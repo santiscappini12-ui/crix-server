@@ -648,10 +648,95 @@ function dateStr(iso) { return new Date(iso).toLocaleDateString('es-AR',{year:'n
 let ME = null;
 function swapForm(to) { document.getElementById('form-login').style.display = to === 'login' ? '' : 'none'; document.getElementById('form-reg').style.display = to === 'reg' ? '' : 'none'; document.getElementById('auth-err').style.display = 'none'; }
 function authErr(m) { const e = document.getElementById('auth-err'); e.textContent = m; e.style.display = 'block'; }
-function doLogin() { const u = document.getElementById('a-u').value.trim(); const p = document.getElementById('a-p').value; if (!u || !p) { authErr('Completá los campos.'); return; } const users = getUsers(); const found = Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase()); if (!found) { authErr('Usuario no encontrado.'); return; } if (found.pw !== btoa(unescape(encodeURIComponent(p)))) { authErr('Contraseña incorrecta.'); return; } loginAs(found); }
-function doRegister() { const u = document.getElementById('r-u').value.trim(); const p = document.getElementById('r-p').value; const p2 = document.getElementById('r-p2').value; if (!u || !p) { authErr('Completá todos los campos.'); return; } if (u.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; } if (p.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; } if (p !== p2) { authErr('Las contraseñas no coinciden.'); return; } if (!/^[a-zA-Z0-9_]+$/.test(u)) { authErr('Solo letras, números y guión bajo.'); return; } const users = getUsers(); if (Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase())) { authErr('Ese nombre ya está en uso.'); return; } const id = nextId('user'); const nu = { id, username: u, pw: btoa(unescape(encodeURIComponent(p))), created: new Date().toISOString(), color: randColor(), friends: [], games: [], visits: 0, bio: '' }; users[id] = nu; setUsers(users); loginAs(nu); }
-function loginAs(u) { ME = u; DB.set('session', u.id); bootApp(); }
-function trySession() { const sid = DB.get('session'); if (!sid) return false; const u = getUsers()[sid]; if (u) { ME = u; return true; } return false; }
+
+// ── AUTH FIX: doLogin ────────────────────────────────────────────
+function doLogin() {
+  const u = document.getElementById('a-u').value.trim();
+  const p = document.getElementById('a-p').value;
+  if (!u || !p) { authErr('Completá los campos.'); return; }
+
+  // Leer users fresco del storage
+  const users = getUsers();
+  const found = Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase());
+
+  if (!found) { authErr('Usuario no encontrado. ¿Escribiste bien el nombre?'); return; }
+
+  // Hash nuevo (con encodeURIComponent) y hash legacy (sin encode)
+  const pwHash       = btoa(unescape(encodeURIComponent(p)));
+  const pwHashLegacy = btoa(p);
+
+  if (found.pw !== pwHash && found.pw !== pwHashLegacy) {
+    authErr('Contraseña incorrecta.');
+    return;
+  }
+
+  // Migrar al nuevo hash si estaba en formato legacy
+  if (found.pw === pwHashLegacy && found.pw !== pwHash) {
+    found.pw = pwHash;
+    users[found.id] = found;
+    setUsers(users);
+  }
+
+  // Re-leer usuario fresco antes de entrar
+  const freshUser = getUsers()[found.id] || found;
+  loginAs(freshUser);
+}
+
+// ── AUTH FIX: doRegister ─────────────────────────────────────────
+function doRegister() {
+  const u = document.getElementById('r-u').value.trim();
+  const p = document.getElementById('r-p').value;
+  const p2 = document.getElementById('r-p2').value;
+  if (!u || !p) { authErr('Completá todos los campos.'); return; }
+  if (u.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; }
+  if (p.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; }
+  if (p !== p2) { authErr('Las contraseñas no coinciden.'); return; }
+  if (!/^[a-zA-Z0-9_]+$/.test(u)) { authErr('Solo letras, números y guión bajo.'); return; }
+  const users = getUsers();
+  if (Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase())) {
+    authErr('Ese nombre ya está en uso.'); return;
+  }
+  const id = nextId('user');
+  const nu = {
+    id, username: u,
+    pw: btoa(unescape(encodeURIComponent(p))),
+    created: new Date().toISOString(),
+    color: randColor(), friends: [], games: [], visits: 0, bio: ''
+  };
+  users[id] = nu;
+  setUsers(users);
+  loginAs(nu);
+}
+
+// ── AUTH FIX: loginAs ────────────────────────────────────────────
+function loginAs(u) {
+  // Sincronizar con storage: mezclar datos para no perder nada
+  const users = getUsers();
+  if (users[u.id]) {
+    u = { ...users[u.id], ...u };
+  }
+  users[u.id] = u;
+  setUsers(users);
+  ME = u;
+  DB.set('session', u.id);
+  bootApp();
+}
+
+// ── AUTH FIX: trySession ─────────────────────────────────────────
+function trySession() {
+  const sid = DB.get('session');
+  if (!sid) return false;
+  const users = getUsers();
+  const u = users[sid];
+  // Si la sesión apunta a un usuario que no existe, limpiarla
+  if (!u || !u.username || !u.id) {
+    DB.del('session');
+    return false;
+  }
+  ME = u;
+  return true;
+}
+
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
 function bootApp() { ensureDefaultMaps(); document.getElementById('s-auth').classList.remove('active'); document.getElementById('nav').style.display = 'flex'; const av = document.getElementById('nav-av'); av.textContent = ME.username[0].toUpperCase(); av.style.background = ME.color; goTab('home'); checkNotifs(); }
 function goTab(t, extra) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); const el = document.getElementById('s-' + t); if (el) el.classList.add('active'); document.querySelectorAll('.nav-tab').forEach((b, i) => { b.classList.toggle('active', ['home','discover','studio','msg','profile'][i] === t); }); if (t === 'home') renderHome(); if (t === 'discover') renderDiscover(); if (t === 'studio') initStudio(); if (t === 'msg') loadConvList(); if (t === 'profile') renderProfile(extra || ME.id); }
