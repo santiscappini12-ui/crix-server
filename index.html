@@ -648,10 +648,45 @@ function dateStr(iso) { return new Date(iso).toLocaleDateString('es-AR',{year:'n
 let ME = null;
 function swapForm(to) { document.getElementById('form-login').style.display = to === 'login' ? '' : 'none'; document.getElementById('form-reg').style.display = to === 'reg' ? '' : 'none'; document.getElementById('auth-err').style.display = 'none'; }
 function authErr(m) { const e = document.getElementById('auth-err'); e.textContent = m; e.style.display = 'block'; }
-function doLogin() { const u = document.getElementById('a-u').value.trim(); const p = document.getElementById('a-p').value; if (!u || !p) { authErr('Completá los campos.'); return; } const users = getUsers(); const found = Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase()); if (!found) { authErr('Usuario no encontrado.'); return; } if (found.pw !== btoa(unescape(encodeURIComponent(p)))) { authErr('Contraseña incorrecta.'); return; } loginAs(found); }
-function doRegister() { const u = document.getElementById('r-u').value.trim(); const p = document.getElementById('r-p').value; const p2 = document.getElementById('r-p2').value; if (!u || !p) { authErr('Completá todos los campos.'); return; } if (u.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; } if (p.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; } if (p !== p2) { authErr('Las contraseñas no coinciden.'); return; } if (!/^[a-zA-Z0-9_]+$/.test(u)) { authErr('Solo letras, números y guión bajo.'); return; } const users = getUsers(); if (Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase())) { authErr('Ese nombre ya está en uso.'); return; } const id = nextId('user'); const nu = { id, username: u, pw: btoa(unescape(encodeURIComponent(p))), created: new Date().toISOString(), color: randColor(), friends: [], games: [], visits: 0, bio: '' }; users[id] = nu; setUsers(users); loginAs(nu); }
-function loginAs(u) { ME = u; DB.set('session', u.id); bootApp(); }
-function trySession() { const sid = DB.get('session'); if (!sid) return false; const u = getUsers()[sid]; if (u) { ME = u; return true; } return false; }
+function doLogin() {
+  const u = document.getElementById('a-u').value.trim();
+  const p = document.getElementById('a-p').value;
+  if (!u || !p) { authErr('Completá los campos.'); return; }
+  const users = getUsers();
+  const found = Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase());
+  if (!found) { authErr('Usuario no encontrado. \u00bfEscribiste bien el nombre?'); return; }
+  const pwHash = btoa(unescape(encodeURIComponent(p)));
+  const pwLegacy = btoa(p);
+  if (found.pw !== pwHash && found.pw !== pwLegacy) { authErr('Contrase\u00f1a incorrecta.'); return; }
+  if (found.pw === pwLegacy && found.pw !== pwHash) { found.pw = pwHash; users[found.id] = found; setUsers(users); }
+  loginAs(getUsers()[found.id] || found);
+}
+function doRegister() {
+  const u = document.getElementById('r-u').value.trim();
+  const p = document.getElementById('r-p').value;
+  const p2 = document.getElementById('r-p2').value;
+  if (!u || !p) { authErr('Complet\u00e1 todos los campos.'); return; }
+  if (u.length < 3) { authErr('M\u00ednimo 3 caracteres en el nombre.'); return; }
+  if (p.length < 6) { authErr('La contrase\u00f1a necesita al menos 6 caracteres.'); return; }
+  if (p !== p2) { authErr('Las contrase\u00f1as no coinciden.'); return; }
+  const users = getUsers();
+  if (Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase())) { authErr('Ese nombre ya est\u00e1 en uso.'); return; }
+  const id = nextId('user');
+  const nu = { id, username: u, pw: btoa(unescape(encodeURIComponent(p))), created: new Date().toISOString(), color: randColor(), friends: [], games: [], visits: 0, bio: '' };
+  users[id] = nu; setUsers(users); loginAs(nu);
+}
+function loginAs(u) {
+  const users = getUsers();
+  u = { ...(users[u.id] || {}), ...u };
+  users[u.id] = u; setUsers(users);
+  ME = u; DB.set('session', u.id); bootApp();
+}
+function trySession() {
+  const sid = DB.get('session'); if (!sid) return false;
+  const u = getUsers()[sid];
+  if (!u || !u.username || !u.id) { DB.del('session'); return false; }
+  ME = u; return true;
+}
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
 function bootApp() { ensureDefaultMaps(); document.getElementById('s-auth').classList.remove('active'); document.getElementById('nav').style.display = 'flex'; const av = document.getElementById('nav-av'); av.textContent = ME.username[0].toUpperCase(); av.style.background = ME.color; goTab('home'); checkNotifs(); }
 function goTab(t, extra) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); const el = document.getElementById('s-' + t); if (el) el.classList.add('active'); document.querySelectorAll('.nav-tab').forEach((b, i) => { b.classList.toggle('active', ['home','discover','studio','msg','profile'][i] === t); }); if (t === 'home') renderHome(); if (t === 'discover') renderDiscover(); if (t === 'studio') initStudio(); if (t === 'msg') loadConvList(); if (t === 'profile') renderProfile(extra || ME.id); }
@@ -659,12 +694,92 @@ function showToast(m, dur = 3000) { const t = document.getElementById('toast'); 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function checkNotifs() { const convs = getConvs(); let total = 0; (ME.friends||[]).forEach(fid => { const cid = convId(ME.id, fid); const msgs = convs[cid] || []; total += msgs.filter(m => m.from !== ME.id && !m.read).length; }); document.getElementById('notif-dot').style.display = total > 0 ? 'block' : 'none'; }
-function ensureDefaultMaps() { const maps = getMaps(); const defaults = [ { id: 'sys1', name: 'Crix Island', genre: 'adventure', desc: 'La isla original de Crix.', authorId: 'system', authorName: 'Crix', plays: 9999, likes: 1337 }, { id: 'sys2', name: 'Sky Towers', genre: 'parkour', desc: 'Torres flotantes en las nubes.', authorId: 'system', authorName: 'Crix', plays: 7500, likes: 800 }, { id: 'sys3', name: 'Arena Battle', genre: 'shooter', desc: 'Combate en la arena.', authorId: 'system', authorName: 'Crix', plays: 6200, likes: 620 }, { id: 'sys4', name: 'Roleplay City', genre: 'roleplay', desc: 'Ciudad interactiva.', authorId: 'system', authorName: 'Crix', plays: 5100, likes: 510 }, ]; defaults.forEach(d => { if (!maps[d.id]) { maps[d.id] = { ...d, created: '2024-01-01T00:00:00.000Z', parts: defaultParts(), scripts: [], thumb: null }; } }); setMaps(maps); }
+function ensureDefaultMaps() {
+  const maps = getMaps();
+  ['sys1','sys2','sys3','sys4'].forEach(id => { if (maps[id]) delete maps[id]; });
+  setMaps(maps);
+}
 function defaultParts() { return [ {id:'ground',type:'Block',name:'Suelo',x:0,y:-0.5,z:0,sx:120,sy:1,sz:120,color:'#2d5a1e',anchored:true,canCollide:true,transparent:0,material:'Grass'}, {id:'build1',type:'Block',name:'Edificio',x:12,y:2,z:-12,sx:6,sy:4,sz:6,color:'#cc4444',anchored:true,canCollide:true,transparent:0,material:'Brick'}, {id:'plat1',type:'Block',name:'Plataforma A',x:-10,y:3.5,z:10,sx:8,sy:1,sz:4,color:'#7c3aed',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat2',type:'Block',name:'Plataforma B',x:0,y:6,z:-25,sx:10,sy:1,sz:6,color:'#059669',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat3',type:'Block',name:'Plataforma C',x:20,y:8,z:8,sx:5,sy:1,sz:5,color:'#d97706',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat4',type:'Block',name:'Plataforma D',x:-18,y:4.5,z:-8,sx:4,sy:1,sz:10,color:'#0369a1',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat5',type:'Block',name:'Plataforma E',x:5,y:10,z:18,sx:6,sy:1,sz:6,color:'#be185d',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'tower',type:'Block',name:'Torre',x:0,y:11,z:0,sx:6,sy:1,sz:6,color:'#78350f',anchored:true,canCollide:true,transparent:0,material:'Wood'}, {id:'spawn',type:'Spawn',name:'SpawnLocation',x:0,y:0.5,z:0,sx:4,sy:0.4,sz:4,color:'#00ff88',anchored:true,canCollide:false,transparent:0.5,material:'Neon'}, ]; }
 const THUMB_ICONS = ['🏝️','🌋','🏙️','🌌','🏔️','🌊','🏰','🛸','⚔️','🎮','🌃','🗺️'];
 const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt-teal'];
-function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine'); }
-function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="playMap('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${m.thumb ? `<img src="${m.thumb}">` : ''}<span class="thumb-icon">${THUMB_ICONS[i%THUMB_ICONS.length]}</span>${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
+function renderHome() {
+  const allMaps = Object.values(getMaps()).filter(m => m.authorId !== 'system');
+  const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8);
+  const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6);
+  const mine = allMaps.filter(m => m.authorId === ME.id);
+  renderGrid('grid-featured', featured, 'hot');
+  renderGrid('grid-recent', recent, 'new');
+  renderGrid('grid-mine', mine, 'mine');
+}
+function renderGrid(id, arr, badge = '') {
+  const el = document.getElementById(id); if (!el) return;
+  if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todav\u00eda no hay juegos aqu\u00ed.</div>'; return; }
+  el.innerHTML = arr.map((m, i) => {
+    const badgeHtml = badge === 'hot' ? '<div class="game-badge b-hot">\uD83D\uDD25 POPULAR</div>'
+      : badge === 'new' ? '<div class="game-badge b-new">\u2728 NUEVO</div>'
+      : m.authorId === ME.id ? '<div class="game-badge b-top">\u270F\uFE0F MIO</div>' : '';
+    const isOwner = m.authorId === ME.id;
+    return '<div class="game-card" onclick="openGamePage(\''+m.id+'\')">'+
+      '<div class="game-thumb '+THUMB_CLASSES[i%THUMB_CLASSES.length]+'">'+
+      (m.thumb ? '<img src="'+m.thumb+'">' : '')+
+      '<span class="thumb-icon">'+THUMB_ICONS[i%THUMB_ICONS.length]+'</span>'+badgeHtml+
+      '<div class="game-actions" onclick="event.stopPropagation()">'+
+      (isOwner ? '<button class="game-act-btn" onclick="editMap(\''+m.id+'\')">\u270F\uFE0F Editar</button>' : '')+
+      (isOwner ? '<button class="game-act-btn" onclick="deleteMap(\''+m.id+'\') "style="color:var(--red)">\uD83D\uDDD1\uFE0F</button>' : '')+
+      '</div></div>'+
+      '<div class="game-info"><div class="game-name" title="'+esc(m.name)+'">'+esc(m.name)+'</div>'+
+      '<div class="game-meta"><span>\uD83D\uDC41 '+(m.plays||0)+'</span><span>\u2764\uFE0F '+(m.likes||0)+'</span></div>'+
+      '<div class="game-author">por '+esc(m.authorName)+'</div></div></div>';
+  }).join('');
+}
+function openGamePage(mapId) {
+  const m = getMaps()[mapId]; if (!m) return;
+  const users = getUsers();
+  const author = users[m.authorId] || { username: m.authorName, color: '#5b8def' };
+  const isOwner = m.authorId === ME.id;
+  const liked = (ME.liked||[]).includes(mapId);
+  document.getElementById('profile-inner').innerHTML =
+    '<div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">'+
+    '<button class="btn btn-g" style="font-size:12px;padding:7px 12px" onclick="goTab(\'home\')">\u2190 Volver</button>'+
+    '<div style="font-family:var(--display);font-size:17px;font-weight:800">'+esc(m.name)+'</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px">'+
+    '<div style="flex:1;min-width:200px">'+
+    (m.thumb ? '<img src="'+m.thumb+'" style="width:100%;border-radius:12px;border:1px solid var(--border);margin-bottom:12px">' : '<div style="background:var(--bg3);border-radius:12px;height:160px;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:12px">\uD83C\uDFAE</div>')+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+    '<button class="btn btn-p" style="flex:1" onclick="playMap(\''+mapId+'\')">\u25B6\uFE0F Jugar</button>'+
+    '<button class="btn '+(liked?'btn-red':'btn-g')+'" onclick="toggleLike(\''+mapId+'\',this)">'+
+    (liked?'\u2764\uFE0F':'\uD83E\uDD0D')+' '+(m.likes||0)+'</button>'+
+    (isOwner ? '<button class="btn btn-g" onclick="editMap(\''+mapId+'\')">\u270F\uFE0F Editar</button>' : '')+
+    '</div>'+
+    '</div>'+
+    '<div style="flex:2;min-width:220px">'+
+    '<div style="font-family:var(--display);font-size:22px;font-weight:800;margin-bottom:4px">'+esc(m.name)+'</div>'+
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">ID del juego: #'+mapId+' &nbsp;·&nbsp; Creado: '+dateStr(m.created)+'</div>'+
+    '<div style="font-size:13px;color:var(--text2);margin-bottom:12px">'+(m.desc||'Sin descripci\u00f3n.')+'</div>'+
+    '<div style="display:flex;gap:16px;margin-bottom:12px">'+
+    '<div><div style="font-size:18px;font-weight:800;color:var(--acc)">'+(m.plays||0)+'</div><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Visitas</div></div>'+
+    '<div><div style="font-size:18px;font-weight:800;color:var(--acc3)">'+(m.likes||0)+'</div><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Me gusta</div></div>'+
+    '<div><div style="font-size:18px;font-weight:800;color:var(--green)">'+esc(m.genre||'otro')+'</div><div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">G\u00e9nero</div></div>'+
+    '</div>'+
+    '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg2);border-radius:10px;border:1px solid var(--border);cursor:pointer" onclick="goTab(\'profile\',\''+m.authorId+'\')">'+
+    '<div style="width:36px;height:36px;border-radius:50%;background:'+author.color+';display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px">'+author.username[0].toUpperCase()+'</div>'+
+    '<div><div style="font-size:12px;font-weight:700">'+esc(author.username)+'</div><div style="font-size:10px;color:var(--text3)">Creador</div></div>'+
+    '</div>'+
+    '</div>'+
+    '</div>';
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-profile').classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+}
+function toggleLike(mapId, btn) {
+  const maps = getMaps(); const m = maps[mapId]; if (!m) return;
+  ME.liked = ME.liked || [];
+  const idx = ME.liked.indexOf(mapId);
+  if (idx === -1) { ME.liked.push(mapId); m.likes = (m.likes||0)+1; btn.innerHTML = '\u2764\uFE0F '+m.likes; btn.className = 'btn btn-red'; }
+  else { ME.liked.splice(idx,1); m.likes = Math.max(0,(m.likes||1)-1); btn.innerHTML = '\uD83E\uDD0D '+m.likes; btn.className = 'btn btn-g'; }
+  saveMe(); maps[mapId] = m; setMaps(maps);
+}
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
 function editMap(id) { stMapId = id; initStudio(); goTab('studio'); }
 function handleUpload(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { const maps = getMaps(); const id = nextId('map'); const isImg = file.type.startsWith('image/'); let mapData = { id, name: file.name.replace(/\.[^.]+$/, ''), desc: 'Mapa importado', genre: 'other', authorId: ME.id, authorName: ME.username, plays: 0, likes: 0, created: new Date().toISOString(), parts: defaultParts(), scripts: [], thumb: isImg ? ev.target.result : null }; if (!isImg) { try { const p = JSON.parse(ev.target.result); if (p.parts) mapData.parts = p.parts; if (p.name) mapData.name = p.name; if (p.scripts) mapData.scripts = p.scripts; } catch {} } maps[id] = mapData; setMaps(maps); ME.games = ME.games || []; ME.games.push(id); saveMe(); showToast(`✅ Importado: ${mapData.name}`); renderHome(); }; if (file.type.startsWith('image/')) reader.readAsDataURL(file); else reader.readAsText(file); e.target.value = ''; }
