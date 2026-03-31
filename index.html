@@ -648,95 +648,10 @@ function dateStr(iso) { return new Date(iso).toLocaleDateString('es-AR',{year:'n
 let ME = null;
 function swapForm(to) { document.getElementById('form-login').style.display = to === 'login' ? '' : 'none'; document.getElementById('form-reg').style.display = to === 'reg' ? '' : 'none'; document.getElementById('auth-err').style.display = 'none'; }
 function authErr(m) { const e = document.getElementById('auth-err'); e.textContent = m; e.style.display = 'block'; }
-
-// ── AUTH FIX: doLogin ────────────────────────────────────────────
-function doLogin() {
-  const u = document.getElementById('a-u').value.trim();
-  const p = document.getElementById('a-p').value;
-  if (!u || !p) { authErr('Completá los campos.'); return; }
-
-  // Leer users fresco del storage
-  const users = getUsers();
-  const found = Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase());
-
-  if (!found) { authErr('Usuario no encontrado. ¿Escribiste bien el nombre?'); return; }
-
-  // Hash nuevo (con encodeURIComponent) y hash legacy (sin encode)
-  const pwHash       = btoa(unescape(encodeURIComponent(p)));
-  const pwHashLegacy = btoa(p);
-
-  if (found.pw !== pwHash && found.pw !== pwHashLegacy) {
-    authErr('Contraseña incorrecta.');
-    return;
-  }
-
-  // Migrar al nuevo hash si estaba en formato legacy
-  if (found.pw === pwHashLegacy && found.pw !== pwHash) {
-    found.pw = pwHash;
-    users[found.id] = found;
-    setUsers(users);
-  }
-
-  // Re-leer usuario fresco antes de entrar
-  const freshUser = getUsers()[found.id] || found;
-  loginAs(freshUser);
-}
-
-// ── AUTH FIX: doRegister ─────────────────────────────────────────
-function doRegister() {
-  const u = document.getElementById('r-u').value.trim();
-  const p = document.getElementById('r-p').value;
-  const p2 = document.getElementById('r-p2').value;
-  if (!u || !p) { authErr('Completá todos los campos.'); return; }
-  if (u.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; }
-  if (p.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; }
-  if (p !== p2) { authErr('Las contraseñas no coinciden.'); return; }
-  if (!/^[a-zA-Z0-9_]+$/.test(u)) { authErr('Solo letras, números y guión bajo.'); return; }
-  const users = getUsers();
-  if (Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase())) {
-    authErr('Ese nombre ya está en uso.'); return;
-  }
-  const id = nextId('user');
-  const nu = {
-    id, username: u,
-    pw: btoa(unescape(encodeURIComponent(p))),
-    created: new Date().toISOString(),
-    color: randColor(), friends: [], games: [], visits: 0, bio: ''
-  };
-  users[id] = nu;
-  setUsers(users);
-  loginAs(nu);
-}
-
-// ── AUTH FIX: loginAs ────────────────────────────────────────────
-function loginAs(u) {
-  // Sincronizar con storage: mezclar datos para no perder nada
-  const users = getUsers();
-  if (users[u.id]) {
-    u = { ...users[u.id], ...u };
-  }
-  users[u.id] = u;
-  setUsers(users);
-  ME = u;
-  DB.set('session', u.id);
-  bootApp();
-}
-
-// ── AUTH FIX: trySession ─────────────────────────────────────────
-function trySession() {
-  const sid = DB.get('session');
-  if (!sid) return false;
-  const users = getUsers();
-  const u = users[sid];
-  // Si la sesión apunta a un usuario que no existe, limpiarla
-  if (!u || !u.username || !u.id) {
-    DB.del('session');
-    return false;
-  }
-  ME = u;
-  return true;
-}
-
+function doLogin() { const u = document.getElementById('a-u').value.trim(); const p = document.getElementById('a-p').value; if (!u || !p) { authErr('Completá los campos.'); return; } const users = getUsers(); const found = Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase()); if (!found) { authErr('Usuario no encontrado.'); return; } if (found.pw !== btoa(unescape(encodeURIComponent(p)))) { authErr('Contraseña incorrecta.'); return; } loginAs(found); }
+function doRegister() { const u = document.getElementById('r-u').value.trim(); const p = document.getElementById('r-p').value; const p2 = document.getElementById('r-p2').value; if (!u || !p) { authErr('Completá todos los campos.'); return; } if (u.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; } if (p.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; } if (p !== p2) { authErr('Las contraseñas no coinciden.'); return; } if (!/^[a-zA-Z0-9_]+$/.test(u)) { authErr('Solo letras, números y guión bajo.'); return; } const users = getUsers(); if (Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase())) { authErr('Ese nombre ya está en uso.'); return; } const id = nextId('user'); const nu = { id, username: u, pw: btoa(unescape(encodeURIComponent(p))), created: new Date().toISOString(), color: randColor(), friends: [], games: [], visits: 0, bio: '' }; users[id] = nu; setUsers(users); loginAs(nu); }
+function loginAs(u) { ME = u; DB.set('session', u.id); bootApp(); }
+function trySession() { const sid = DB.get('session'); if (!sid) return false; const u = getUsers()[sid]; if (u) { ME = u; return true; } return false; }
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
 function bootApp() { ensureDefaultMaps(); document.getElementById('s-auth').classList.remove('active'); document.getElementById('nav').style.display = 'flex'; const av = document.getElementById('nav-av'); av.textContent = ME.username[0].toUpperCase(); av.style.background = ME.color; goTab('home'); checkNotifs(); }
 function goTab(t, extra) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); const el = document.getElementById('s-' + t); if (el) el.classList.add('active'); document.querySelectorAll('.nav-tab').forEach((b, i) => { b.classList.toggle('active', ['home','discover','studio','msg','profile'][i] === t); }); if (t === 'home') renderHome(); if (t === 'discover') renderDiscover(); if (t === 'studio') initStudio(); if (t === 'msg') loadConvList(); if (t === 'profile') renderProfile(extra || ME.id); }
@@ -872,7 +787,40 @@ function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTi
 function netSendChat(text) { if (!socket || !netConnected) return false; socket.emit('game_chat', { text }); return true; }
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
 function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const group = _buildAvatar(playerData.color || '#f97316'); group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, parts: group.userData.parts, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false }; }
-function _buildAvatar(color) { const g = new THREE.Group(); const bodyM = new THREE.MeshPhongMaterial({ color: new THREE.Color(color) }); const skinM = new THREE.MeshPhongMaterial({ color: 0xffdbac }); const torso = new THREE.Mesh(new THREE.BoxGeometry(1, 1.3, 0.55), bodyM); torso.position.y = 0.65; const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), skinM); head.position.y = 1.65; const aL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.15, 0.42), bodyM); aL.position.set(-0.73, 0.575, 0); const aR = aL.clone(); aR.position.x = 0.73; const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.15, 0.45), bodyM); lL.position.set(-0.27, -0.575, 0); const lR = lL.clone(); lR.position.x = 0.27; g.add(torso, head, aL, aR, lL, lR); g.userData.parts = { aL, aR, lL, lR }; return g; }
+function _buildAvatar(color) {
+  const g = new THREE.Group();
+  // Origen del grupo = pies del avatar (igual que el avatar local)
+  const bodyM = new THREE.MeshPhongMaterial({ color: new THREE.Color(color) });
+  const skinM = new THREE.MeshPhongMaterial({ color: 0xffdbac });
+  const eyeM  = new THREE.MeshPhongMaterial({ color: 0x111111 });
+
+  // Piernas: y=0 → 1.10, centro en 0.55
+  const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.10, 0.45), bodyM);
+  lL.position.set(-0.27, 0.55, 0);
+  const lR = lL.clone(); lR.position.set(0.27, 0.55, 0);
+
+  // Torso: y=1.10 → 2.30, centro en 1.70
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55), bodyM);
+  torso.position.set(0, 1.70, 0);
+
+  // Cabeza: y=2.35 → 3.05, centro en 2.70
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.70, 0.70), skinM);
+  head.position.set(0, 2.70, 0);
+
+  // Ojos
+  const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), eyeM);
+  eL.position.set(-0.17, 2.73, 0.36);
+  const eR = eL.clone(); eR.position.set(0.17, 2.73, 0.36);
+
+  // Brazos: centro vertical alineado con el torso (1.70)
+  const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40, 1.10, 0.40), bodyM);
+  aL.position.set(-0.72, 1.70, 0);
+  const aR = aL.clone(); aR.position.set(0.72, 1.70, 0);
+
+  g.add(lL, lR, torso, head, eL, eR, aL, aR);
+  g.userData.parts = { aL, aR, lL, lR };
+  return g;
+}
 function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
 function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); }); remotePlayers = {}; }
 function netUpdateRemotes() { const LERP = 0.18; for (const rp of Object.values(remotePlayers)) { rp.group.position.lerp(rp.targetPos, LERP); let diff = rp.targetRY - rp.group.rotation.y; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; rp.group.rotation.y += diff * LERP; const { aL, aR, lL, lR } = rp.parts; if (rp.moving) { const sw = rp.anim; aL.rotation.x = sw; aR.rotation.x = -sw; lL.rotation.x = -sw; lR.rotation.x = sw; } else { aL.rotation.x = aR.rotation.x = lL.rotation.x = lR.rotation.x = 0; } } }
