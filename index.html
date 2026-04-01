@@ -596,6 +596,19 @@ input,select,textarea{font-family:var(--font);}
     </select>
   </div>
   <div class="field-grp">
+    <label class="field-lbl">Privacidad</label>
+    <select class="inp" id="pub-privacy" onchange="var w=document.getElementById('pub-assigned-wrap');if(w)w.style.display=this.value==='assigned'?'':' none'">
+      <option value="public">🌍 Público</option>
+      <option value="friends">👥 Solo amigos</option>
+      <option value="assigned">🔒 Jugadores asignados</option>
+      <option value="private">🔐 Privado</option>
+    </select>
+  </div>
+  <div class="field-grp" id="pub-assigned-wrap" style="display:none">
+    <label class="field-lbl">Jugadores asignados (separados por coma)</label>
+    <input class="inp" id="pub-assigned" placeholder="usuario1, usuario2...">
+  </div>
+  <div class="field-grp">
     <label class="field-lbl">Miniatura (opcional)</label>
     <div style="display:flex;align-items:center;gap:8px">
       <button class="btn btn-g" style="font-size:12px" onclick="document.getElementById('pub-thumb').click()">📷 Subir imagen</button>
@@ -726,6 +739,8 @@ function bootApp() {
     adminBtn.onclick = () => openAdminPanel();
     document.querySelector('.nav-tabs').appendChild(adminBtn);
   }
+  ME.onlineAt = Date.now(); saveMe();
+  window.addEventListener('beforeunload', () => { if(ME){ME.onlineAt=null;saveMe();} });
   goTab('home'); checkNotifs();
 }
 function showBanScreen() {
@@ -907,7 +922,17 @@ function doSearch(q) { q = (q || '').trim(); if (!q) return; searchQuery = q; do
 function runSearch() { const q = searchQuery.toLowerCase(); const allMaps = Object.values(getMaps()); const allUsers = Object.values(getUsers()); const gResults = allMaps.filter(m => m.name.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q)); const uResults = allUsers.filter(u => u.username.toLowerCase().includes(q)); renderGrid('search-games-results', gResults, 'hot'); const uEl = document.getElementById('search-users-results'); uEl.innerHTML = uResults.length ? uResults.map(u => `<div class="friend-card" onclick="goTab('profile','${u.id}')"><div class="friend-av" style="background:${u.color}">${u.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join('') : '<div style="color:var(--text3);font-size:12px">Sin resultados.</div>'; }
 function switchSearchTab(tab) { searchTab = tab; document.getElementById('search-games-results').style.display = tab === 'games' ? 'grid' : 'none'; document.getElementById('search-users-results').style.display = tab === 'users' ? 'grid' : 'none'; document.getElementById('sf-games').classList.toggle('active', tab === 'games'); document.getElementById('sf-users').classList.toggle('active', tab === 'users'); }
 let viewingUserId = null;
-function renderProfile(uid) { viewingUserId = uid || ME.id; const users = getUsers(); const u = users[viewingUserId] || ME; const isMe = viewingUserId === ME.id; const myMaps = Object.values(getMaps()).filter(m => m.authorId === u.id); const isFriend = (ME.friends||[]).includes(u.id); const isBanned = u.banned && (u.banned.permanent || (u.banned.until && new Date(u.banned.until) > new Date()));
+function renderProfile(uid) {
+  viewingUserId = uid || ME.id;
+  const users = getUsers(); const u = users[viewingUserId] || ME;
+  const isMe = viewingUserId === ME.id;
+  const myMaps = Object.values(getMaps()).filter(m => m.authorId === u.id);
+  const isFriend = (ME.friends||[]).includes(u.id);
+  const isBanned = u.banned && (u.banned.permanent || (u.banned.until && new Date(u.banned.until) > new Date()));
+  const isOnline = u.onlineAt && (Date.now() - u.onlineAt < 120000);
+  const isFollowing = (ME.following||[]).includes(u.id);
+  const followersCount = Object.values(users).filter(x => (x.following||[]).includes(u.id)).length;
+  const followingCount = (u.following||[]).length;
   const adminBanBtn = isAdmin() && !isMe ? (isBanned
     ? '<button class="btn btn-green" style="font-size:12px" onclick="unbanUser(\''+u.id+'\')">✅ Desbanear</button>'
     : '<button class="btn btn-red" style="font-size:12px" onclick="banUser(\''+u.id+'\')">🚫 Banear</button>') : '';
@@ -930,6 +955,7 @@ function renderProfile(uid) { viewingUserId = uid || ME.id; const users = getUse
       : (!isFriend
           ? '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(\''+u.id+'\')">+ Agregar amigo</button>'
           : '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje</button>')+
+        '<button class="btn '+(isFollowing?'btn-red':'btn-g')+'" style="font-size:12px" onclick="toggleFollow(\''+u.id+'\')">'+(isFollowing?'➖ Dejar de seguir':'➕ Seguir')+'</button>'+
         adminBanBtn)+
     '</div></div></div>'+
     (isMe ? '<div style="display:flex;gap:8px;margin-bottom:14px"><input class="inp" style="flex:1" id="add-friend-inp" placeholder="Buscar y agregar amigo..."><button class="btn btn-p" onclick="addFriendByName()">+ Amigo</button></div>' : '')+
@@ -937,11 +963,39 @@ function renderProfile(uid) { viewingUserId = uid || ME.id; const users = getUse
     '<button class="tab active" id="pftab-games" onclick="pfTab(\'games\',this)">🎮 Juegos ('+myMaps.length+')</button>'+
     '<button class="tab" id="pftab-friends" onclick="pfTab(\'friends\',this)">👥 Amigos ('+((u.friends||[]).length)+')</button>'+
     (isMe ? '<button class="tab" id="pftab-liked" onclick="pfTab(\'liked\',this)">❤️ Favoritos</button>' : '')+
+    '<button class="tab" id="pftab-followers" onclick="pfTab(\'followers\',this)">👥 Seguidores ('+followersCount+')</button>'+
+    '<button class="tab" id="pftab-following" onclick="pfTab(\'following\',this)">➕ Seguidos ('+followingCount+')</button>'+
     '</div>'+
     '<div id="pf-games-tab" class="games-grid"></div>'+
     '<div id="pf-friends-tab" class="friends-grid" style="display:none"></div>'+
+    '<div id="pf-followers-tab" class="friends-grid" style="display:none"></div>'+
+    '<div id="pf-following-tab" class="friends-grid" style="display:none"></div>'+
     (isMe ? '<div id="pf-liked-tab" class="games-grid" style="display:none"></div>' : ''); pfTab('games'); }
-function pfTab(tab, el) { ['games','friends','liked'].forEach(t => { const e1 = document.getElementById('pf-'+t+'-tab'); const e2 = document.getElementById('pftab-'+t); if (e1) e1.style.display = 'none'; if (e2) e2.classList.remove('active'); }); const tEl = document.getElementById('pf-'+tab+'-tab'); const hEl = el || document.getElementById('pftab-'+tab); if (tEl) tEl.style.display = 'grid'; if (hEl) hEl.classList.add('active'); const users = getUsers(); const u = users[viewingUserId] || ME; if (tab === 'games') { const mine = Object.values(getMaps()).filter(m => m.authorId === u.id); renderGrid('pf-games-tab', mine, u.id === ME.id ? 'mine' : ''); } else if (tab === 'friends') { const frds = (u.friends||[]).map(fid => users[fid]).filter(Boolean); const el2 = document.getElementById('pf-friends-tab'); if (!frds.length) { el2.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin amigos todavía.</div>'; return; } el2.innerHTML = frds.map(f => `<div class="friend-card" onclick="goTab('profile','${f.id}')"><div class="friend-av" style="background:${f.color||'#5b8def'}">${f.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(f.username)}</div><div style="font-size:9px;color:var(--text3)">#${f.id}</div><button class="btn btn-g" style="font-size:10px;padding:3px 8px;margin-top:6px" onclick="event.stopPropagation();openConvWith('${f.id}')">💬</button></div>`).join(''); } else if (tab === 'liked') { const liked = Object.values(getMaps()).filter(m => (ME.liked||[]).includes(m.id)); renderGrid('pf-liked-tab', liked, ''); } }
+function pfTab(tab, el) { ['games','friends','liked'].forEach(t => { const e1 = document.getElementById('pf-'+t+'-tab'); const e2 = document.getElementById('pftab-'+t); if (e1) e1.style.display = 'none'; if (e2) e2.classList.remove('active'); }); const tEl = document.getElementById('pf-'+tab+'-tab'); const hEl = el || document.getElementById('pftab-'+tab); if (tEl) tEl.style.display = 'grid'; if (hEl) hEl.classList.add('active'); const users = getUsers(); const u = users[viewingUserId] || ME; if (tab === 'games') { const mine = Object.values(getMaps()).filter(m => m.authorId === u.id); renderGrid('pf-games-tab', mine, u.id === ME.id ? 'mine' : ''); } else if (tab === 'friends') { const frds = (u.friends||[]).map(fid => users[fid]).filter(Boolean); const el2 = document.getElementById('pf-friends-tab'); if (!frds.length) { el2.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin amigos todavía.</div>'; return; } el2.innerHTML = frds.map(f => `<div class="friend-card" onclick="goTab('profile','${f.id}')"><div class="friend-av" style="background:${f.color||'#5b8def'}">${f.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(f.username)}</div><div style="font-size:9px;color:var(--text3)">#${f.id}</div><button class="btn btn-g" style="font-size:10px;padding:3px 8px;margin-top:6px" onclick="event.stopPropagation();openConvWith('${f.id}')">💬</button></div>`).join(''); } else if (tab === 'liked') { const liked = Object.values(getMaps()).filter(m => (ME.liked||[]).includes(m.id)); renderGrid('pf-liked-tab', liked, ''); }
+  else if (tab === 'followers') {
+    const el2=document.getElementById('pf-followers-tab'); if(!el2)return;
+    const fwrs=Object.values(getUsers()).filter(x=>(x.following||[]).includes((getUsers()[viewingUserId]||ME).id));
+    el2.innerHTML=fwrs.length?fwrs.map(f=>renderUserCard(f)).join(''):'<div style="color:var(--text3);font-size:12px">Sin seguidores.</div>';
+  } else if (tab === 'following') {
+    const el2=document.getElementById('pf-following-tab'); if(!el2)return;
+    const u2=getUsers()[viewingUserId]||ME;
+    const fwing=(u2.following||[]).map(fid=>getUsers()[fid]).filter(Boolean);
+    el2.innerHTML=fwing.length?fwing.map(f=>renderUserCard(f)).join(''):'<div style="color:var(--text3);font-size:12px">No seguís a nadie.</div>';
+  }
+}
+function renderUserCard(u) {
+  return '<div class="friend-card" onclick="goTab(\'profile\',\''+u.id+'\')">'+
+    '<div class="friend-av" style="background:'+(u.color||'#5b8def')+'">'+(u.username||'?')[0].toUpperCase()+'</div>'+
+    '<div style="font-size:12px;font-weight:700">'+esc(u.username)+'</div>'+
+    '<div style="font-size:9px;color:var(--text3)">#'+u.id+'</div></div>';
+}
+function toggleFollow(uid) {
+  ME.following = ME.following || [];
+  const idx = ME.following.indexOf(uid);
+  if (idx === -1) { ME.following.push(uid); showToast('Ahora seguís a este usuario'); }
+  else { ME.following.splice(idx, 1); showToast('Dejaste de seguir'); }
+  saveMe(); renderProfile(viewingUserId);
+}
 function addFriend(uid) { if ((ME.friends||[]).includes(uid)) { showToast('Ya son amigos'); return; } ME.friends = ME.friends || []; ME.friends.push(uid); saveMe(); showToast('✅ Amigo agregado'); renderProfile(viewingUserId); }
 function addFriendByName() { const val = (document.getElementById('add-friend-inp')||{}).value; if (!val) return; const name = val.trim(); const found = Object.values(getUsers()).find(u => u.username.toLowerCase() === name.toLowerCase()); if (!found) { showToast('❌ Usuario no encontrado'); return; } if (found.id === ME.id) { showToast('No podés agregarte a vos mismo'); return; } addFriend(found.id); document.getElementById('add-friend-inp').value = ''; }
 function editProfile() { const bio = prompt('Editá tu bio:', ME.bio || ''); if (bio === null) return; ME.bio = bio.slice(0, 120); saveMe(); renderProfile(ME.id); }
@@ -1052,7 +1106,11 @@ function _setupStInput() { const el = stRenderer.domElement; el.addEventListener
 function onStClick(e) { if (gizmoDragging) return; const wrap = document.getElementById('stu-canvas-wrap'); const rect = wrap.getBoundingClientRect(); const mouse = new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1); const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, stCamera); if (gizmoArrows.length) { const ghits = ray.intersectObjects(gizmoArrows, false); if (ghits.length) { gizmoDragging = true; gizmoAxis = ghits[0].object.userData.axis; gizmoStart.copy(ghits[0].point); return; } } const meshes = stParts.map(p => p.mesh).filter(Boolean); const hits = ray.intersectObjects(meshes, false); if (hits.length) selectPart(stParts.find(p => p.mesh === hits[0].object)); else deselect(); }
 function onGizmoDrag(e) { if (!selPart || !gizmoAxis) return; const wrap = document.getElementById('stu-canvas-wrap'); const rect = wrap.getBoundingClientRect(); const mouse = new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1); const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, stCamera); const pN = gizmoAxis === 'y' ? new THREE.Vector3(0,0,1) : new THREE.Vector3(0,1,0); const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(pN, selPart.mesh.position); const hitPt = new THREE.Vector3(); ray.ray.intersectPlane(plane, hitPt); if (!hitPt.length()) return; const delta = hitPt.clone().sub(gizmoStart); if (gizmoAxis === 'x') { selPart.data.x += delta.x; selPart.mesh.position.x = selPart.data.x; } if (gizmoAxis === 'y') { selPart.data.y += delta.y; selPart.mesh.position.y = selPart.data.y; } if (gizmoAxis === 'z') { selPart.data.z += delta.z; selPart.mesh.position.z = selPart.data.z; } gizmoStart.copy(hitPt); updateGizmoPos(); renderProps(selPart); }
 function _stLoop() { requestAnimationFrame(_stLoop); if (!stRenderer) return; const cx = stCamTarget.x + stCamDist*Math.sin(stCamTheta)*Math.cos(stCamPhi); const cy = stCamTarget.y + stCamDist*Math.sin(stCamPhi); const cz = stCamTarget.z + stCamDist*Math.cos(stCamTheta)*Math.cos(stCamPhi); stCamera.position.set(cx, cy, cz); stCamera.lookAt(stCamTarget); if (selOutline && selPart) selOutline.position.copy(selPart.mesh.position); stRenderer.render(stScene, stCamera); }
-function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = nextId('map'); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; stScripts = m.scripts || []; clearSt(); (m.parts||[]).forEach(d => addPartMesh({...d})); refreshExplorer(); }
+function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = nextId('map'); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; stScripts = m.scripts || [];
+  if (m.lighting) stLighting = {...stLighting, ...m.lighting};
+  clearSt(); (m.parts||[]).forEach(d => addPartMesh({...d})); refreshExplorer();
+  setTimeout(applyLighting, 100);
+}
 function clearSt() { stParts.forEach(p => p.mesh && stScene.remove(p.mesh)); stParts = []; if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; }
 function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,2,1,0,3,2, 3,5,2,3,4,5, 0,4,3, 1,5,2,0,4,1, 1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color||'#888888'), transparent: Number(d.transparent||0) > 0, opacity: 1 - Number(d.transparent||0), wireframe: d.type === 'TrussPart' }); if (d.material === 'Neon') { mat.emissive = new THREE.Color(d.color||'#00ff88'); mat.emissiveIntensity = 0.7; } if (d.material === 'Metal') { mat.shininess = 120; mat.specular = new THREE.Color(0x888888); } if (d.material === 'Glass') { mat.transparent = true; mat.opacity = Math.max(0.2, 1-Number(d.transparent||0.5)); mat.shininess = 200; } const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); mesh.castShadow = true; mesh.receiveShadow = true; return mesh; }
 function addPartMesh(d) { const mesh = makeMesh(d); stScene.add(mesh); const entry = {data:d, mesh}; stParts.push(entry); return entry; }
@@ -1074,8 +1132,92 @@ function spSize(k,v){ if(!selPart) return; selPart.data[k]=Math.max(0.1,parseFlo
 function toggleProp(k){ if(!selPart) return; selPart.data[k]=!selPart.data[k]; const t=document.getElementById('tgl-'+k); if(t)t.classList.toggle('on',selPart.data[k]); }
 function rebuildMesh(){ if(!selPart) return; stScene.remove(selPart.mesh); if(selOutline){stScene.remove(selOutline);selOutline=null;} selPart.mesh=makeMesh(selPart.data); stScene.add(selPart.mesh); clearGizmo(); selectPart(selPart); }
 function addScriptToPart(type){ if(!selPart){showToast('Seleccioná una parte primero');return;} const id='scr_'+Date.now(); stScripts.push({id,name:type+'_'+selPart.data.name,type,code:`-- Script en ${selPart.data.name}`,parent:'ServerScriptService'}); refreshExplorer();openCodeEditor(id); }
-const FOLDERS = [{id:'Workspace',icon:'🌍',label:'Workspace'},{id:'ServerScriptService',icon:'🖥️',label:'ServerScriptService'},{id:'LocalScriptService',icon:'💻',label:'LocalScriptService'},{id:'ReplicatedStorage',icon:'🔄',label:'ReplicatedStorage'},{id:'StarterPlayerScripts',icon:'👤',label:'StarterPlayerScripts'},{id:'SoundService',icon:'🔊',label:'SoundService'},{id:'Lighting',icon:'💡',label:'Lighting'},{id:'NPCService',icon:'🤖',label:'NPCService'}];
-function refreshExplorer() { const el = document.getElementById('explorer'); let html = ''; FOLDERS.forEach(f => { const parts = f.id === 'Workspace' ? stParts : []; const scripts = stScripts.filter(s => s.parent === f.id); const count = parts.length + scripts.length; html += `<div class="exp-folder"><div class="exp-folder-hd ${f.id==='Workspace'?'open':''}" onclick="toggleFolder(this)"><span class="exp-arrow">▶</span><span>${f.icon}</span><span style="flex:1;font-size:11px">${f.label}</span>${count ? `<span style="font-size:9px;color:var(--text3)">${count}</span>` : ''}</div><div class="exp-children">${f.id==='Workspace' ? stParts.map((p,i)=>`<div class="exp-item ${selPart===p?'sel':''}" onclick="selectPart(stParts[${i}])"><span style="font-size:10px">${typeIcon(p.data.type)}</span><span style="flex:1">${esc(p.data.name)}</span><span class="exp-ctx" onclick="event.stopPropagation();selPart=stParts[${i}];stuDelete()">✕</span></div>`).join('') : ''}${scripts.map(s=>`<div class="exp-item" onclick="openCodeEditor('${s.id}')"><span style="font-size:10px">${s.type==='Script'?'📜':s.type==='LocalScript'?'📋':'📦'}</span><span style="flex:1">${esc(s.name)}</span><span class="exp-ctx" onclick="event.stopPropagation();delScript('${s.id}')">✕</span></div>`).join('')}</div></div>`; }); el.innerHTML = html; updateStStatus(); }
+const FOLDERS = [
+  {id:'Workspace',icon:'🌍',label:'Workspace',addable:['Block','Sphere','Cylinder','Wedge','Script','LocalScript']},
+  {id:'ServerScriptService',icon:'🖥️',label:'ServerScriptService',addable:['Script','ModuleScript']},
+  {id:'LocalScriptService',icon:'💻',label:'LocalScriptService',addable:['LocalScript','ModuleScript']},
+  {id:'ReplicatedStorage',icon:'🔄',label:'ReplicatedStorage',addable:['ModuleScript','RemoteEvent']},
+  {id:'StarterPlayerScripts',icon:'👤',label:'StarterPlayerScripts',addable:['LocalScript','Script']},
+  {id:'SoundService',icon:'🔊',label:'SoundService',addable:['Sound']},
+  {id:'Lighting',icon:'💡',label:'Lighting',addable:['BloomEffect','BlurEffect','SunRaysEffect'],isLighting:true},
+  {id:'NPCService',icon:'🤖',label:'NPCService',addable:['NPC']},
+];
+let stLighting = {ambient:'#334466',brightness:1.0,fog:true,fogColor:'#87ceeb',fogDensity:0.007,bloom:false,blur:false,sunRays:false,colorBrightness:1,colorContrast:0,colorSaturation:1};
+function refreshExplorer() {
+  const el = document.getElementById('explorer'); let html = '';
+  FOLDERS.forEach(f => {
+    const scripts = stScripts.filter(s => s.parent === f.id);
+    const parts = f.id === 'Workspace' ? stParts : [];
+    const count = parts.length + scripts.length;
+    const addItems = (f.addable||[]).map(t =>
+      '<div style="padding:5px 12px;font-size:11px;cursor:pointer;color:var(--text2)" onmousedown="event.preventDefault();stuAddToFolder(\''+t+'\',\''+f.id+'\')">'+typeIcon(t)+' '+t+'</div>'
+    ).join('');
+    html += '<div class="exp-folder">';
+    html += '<div class="exp-folder-hd '+(f.id==='Workspace'?'open':'')+'" onclick="'+(f.isLighting?'openLightingProps()':'toggleFolder(this)')+'">';
+    html += '<span class="exp-arrow">▶</span><span>'+f.icon+'</span>';
+    html += '<span style="flex:1;font-size:11px">'+f.label+'</span>';
+    if (count) html += '<span style="font-size:9px;color:var(--text3)">'+count+'</span>';
+    if (f.addable) {
+      html += '<div style="position:relative" onclick="event.stopPropagation()">';
+      html += '<button class="exp-ctx" style="opacity:1;color:var(--acc);font-size:14px;font-weight:700;padding:0 5px;line-height:1" onclick="var d=this.nextElementSibling;d.style.display=d.style.display===\'none\'?\'block\':\'none\'">+</button>';
+      html += '<div style="display:none;position:absolute;right:0;top:22px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;z-index:999;min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.6)" onmouseleave="this.style.display=\'none\'">';
+      html += addItems + '</div></div>';
+    }
+    html += '</div><div class="exp-children">';
+    if (f.id === 'Workspace') {
+      html += stParts.map((p,i) =>
+        '<div class="exp-item '+(selPart===p?'sel':'')+'" onclick="selectPart(stParts['+i+'])">'+
+        '<span style="font-size:10px">'+typeIcon(p.data.type)+'</span>'+
+        '<span style="flex:1">'+esc(p.data.name)+'</span>'+
+        '<span class="exp-ctx" onclick="event.stopPropagation();selPart=stParts['+i+'];stuDelete()">✕</span>'+
+        '</div>'
+      ).join('');
+    }
+    html += scripts.map(s =>
+      '<div class="exp-item" onclick="openCodeEditor(\''+s.id+'\')">'+
+      '<span style="font-size:10px">'+(s.type==='Script'?'📜':s.type==='LocalScript'?'📋':s.type==='RemoteEvent'?'📡':'📦')+'</span>'+
+      '<span style="flex:1">'+esc(s.name)+'</span>'+
+      '<span class="exp-ctx" onclick="event.stopPropagation();delScript(\''+s.id+'\')">✕</span>'+
+      '</div>'
+    ).join('');
+    html += '</div></div>';
+  });
+  el.innerHTML = html; updateStStatus();
+}
+function stuAddToFolder(type, folderId) {
+  if (['Script','LocalScript','ModuleScript','RemoteEvent','Sound','BloomEffect','BlurEffect','SunRaysEffect'].includes(type)) {
+    const id = 'scr_'+Date.now();
+    const codes = {Script:'-- Script\nprint("Hola!")',LocalScript:'-- LocalScript\nprint("Local!")',ModuleScript:'local M={}\nreturn M',RemoteEvent:'-- RemoteEvent',Sound:'-- Sound',BloomEffect:'-- BloomEffect',BlurEffect:'-- BlurEffect',SunRaysEffect:'-- SunRaysEffect'};
+    stScripts.push({id,name:type+'_'+stScripts.length,type,code:codes[type]||'',parent:folderId});
+    refreshExplorer();
+    if (['Script','LocalScript','ModuleScript'].includes(type)) openCodeEditor(id);
+  } else if (type==='NPC') { openNpcPanel(); }
+  else { stuAdd(type); }
+}
+function openLightingProps() {
+  const L = stLighting;
+  document.getElementById('props-body').innerHTML =
+    '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--yellow);background:var(--bg3);border-bottom:1px solid var(--border)">LIGHTING</div>'+
+    '<div class="prop-row"><div class="prop-lbl">Luz Ambiente</div><input type="color" value="'+L.ambient+'" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);cursor:pointer" onchange="stLighting.ambient=this.value;applyLighting()"></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Brillo (0-3)</div><input class="prop-inp" type="number" value="'+L.brightness+'" step="0.1" min="0" max="3" onchange="stLighting.brightness=parseFloat(this.value);applyLighting()"></div>'+
+    '<div class="prop-row"><div class="tgl-row" onclick="stLighting.fog=!stLighting.fog;this.querySelector(\'.tgl\').classList.toggle(\'on\',stLighting.fog);applyLighting()"><div class="tgl '+(L.fog?'on':'')+'"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Niebla</span></div></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Color Cielo/Niebla</div><input type="color" value="'+L.fogColor+'" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);cursor:pointer" onchange="stLighting.fogColor=this.value;applyLighting()"></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Densidad Niebla</div><input class="prop-inp" type="number" value="'+L.fogDensity+'" step="0.001" min="0" max="0.1" onchange="stLighting.fogDensity=parseFloat(this.value);applyLighting()"></div>'+
+    '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--acc2);background:var(--bg3);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">EFECTOS POST-PROCESS</div>'+
+    '<div class="prop-row"><div class="tgl-row" onclick="stLighting.bloom=!stLighting.bloom;this.querySelector(\'.tgl\').classList.toggle(\'on\',stLighting.bloom);applyLighting()"><div class="tgl '+(L.bloom?'on':'')+'"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">BloomEffect</span></div></div>'+
+    '<div class="prop-row"><div class="tgl-row" onclick="stLighting.sunRays=!stLighting.sunRays;this.querySelector(\'.tgl\').classList.toggle(\'on\',stLighting.sunRays);applyLighting()"><div class="tgl '+(L.sunRays?'on':'')+'"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">SunRaysEffect</span></div></div>'+
+    '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--acc);background:var(--bg3);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">COLOR CORRECTION</div>'+
+    '<div class="prop-row"><div class="prop-lbl">Brillo</div><input class="prop-inp" type="number" value="'+L.colorBrightness+'" step="0.05" min="-1" max="2" onchange="stLighting.colorBrightness=parseFloat(this.value);applyLighting()"></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Contraste</div><input class="prop-inp" type="number" value="'+L.colorContrast+'" step="0.05" min="-1" max="1" onchange="stLighting.colorContrast=parseFloat(this.value);applyLighting()"></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Saturación</div><input class="prop-inp" type="number" value="'+L.colorSaturation+'" step="0.05" min="0" max="2" onchange="stLighting.colorSaturation=parseFloat(this.value);applyLighting()"></div>';
+}
+function applyLighting() {
+  if (!stScene) return;
+  stScene.traverse(o => { if (o.isAmbientLight) { o.color.set(stLighting.ambient); o.intensity = stLighting.brightness * 0.55; } });
+  stScene.fog = stLighting.fog ? new THREE.FogExp2(stLighting.fogColor, stLighting.fogDensity) : null;
+  stScene.background = new THREE.Color(stLighting.fogColor || '#0d1020');
+  if (stMapId) { const maps=getMaps(); if(maps[stMapId]){maps[stMapId].lighting=JSON.parse(JSON.stringify(stLighting));setMaps(maps);} }
+}
 function toggleFolder(el) { el.classList.toggle('open'); }
 function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖'}[t]||'📦'; }
 function updateStStatus() { document.getElementById('stu-status').textContent = `${stParts.length} partes · ${stScripts.length} scripts · #${stMapId||'?'}`; }
@@ -1085,7 +1227,21 @@ function stuTest() { stuSave(); if (stMapId) playMap(stMapId); }
 let pubThumbData = null;
 function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; openModal('mo-publish'); }
 function previewThumb(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { pubThumbData = ev.target.result; document.getElementById('pub-thumb-name').textContent = f.name; const canvas = document.getElementById('pub-thumb-preview'); const img = new Image(); img.onload = () => { canvas.style.display='block'; canvas.getContext('2d').drawImage(img,0,0,canvas.width=canvas.clientWidth,canvas.height=canvas.clientWidth*9/16); }; img.src = pubThumbData; }; r.readAsDataURL(f); }
-function confirmPublish() { const name = document.getElementById('pub-name').value.trim(); const desc = document.getElementById('pub-desc').value.trim(); const genre = document.getElementById('pub-genre').value; if (!name) { showToast('Poné un nombre'); return; } const maps = getMaps(); const m = maps[stMapId]; if (!m) return; m.name = name; m.desc = desc; m.genre = genre; m.authorId = ME.id; m.authorName = ME.username; if (pubThumbData) m.thumb = pubThumbData; setMaps(maps); closeModal('mo-publish'); showToast('🚀 ¡Publicado!'); }
+function confirmPublish() {
+  const name = document.getElementById('pub-name').value.trim();
+  const desc = document.getElementById('pub-desc').value.trim();
+  const genre = document.getElementById('pub-genre').value;
+  const privacy = (document.getElementById('pub-privacy')||{}).value || 'public';
+  const assignedRaw = (document.getElementById('pub-assigned')||{}).value || '';
+  if (!name) { showToast('Poné un nombre'); return; }
+  const maps = getMaps(); const m = maps[stMapId]; if (!m) return;
+  m.name = name; m.desc = desc; m.genre = genre;
+  m.privacy = privacy;
+  m.assignedPlayers = privacy === 'assigned' ? assignedRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  m.authorId = ME.id; m.authorName = ME.username;
+  if (pubThumbData) m.thumb = pubThumbData;
+  setMaps(maps); closeModal('mo-publish'); showToast('🚀 ¡Publicado!');
+}
 const NPC_LIB = [{id:'dummy',name:'Dummy',icon:'🪆',type:'Humanoid',color:'#cc6644',hp:100},{id:'zombie',name:'Zombie',icon:'🧟',type:'Enemy',color:'#3d6e3d',hp:50},{id:'robot',name:'Robot',icon:'🤖',type:'NPC',color:'#4466aa',hp:200},{id:'merchant',name:'Comerciante',icon:'🧙',type:'Friendly',color:'#cc9933',hp:100},{id:'guard',name:'Guardia',icon:'💂',type:'Friendly',color:'#334488',hp:150},{id:'cat',name:'Gato',icon:'🐱',type:'Passive',color:'#aaaaaa',hp:30}];
 function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
 function spawnNpc(npcId) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; const d = { id:'npc'+Date.now(), type:'NPC', name:npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:2.6, sz:1, rx:0, ry:0, rz:0, color:npc.color, anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(`🤖 ${npc.name} agregado`); }
@@ -1109,8 +1265,17 @@ function runScript() { saveActiveScript(); const s = stScripts.find(x => x.id ==
 function appendOutput(line, cls = '') { const out = document.getElementById('code-output'); const span = document.createElement('span'); span.className = cls === 'err' ? 'code-out-err' : cls === 'warn' ? 'code-out-warn' : cls === 'sys' ? 'code-out-sys' : ''; span.textContent = line + '\n'; out.appendChild(span); out.scrollTop = out.scrollHeight; }
 let gScene, gCamera, gRenderer; let gPlayer = null, gPlayerParts = {}; let gKeys = {}, joyPos = {x:0, y:0}; let gVelY = 0, gOnGround = false; let gCamTheta = 0, gCamPhi = 0.45, gCamDist = 16; let gTargetRY = 0, gAnimT = 0; let gColliders = [], gNPCs = []; let gGameInited = false; let _prevPos = new THREE.Vector3(); let gFps = 0, gFpsT = 0, gFpsCount = 0;
 const G_SPD = 0.23, G_JUMP = 0.35, G_GRAV = 0.018; const AV_HW = 0.50, AV_HD = 0.50, AV_H = 3.05;
+function canPlayMap(m) {
+  if (!m || m.authorId === ME.id || isAdmin()) return true;
+  const p = m.privacy || 'public';
+  if (p === 'private') return false;
+  if (p === 'friends') return (ME.friends||[]).includes(m.authorId);
+  if (p === 'assigned') return (m.assignedPlayers||[]).includes(ME.username);
+  return true;
+}
 function playMap(mapId) {
   const maps = getMaps(); const m = maps[mapId]; if (!m) { showToast('Mapa no encontrado'); return; }
+  if (!canPlayMap(m)) { showToast('No tenés acceso a este juego'); return; }
   m.plays = (m.plays||0) + 1; setMaps(maps); ME.visits = (ME.visits||0) + 1; saveMe();
   // Si es un juego HTML importado, lanzarlo en iframe
   if (m.isHtmlGame && m.htmlContent) {
