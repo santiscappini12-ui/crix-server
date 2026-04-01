@@ -366,13 +366,23 @@ input,select,textarea{font-family:var(--font);}
   <div class="games-grid" id="grid-featured"></div>
   <div class="section-hd"><div class="section-hd-accent" style="background:var(--acc2)"></div>Recién Publicados<span class="section-sub">Últimas creaciones</span></div>
   <div class="games-grid" id="grid-recent"></div>
-  <div class="section-hd"><div class="section-hd-accent" style="background:var(--green)"></div>Mis Juegos</div>
-  <label class="upload-zone">
-    ➕ Subir juego o mapa (.crix, .json, HTML, imagen)
-    <input type="file" style="display:none" id="upload-file" accept=".html,.crix,.json,image/*" onchange="handleUpload(event)">
-  </label>
+  <div class="section-hd"><div class="section-hd-accent" style="background:var(--green)"></div>Mis Juegos
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn btn-p" style="font-size:12px;padding:6px 14px" onclick="createNewGame()">➕ Nuevo juego</button>
+      <label class="btn btn-g" style="font-size:12px;padding:6px 14px;cursor:pointer">
+        📁 Importar
+        <input type="file" style="display:none" id="upload-file" accept=".html,.crix,.json,image/*" onchange="handleUpload(event)">
+      </label>
+    </div>
+  </div>
   <div class="games-grid" id="grid-mine"></div>
 </div></div>
+</div>
+
+<!-- ═══ IFRAME GAME (para juegos HTML importados) ═══ -->
+<div id="s-iframe" class="screen" style="background:#000">
+  <button id="iframe-back-btn" style="position:fixed;top:10px;right:10px;z-index:9999;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.15);color:white;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:12px;font-weight:700" onclick="exitIframe()">← Salir</button>
+  <iframe id="game-iframe" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
 </div>
 
 <!-- ═══ DISCOVER ═══ -->
@@ -688,7 +698,53 @@ function trySession() {
   ME = u; return true;
 }
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
-function bootApp() { ensureDefaultMaps(); document.getElementById('s-auth').classList.remove('active'); document.getElementById('nav').style.display = 'flex'; const av = document.getElementById('nav-av'); av.textContent = ME.username[0].toUpperCase(); av.style.background = ME.color; goTab('home'); checkNotifs(); }
+function bootApp() {
+  ensureDefaultMaps();
+  // Verificar ban
+  if (ME.banned) {
+    const now = new Date();
+    const isPerm = ME.banned.permanent;
+    const expiry = ME.banned.until ? new Date(ME.banned.until) : null;
+    if (isPerm || (expiry && expiry > now)) {
+      showBanScreen(); return;
+    } else if (expiry && expiry <= now) {
+      // Ban expirado, limpiar
+      delete ME.banned; saveMe();
+    }
+  }
+  document.getElementById('s-auth').classList.remove('active');
+  document.getElementById('nav').style.display = 'flex';
+  const av = document.getElementById('nav-av');
+  av.textContent = ME.username[0].toUpperCase();
+  av.style.background = ME.color;
+  // Boton admin si es Crix
+  if (ME.username.toLowerCase() === 'crix' || ME.isAdmin) {
+    const adminBtn = document.createElement('button');
+    adminBtn.className = 'nav-tab';
+    adminBtn.innerHTML = '⚡ Admin';
+    adminBtn.style.color = '#f59e0b';
+    adminBtn.onclick = () => openAdminPanel();
+    document.querySelector('.nav-tabs').appendChild(adminBtn);
+  }
+  goTab('home'); checkNotifs();
+}
+function showBanScreen() {
+  document.getElementById('s-auth').classList.remove('active');
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const b = ME.banned;
+  const durTxt = b.permanent ? 'PERMANENTE' : ('Hasta: ' + new Date(b.until).toLocaleString('es-AR'));
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="ban-screen" style="position:fixed;inset:0;background:#080a0f;display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:16px;padding:24px">
+      <div style="font-size:48px">🚫</div>
+      <div style="font-family:var(--display);font-size:28px;font-weight:800;color:var(--red)">Cuenta Suspendida</div>
+      <div style="background:var(--bg2);border:1px solid rgba(239,68,68,.3);border-radius:14px;padding:20px;max-width:400px;width:100%;display:flex;flex-direction:column;gap:10px">
+        <div><span style="color:var(--text3);font-size:11px">DURACIÓN</span><div style="font-weight:700;color:var(--red)">${durTxt}</div></div>
+        <div><span style="color:var(--text3);font-size:11px">MOTIVO</span><div style="font-weight:600">${esc(b.reason||'Sin motivo especificado')}</div></div>
+        ${b.notes ? '<div><span style="color:var(--text3);font-size:11px">NOTAS</span><div style="font-size:13px;color:var(--text2)">' + esc(b.notes) + '</div></div>' : ''}
+      </div>
+      <button class="btn btn-g" onclick="DB.del('session');location.reload()">← Cerrar sesión</button>
+    </div>`);
+}
 function goTab(t, extra) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); const el = document.getElementById('s-' + t); if (el) el.classList.add('active'); document.querySelectorAll('.nav-tab').forEach((b, i) => { b.classList.toggle('active', ['home','discover','studio','msg','profile'][i] === t); }); if (t === 'home') renderHome(); if (t === 'discover') renderDiscover(); if (t === 'studio') initStudio(); if (t === 'msg') loadConvList(); if (t === 'profile') renderProfile(extra || ME.id); }
 function showToast(m, dur = 3000) { const t = document.getElementById('toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = 'none', dur); }
 function openModal(id) { document.getElementById(id).classList.add('open'); }
@@ -782,7 +838,67 @@ function toggleLike(mapId, btn) {
 }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
 function editMap(id) { stMapId = id; initStudio(); goTab('studio'); }
-function handleUpload(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { const maps = getMaps(); const id = nextId('map'); const isImg = file.type.startsWith('image/'); let mapData = { id, name: file.name.replace(/\.[^.]+$/, ''), desc: 'Mapa importado', genre: 'other', authorId: ME.id, authorName: ME.username, plays: 0, likes: 0, created: new Date().toISOString(), parts: defaultParts(), scripts: [], thumb: isImg ? ev.target.result : null }; if (!isImg) { try { const p = JSON.parse(ev.target.result); if (p.parts) mapData.parts = p.parts; if (p.name) mapData.name = p.name; if (p.scripts) mapData.scripts = p.scripts; } catch {} } maps[id] = mapData; setMaps(maps); ME.games = ME.games || []; ME.games.push(id); saveMe(); showToast(`✅ Importado: ${mapData.name}`); renderHome(); }; if (file.type.startsWith('image/')) reader.readAsDataURL(file); else reader.readAsText(file); e.target.value = ''; }
+function handleUpload(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const maps = getMaps();
+    const id = nextId('map');
+    const isImg = file.type.startsWith('image/');
+    const isHtml = file.name.toLowerCase().endsWith('.html') || file.type === 'text/html';
+    let mapData = {
+      id, name: file.name.replace(/\.[^.]+$/, ''),
+      desc: 'Juego importado', genre: 'other',
+      authorId: ME.id, authorName: ME.username,
+      plays: 0, likes: 0, created: new Date().toISOString(),
+      parts: defaultParts(), scripts: [], thumb: null,
+      htmlContent: null, isHtmlGame: false
+    };
+    if (isImg) {
+      mapData.thumb = ev.target.result;
+    } else if (isHtml) {
+      // Guardar el HTML real del juego
+      mapData.htmlContent = ev.target.result;
+      mapData.isHtmlGame = true;
+      mapData.desc = 'Juego HTML importado desde archivo';
+    } else {
+      try {
+        const p = JSON.parse(ev.target.result);
+        if (p.parts) mapData.parts = p.parts;
+        if (p.name) mapData.name = p.name;
+        if (p.scripts) mapData.scripts = p.scripts;
+      } catch {}
+    }
+    maps[id] = mapData; setMaps(maps);
+    ME.games = ME.games || []; ME.games.push(id); saveMe();
+    showToast('✅ Importado: ' + mapData.name); renderHome();
+  };
+  if (file.type.startsWith('image/')) reader.readAsDataURL(file);
+  else reader.readAsText(file);
+  e.target.value = '';
+}
+function createNewGame() {
+  const id = nextId('map');
+  const maps = getMaps();
+  const name = 'Mi Juego ' + (Object.values(maps).filter(m => m.authorId === ME.id).length + 1);
+  const m = {
+    id, name, desc: '', genre: 'adventure',
+    authorId: ME.id, authorName: ME.username,
+    plays: 0, likes: 0, created: new Date().toISOString(),
+    parts: [...defaultParts()], scripts: [], thumb: null,
+    htmlContent: null, isHtmlGame: false
+  };
+  maps[id] = m; setMaps(maps);
+  ME.games = ME.games || []; ME.games.push(id); saveMe();
+  stMapId = id; goTab('studio');
+  showToast('✅ Nuevo juego creado: ' + name);
+}
+function exitIframe() {
+  document.getElementById('s-iframe').classList.remove('active');
+  document.getElementById('game-iframe').src = '';
+  document.getElementById('s-home').classList.add('active');
+  document.getElementById('nav').style.display = 'flex';
+}
 let discCurrentFilter = 'all';
 function renderDiscover(filter) { if (filter) discCurrentFilter = filter; const allMaps = Object.values(getMaps()); let filtered = allMaps; if (discCurrentFilter === 'popular') filtered = [...allMaps].sort((a,b)=>(b.plays||0)-(a.plays||0)); else if (discCurrentFilter === 'new') filtered = [...allMaps].sort((a,b)=>new Date(b.created)-new Date(a.created)); else if (!['all'].includes(discCurrentFilter)) filtered = allMaps.filter(m => m.genre === discCurrentFilter); renderGrid('grid-discover', filtered.slice(0, 20), 'hot'); const users = getUsers(); const active = Object.values(users).filter(u => u.id !== ME.id).slice(0, 12); const el = document.getElementById('grid-creators'); if (el) { if (!active.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px">Aún no hay más usuarios.</div>'; return; } el.innerHTML = active.map(u => `<div class="friend-card" onclick="renderProfile('${u.id}');goTab('profile','${u.id}')"><div class="friend-av" style="background:${u.color}">${u.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join(''); } }
 function discFilter(f, el) { document.querySelectorAll('#s-discover .filter-btn').forEach(b => b.classList.remove('active')); if (el) el.classList.add('active'); renderDiscover(f); }
@@ -791,12 +907,125 @@ function doSearch(q) { q = (q || '').trim(); if (!q) return; searchQuery = q; do
 function runSearch() { const q = searchQuery.toLowerCase(); const allMaps = Object.values(getMaps()); const allUsers = Object.values(getUsers()); const gResults = allMaps.filter(m => m.name.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q)); const uResults = allUsers.filter(u => u.username.toLowerCase().includes(q)); renderGrid('search-games-results', gResults, 'hot'); const uEl = document.getElementById('search-users-results'); uEl.innerHTML = uResults.length ? uResults.map(u => `<div class="friend-card" onclick="goTab('profile','${u.id}')"><div class="friend-av" style="background:${u.color}">${u.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join('') : '<div style="color:var(--text3);font-size:12px">Sin resultados.</div>'; }
 function switchSearchTab(tab) { searchTab = tab; document.getElementById('search-games-results').style.display = tab === 'games' ? 'grid' : 'none'; document.getElementById('search-users-results').style.display = tab === 'users' ? 'grid' : 'none'; document.getElementById('sf-games').classList.toggle('active', tab === 'games'); document.getElementById('sf-users').classList.toggle('active', tab === 'users'); }
 let viewingUserId = null;
-function renderProfile(uid) { viewingUserId = uid || ME.id; const users = getUsers(); const u = users[viewingUserId] || ME; const isMe = viewingUserId === ME.id; const myMaps = Object.values(getMaps()).filter(m => m.authorId === u.id); const isFriend = (ME.friends||[]).includes(u.id); document.getElementById('profile-inner').innerHTML = `<div class="pf-banner"><div class="pf-av" style="width:72px;height:72px;font-size:28px;background:${u.color}">${u.username[0].toUpperCase()}</div><div style="flex:1"><div class="pf-name">${esc(u.username)}</div><div class="pf-handle">#${u.id}</div><div class="pf-join">Miembro desde ${dateStr(u.created)}</div>${u.bio ? `<div class="pf-bio">${esc(u.bio)}</div>` : ''}<div class="pf-stats"><div><div class="pstat-v">${myMaps.length}</div><div class="pstat-l">Juegos</div></div><div><div class="pstat-v">${(u.friends||[]).length}</div><div class="pstat-l">Amigos</div></div><div><div class="pstat-v">${u.visits||0}</div><div class="pstat-l">Visitas</div></div></div><div class="pf-btns">${isMe ? `<button class="btn btn-g" style="font-size:12px" onclick="editProfile()">✏️ Editar bio</button><button class="btn btn-red" style="font-size:12px" onclick="logout()">← Cerrar sesión</button>` : `${!isFriend ? `<button class="btn btn-p" style="font-size:12px" onclick="addFriend('${u.id}')">+ Agregar amigo</button>` : `<button class="btn btn-g" style="font-size:12px" onclick="openConvWith('${u.id}')">💬 Mensaje</button>`}`}</div></div></div>${isMe ? `<div style="display:flex;gap:8px;margin-bottom:14px"><input class="inp" style="flex:1" id="add-friend-inp" placeholder="Buscar y agregar amigo..."><button class="btn btn-p" onclick="addFriendByName()">+ Amigo</button></div>` : ''}<div class="tab-row"><button class="tab active" id="pftab-games" onclick="pfTab('games',this)">🎮 Juegos (${myMaps.length})</button><button class="tab" id="pftab-friends" onclick="pfTab('friends',this)">👥 Amigos (${(u.friends||[]).length})</button>${isMe ? `<button class="tab" id="pftab-liked" onclick="pfTab('liked',this)">❤️ Favoritos</button>` : ''}</div><div id="pf-games-tab" class="games-grid"></div><div id="pf-friends-tab" class="friends-grid" style="display:none"></div>${isMe ? `<div id="pf-liked-tab" class="games-grid" style="display:none"></div>` : ''}`; pfTab('games'); }
+function renderProfile(uid) { viewingUserId = uid || ME.id; const users = getUsers(); const u = users[viewingUserId] || ME; const isMe = viewingUserId === ME.id; const myMaps = Object.values(getMaps()).filter(m => m.authorId === u.id); const isFriend = (ME.friends||[]).includes(u.id); const isBanned = u.banned && (u.banned.permanent || (u.banned.until && new Date(u.banned.until) > new Date()));
+  const adminBanBtn = isAdmin() && !isMe ? (isBanned
+    ? '<button class="btn btn-green" style="font-size:12px" onclick="unbanUser(\''+u.id+'\')">✅ Desbanear</button>'
+    : '<button class="btn btn-red" style="font-size:12px" onclick="banUser(\''+u.id+'\')">🚫 Banear</button>') : '';
+  document.getElementById('profile-inner').innerHTML =
+    '<div class="pf-banner">'+
+    '<div class="pf-av" style="width:72px;height:72px;font-size:28px;background:'+u.color+'">'+u.username[0].toUpperCase()+'</div>'+
+    '<div style="flex:1">'+
+    '<div class="pf-name">'+(isBanned&&!isMe?'<span style="color:var(--red)">🚫 </span>':'')+esc(u.username)+'</div>'+
+    '<div class="pf-handle">#'+u.id+'</div>'+
+    '<div class="pf-join">Miembro desde '+dateStr(u.created)+'</div>'+
+    (u.bio ? '<div class="pf-bio">'+esc(u.bio)+'</div>' : '')+
+    '<div class="pf-stats">'+
+    '<div><div class="pstat-v">'+myMaps.length+'</div><div class="pstat-l">Juegos</div></div>'+
+    '<div><div class="pstat-v">'+((u.friends||[]).length)+'</div><div class="pstat-l">Amigos</div></div>'+
+    '<div><div class="pstat-v">'+(u.visits||0)+'</div><div class="pstat-l">Visitas</div></div>'+
+    '</div>'+
+    '<div class="pf-btns">'+
+    (isMe
+      ? '<button class="btn btn-g" style="font-size:12px" onclick="editProfile()">✏️ Editar bio</button><button class="btn btn-red" style="font-size:12px" onclick="logout()">← Cerrar sesión</button>'
+      : (!isFriend
+          ? '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(\''+u.id+'\')">+ Agregar amigo</button>'
+          : '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje</button>')+
+        adminBanBtn)+
+    '</div></div></div>'+
+    (isMe ? '<div style="display:flex;gap:8px;margin-bottom:14px"><input class="inp" style="flex:1" id="add-friend-inp" placeholder="Buscar y agregar amigo..."><button class="btn btn-p" onclick="addFriendByName()">+ Amigo</button></div>' : '')+
+    '<div class="tab-row">'+
+    '<button class="tab active" id="pftab-games" onclick="pfTab(\'games\',this)">🎮 Juegos ('+myMaps.length+')</button>'+
+    '<button class="tab" id="pftab-friends" onclick="pfTab(\'friends\',this)">👥 Amigos ('+((u.friends||[]).length)+')</button>'+
+    (isMe ? '<button class="tab" id="pftab-liked" onclick="pfTab(\'liked\',this)">❤️ Favoritos</button>' : '')+
+    '</div>'+
+    '<div id="pf-games-tab" class="games-grid"></div>'+
+    '<div id="pf-friends-tab" class="friends-grid" style="display:none"></div>'+
+    (isMe ? '<div id="pf-liked-tab" class="games-grid" style="display:none"></div>' : ''); pfTab('games'); }
 function pfTab(tab, el) { ['games','friends','liked'].forEach(t => { const e1 = document.getElementById('pf-'+t+'-tab'); const e2 = document.getElementById('pftab-'+t); if (e1) e1.style.display = 'none'; if (e2) e2.classList.remove('active'); }); const tEl = document.getElementById('pf-'+tab+'-tab'); const hEl = el || document.getElementById('pftab-'+tab); if (tEl) tEl.style.display = 'grid'; if (hEl) hEl.classList.add('active'); const users = getUsers(); const u = users[viewingUserId] || ME; if (tab === 'games') { const mine = Object.values(getMaps()).filter(m => m.authorId === u.id); renderGrid('pf-games-tab', mine, u.id === ME.id ? 'mine' : ''); } else if (tab === 'friends') { const frds = (u.friends||[]).map(fid => users[fid]).filter(Boolean); const el2 = document.getElementById('pf-friends-tab'); if (!frds.length) { el2.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin amigos todavía.</div>'; return; } el2.innerHTML = frds.map(f => `<div class="friend-card" onclick="goTab('profile','${f.id}')"><div class="friend-av" style="background:${f.color||'#5b8def'}">${f.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(f.username)}</div><div style="font-size:9px;color:var(--text3)">#${f.id}</div><button class="btn btn-g" style="font-size:10px;padding:3px 8px;margin-top:6px" onclick="event.stopPropagation();openConvWith('${f.id}')">💬</button></div>`).join(''); } else if (tab === 'liked') { const liked = Object.values(getMaps()).filter(m => (ME.liked||[]).includes(m.id)); renderGrid('pf-liked-tab', liked, ''); } }
 function addFriend(uid) { if ((ME.friends||[]).includes(uid)) { showToast('Ya son amigos'); return; } ME.friends = ME.friends || []; ME.friends.push(uid); saveMe(); showToast('✅ Amigo agregado'); renderProfile(viewingUserId); }
 function addFriendByName() { const val = (document.getElementById('add-friend-inp')||{}).value; if (!val) return; const name = val.trim(); const found = Object.values(getUsers()).find(u => u.username.toLowerCase() === name.toLowerCase()); if (!found) { showToast('❌ Usuario no encontrado'); return; } if (found.id === ME.id) { showToast('No podés agregarte a vos mismo'); return; } addFriend(found.id); document.getElementById('add-friend-inp').value = ''; }
 function editProfile() { const bio = prompt('Editá tu bio:', ME.bio || ''); if (bio === null) return; ME.bio = bio.slice(0, 120); saveMe(); renderProfile(ME.id); }
-function logout() { if (!confirm('¿Cerrar sesión?')) return; DB.del('session'); ME = null; document.getElementById('nav').style.display = 'none'; document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById('s-auth').classList.add('active'); document.getElementById('a-u').value = ''; document.getElementById('a-p').value = ''; }
+function logout() {
+  if (!confirm('\u00bfCerrar sesi\u00f3n?')) return;
+  DB.del('session'); ME = null;
+  document.getElementById('nav').style.display = 'none';
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-auth').classList.add('active');
+  document.getElementById('a-u').value = '';
+  document.getElementById('a-p').value = '';
+}
+function isAdmin() { return ME && (ME.username.toLowerCase() === 'crix' || ME.isAdmin); }
+function openAdminPanel() {
+  const users = getUsers();
+  const maps = getMaps();
+  const userList = Object.values(users).filter(u => u.id !== ME.id);
+  document.getElementById('profile-inner').innerHTML =
+    '<div style="font-family:var(--display);font-size:22px;font-weight:800;margin-bottom:16px;color:var(--yellow)">\u26A1 Panel de Admin</div>'+
+    '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'+
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;flex:1;min-width:120px;text-align:center">'+
+    '<div style="font-size:24px;font-weight:800;color:var(--acc)">'+userList.length+'</div>'+
+    '<div style="font-size:10px;color:var(--text3)">USUARIOS</div></div>'+
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;flex:1;min-width:120px;text-align:center">'+
+    '<div style="font-size:24px;font-weight:800;color:var(--acc2)">'+Object.keys(maps).length+'</div>'+
+    '<div style="font-size:10px;color:var(--text3)">JUEGOS</div></div>'+
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;flex:1;min-width:120px;text-align:center">'+
+    '<div style="font-size:24px;font-weight:800;color:var(--red)">'+userList.filter(u=>u.banned&&(u.banned.permanent||new Date(u.banned.until)>new Date())).length+'</div>'+
+    '<div style="font-size:10px;color:var(--text3)">BANEADOS</div></div>'+
+    '</div>'+
+    '<div style="font-weight:700;margin-bottom:10px">Todos los usuarios</div>'+
+    '<div style="display:flex;flex-direction:column;gap:6px">'+
+    userList.map(u => {
+      const isBanned = u.banned && (u.banned.permanent || new Date(u.banned.until) > new Date());
+      return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;align-items:center;gap:10px">'+
+        '<div style="width:36px;height:36px;border-radius:50%;background:'+(u.color||'#5b8def')+';display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">'+(u.username||'?')[0].toUpperCase()+'</div>'+
+        '<div style="flex:1"><div style="font-weight:700;font-size:13px">'+(isBanned?'<span style="color:var(--red)">🚫 </span>':'')+esc(u.username)+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">#'+u.id+' · '+dateStr(u.created)+'</div></div>'+
+        '<div style="display:flex;gap:6px">'+
+        '<button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="goTab(\'profile\',\''+u.id+'\')">Ver</button>'+
+        (isBanned
+          ? '<button class="btn btn-green" style="font-size:11px;padding:4px 10px" onclick="unbanUser(\''+u.id+'\')">Desbanear</button>'
+          : '<button class="btn btn-red" style="font-size:11px;padding:4px 10px" onclick="banUser(\''+u.id+'\')">Banear</button>')+
+        (isAdmin() && !u.isAdmin ? '<button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="makeAdmin(\''+u.id+'\')">\u26A1 Admin</button>' : '')+
+        '</div></div>';
+    }).join('')+
+    '</div>';
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-profile').classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+}
+function banUser(uid) {
+  const users = getUsers(); const u = users[uid]; if (!u) return;
+  const reason = prompt('Motivo del baneo:', '');
+  if (reason === null) return;
+  const notes = prompt('Notas adicionales (opcional):', '');
+  const durInput = prompt('Duración del baneo:\n- Número de días (ej: 7)\n- 0 = PERMANENTE', '7');
+  if (durInput === null) return;
+  const days = parseInt(durInput);
+  u.banned = {
+    reason: reason || 'Sin motivo',
+    notes: notes || '',
+    permanent: days === 0,
+    until: days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null,
+    bannedBy: ME.username,
+    bannedAt: new Date().toISOString()
+  };
+  users[uid] = u; setUsers(users);
+  showToast('🚫 Usuario baneado: ' + u.username);
+  openAdminPanel();
+}
+function unbanUser(uid) {
+  const users = getUsers(); const u = users[uid]; if (!u) return;
+  delete u.banned; users[uid] = u; setUsers(users);
+  showToast('✅ Ban removido: ' + u.username);
+  openAdminPanel();
+}
+function makeAdmin(uid) {
+  if (!isAdmin()) return;
+  const users = getUsers(); const u = users[uid]; if (!u) return;
+  u.isAdmin = true; users[uid] = u; setUsers(users);
+  showToast('⚡ ' + u.username + ' ahora es admin');
+  openAdminPanel();
+}
 let activeConvId = null;
 function convId(a, b) { return [a, b].sort().join('_'); }
 function openConvWith(userId) { goTab('msg'); const cid = convId(ME.id, userId); activeConvId = cid; loadConvList(); renderConv(cid, userId); }
@@ -880,7 +1109,25 @@ function runScript() { saveActiveScript(); const s = stScripts.find(x => x.id ==
 function appendOutput(line, cls = '') { const out = document.getElementById('code-output'); const span = document.createElement('span'); span.className = cls === 'err' ? 'code-out-err' : cls === 'warn' ? 'code-out-warn' : cls === 'sys' ? 'code-out-sys' : ''; span.textContent = line + '\n'; out.appendChild(span); out.scrollTop = out.scrollHeight; }
 let gScene, gCamera, gRenderer; let gPlayer = null, gPlayerParts = {}; let gKeys = {}, joyPos = {x:0, y:0}; let gVelY = 0, gOnGround = false; let gCamTheta = 0, gCamPhi = 0.45, gCamDist = 16; let gTargetRY = 0, gAnimT = 0; let gColliders = [], gNPCs = []; let gGameInited = false; let _prevPos = new THREE.Vector3(); let gFps = 0, gFpsT = 0, gFpsCount = 0;
 const G_SPD = 0.23, G_JUMP = 0.35, G_GRAV = 0.018; const AV_HW = 0.50, AV_HD = 0.50, AV_H = 3.05;
-function playMap(mapId) { const maps = getMaps(); const m = maps[mapId]; if (!m) { showToast('Mapa no encontrado'); return; } m.plays = (m.plays||0) + 1; setMaps(maps); ME.visits = (ME.visits||0) + 1; saveMe(); document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById('s-game').classList.add('active'); if (!gGameInited) { _initGame(); gGameInited = true; } _loadMap(m); document.getElementById('g-map-name').textContent = m.name; }
+function playMap(mapId) {
+  const maps = getMaps(); const m = maps[mapId]; if (!m) { showToast('Mapa no encontrado'); return; }
+  m.plays = (m.plays||0) + 1; setMaps(maps); ME.visits = (ME.visits||0) + 1; saveMe();
+  // Si es un juego HTML importado, lanzarlo en iframe
+  if (m.isHtmlGame && m.htmlContent) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('nav').style.display = 'none';
+    document.getElementById('s-iframe').classList.add('active');
+    const blob = new Blob([m.htmlContent], {type: 'text/html'});
+    document.getElementById('game-iframe').src = URL.createObjectURL(blob);
+    return;
+  }
+  // Juego 3D normal
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-game').classList.add('active');
+  if (!gGameInited) { _initGame(); gGameInited = true; }
+  _loadMap(m);
+  document.getElementById('g-map-name').textContent = m.name;
+}
 function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); gRenderer.shadowMap.enabled = true; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
 function _loadMap(m) { const toRemove = []; gScene.traverse(o => { if (o !== gScene) toRemove.push(o); }); toRemove.forEach(o => gScene.remove(o)); gColliders = []; gNPCs = []; gPlayer = null; gScene.add(new THREE.AmbientLight(0xffeedd, 0.55)); const sun = new THREE.DirectionalLight(0xffffff, 0.88); sun.position.set(40,70,30); sun.castShadow = true; sun.shadow.mapSize.set(1024,1024); gScene.add(sun); let spawn = {x:0, y:3, z:0}; (m.parts||[]).forEach(d => { if (d.type === 'Spawn') { spawn = {x: d.x, y: d.y + (d.sy||0.4)/2, z: d.z}; return; } let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sz)/2, 16, 12); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 16); else geo = new THREE.BoxGeometry(sx, sy, sz); const mat = new THREE.MeshPhongMaterial({ color:new THREE.Color(d.color||'#888'), transparent:Number(d.transparent||0)>0, opacity:1-Number(d.transparent||0) }); if (d.material === 'Neon') { mat.emissive = new THREE.Color(d.color||'#00ff88'); mat.emissiveIntensity = 0.6; } const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0,d.y||0,d.z||0); mesh.rotation.set(d.rx||0,d.ry||0,d.rz||0); mesh.castShadow = true; mesh.receiveShadow = true; gScene.add(mesh); if (d.isNPC) { gNPCs.push({mesh,data:d}); return; } if (d.canCollide !== false) { const box = new THREE.Box3().setFromObject(mesh); gColliders.push({mesh,box}); } }); _spawnPlayer(spawn); gCamTheta = 0; gCamPhi = 0.45; gChatMsgs = []; document.getElementById('g-chat-msgs').innerHTML = ''; addGMsg(`Bienvenido a ${m.name}`, 'sys'); }
 function _spawnPlayer(pos) { const g = new THREE.Group(); const c = new THREE.Color(ME.color||'#5b8def'); const bMat = new THREE.MeshPhongMaterial({color:c}); const sMat = new THREE.MeshPhongMaterial({color:0xffdbac}); const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45,1.10,0.45),bMat); lL.position.set(-0.27, 0.55, 0); const lR = lL.clone(); lR.position.set( 0.27, 0.55, 0); const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55),bMat); torso.position.set(0, 1.70, 0); const head = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.70,0.70),sMat); head.position.set(0, 2.75, 0); const eyeM = new THREE.MeshPhongMaterial({color:0x111111}); const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeM); eL.position.set(-0.17, 2.78, 0.36); const eR = eL.clone(); eR.position.set( 0.17, 2.78, 0.36); const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40,1.10,0.40),bMat); aL.position.set(-0.72, 1.70, 0); const aR = aL.clone(); aR.position.set( 0.72, 1.70, 0); g.add(lL,lR,torso,head,eL,eR,aL,aR); g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = {aL,aR,lL,lR}; gVelY = 0; gOnGround = false; gTargetRY = 0; }
