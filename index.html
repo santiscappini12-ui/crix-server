@@ -646,23 +646,80 @@ input,select,textarea{font-family:var(--font);}
 <script src="/socket.io/socket.io.js"></script>
 <script>
 'use strict';
+// ══ Capa de datos — usa el servidor, con caché local ══
 const DB = {
   get(k) { try { return JSON.parse(localStorage.getItem('crix4_' + k)); } catch { return null; } },
   set(k, v) { localStorage.setItem('crix4_' + k, JSON.stringify(v)); },
   del(k) { localStorage.removeItem('crix4_' + k); }
 };
-const BC = (() => { try { return new BroadcastChannel('crix4'); } catch { return { postMessage: () => {}, addEventListener: () => {} }; } })();
-BC.addEventListener('message', e => {
-  if (e.data.type === 'msg_update') { if (document.getElementById('s-msg').classList.contains('active')) loadConvList(); }
-  if (e.data.type === 'map_update') { if (document.getElementById('s-home').classList.contains('active')) renderHome(); }
-});
-function getUsers()  { return DB.get('users')  || {}; }
-function setUsers(u) { DB.set('users', u); }
-function getMaps()   { return DB.get('maps')   || {}; }
-function setMaps(m)  { DB.set('maps', m); BC.postMessage({ type: 'map_update' }); }
-function getConvs()  { return DB.get('convs')  || {}; }
-function setConvs(c) { DB.set('convs', c); BC.postMessage({ type: 'msg_update' }); }
-function nextId(type) { const k = 'ctr_' + type; let n = DB.get(k) || 1000; n++; DB.set(k, n); return String(n); }
+
+// Cache en memoria (se puebla al arrancar)
+let _usersCache = {};
+let _mapsCache  = {};
+let _convsCache = {};
+
+function getUsers()  { return _usersCache; }
+function getMaps()   { return _mapsCache;  }
+function getConvs()  { return _convsCache; }
+
+function setUsers(u) { _usersCache = u; }
+function setMaps(m)  { _mapsCache = m; }
+function setConvs(c) { _convsCache = c; }
+
+// API helpers
+async function api(method, path, body) {
+  try {
+    const opts = { method, headers: {'Content-Type':'application/json'} };
+    if (body) opts.body = JSON.stringify(body);
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch(e) { console.warn('[API]', path, e.message); return { ok: false }; }
+}
+
+// Cargar todos los datos del servidor
+async function loadServerData() {
+  const uid = ME ? ME.id : null;
+  const [uRes, mRes] = await Promise.all([
+    api('GET', '/api/users'),
+    api('GET', '/api/maps' + (uid ? '?userId='+uid : ''))
+  ]);
+  if (uRes.ok) _usersCache = uRes.users;
+  if (mRes.ok) _mapsCache  = mRes.maps;
+  if (uid) {
+    const cRes = await api('GET', '/api/convs/' + uid);
+    if (cRes.ok) _convsCache = cRes.convs;
+  }
+}
+
+// Guardar usuario en servidor
+async function saveUserToServer(u) {
+  const { pw: _, ...safe } = u;
+  await api('POST', '/api/user/' + u.id, safe);
+  _usersCache[u.id] = safe;
+}
+
+// Guardar mapa en servidor
+async function saveMapToServer(m) {
+  await api('POST', '/api/maps', m);
+  _mapsCache[m.id] = m;
+}
+
+// Borrar mapa del servidor
+async function deleteMapFromServer(id) {
+  await api('DELETE', '/api/maps/' + id);
+  delete _mapsCache[id];
+}
+
+// Guardar mensaje en servidor
+async function saveMsgToServer(convId, msg) {
+  await api('POST', '/api/convs/' + convId, { msg });
+  _convsCache[convId] = _convsCache[convId] || [];
+  _convsCache[convId].push(msg);
+}
+
+function nextId(type) {
+  const k = 'ctr_' + type; let n = DB.get(k) || 1000; n++; DB.set(k, n); return String(n);
+}
 const AV_COLORS = ['#5b8def','#8b5cf6','#ec4899','#22d3a6','#f59e0b','#ef4444','#f97316','#38bdf8','#a78bfa'];
 function randColor() { return AV_COLORS[Math.floor(Math.random() * AV_COLORS.length)]; }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -671,48 +728,91 @@ function dateStr(iso) { return new Date(iso).toLocaleDateString('es-AR',{year:'n
 let ME = null;
 function swapForm(to) { document.getElementById('form-login').style.display = to === 'login' ? '' : 'none'; document.getElementById('form-reg').style.display = to === 'reg' ? '' : 'none'; document.getElementById('auth-err').style.display = 'none'; }
 function authErr(m) { const e = document.getElementById('auth-err'); e.textContent = m; e.style.display = 'block'; }
-function doLogin() {
+async function doLogin() {
   const u = document.getElementById('a-u').value.trim();
   const p = document.getElementById('a-p').value;
   if (!u || !p) { authErr('Completá los campos.'); return; }
-  const users = getUsers();
-  const found = Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase());
-  if (!found) { authErr('Usuario no encontrado. \u00bfEscribiste bien el nombre?'); return; }
   const pwHash = btoa(unescape(encodeURIComponent(p)));
   const pwLegacy = btoa(p);
-  if (found.pw !== pwHash && found.pw !== pwLegacy) { authErr('Contrase\u00f1a incorrecta.'); return; }
-  if (found.pw === pwLegacy && found.pw !== pwHash) { found.pw = pwHash; users[found.id] = found; setUsers(users); }
-  loginAs(getUsers()[found.id] || found);
+  // Intentar con servidor
+  let res = await api('POST', '/api/login', { username: u, pw: pwHash });
+  if (!res.ok) res = await api('POST', '/api/login', { username: u, pw: pwLegacy });
+  if (!res.ok) {
+    if (res.banned) { showBanScreenData(res.banned); return; }
+    authErr(res.err || 'Error al iniciar sesión');
+    return;
+  }
+  loginAs(res.user);
 }
-function doRegister() {
+async function doRegister() {
   const u = document.getElementById('r-u').value.trim();
   const p = document.getElementById('r-p').value;
   const p2 = document.getElementById('r-p2').value;
-  if (!u || !p) { authErr('Complet\u00e1 todos los campos.'); return; }
-  if (u.length < 3) { authErr('M\u00ednimo 3 caracteres en el nombre.'); return; }
-  if (p.length < 6) { authErr('La contrase\u00f1a necesita al menos 6 caracteres.'); return; }
-  if (p !== p2) { authErr('Las contrase\u00f1as no coinciden.'); return; }
-  const users = getUsers();
-  if (Object.values(users).find(x => x.username && x.username.toLowerCase() === u.toLowerCase())) { authErr('Ese nombre ya est\u00e1 en uso.'); return; }
+  if (!u || !p) { authErr('Completá todos los campos.'); return; }
+  if (u.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; }
+  if (p.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; }
+  if (p !== p2) { authErr('Las contraseñas no coinciden.'); return; }
+  const pwHash = btoa(unescape(encodeURIComponent(p)));
   const id = nextId('user');
-  const nu = { id, username: u, pw: btoa(unescape(encodeURIComponent(p))), created: new Date().toISOString(), color: randColor(), friends: [], games: [], visits: 0, bio: '' };
-  users[id] = nu; setUsers(users); loginAs(nu);
+  const res = await api('POST', '/api/register', { username: u, pw: pwHash, color: randColor(), id });
+  if (!res.ok) { authErr(res.err || 'Error al registrarse'); return; }
+  loginAs(res.user);
 }
 function loginAs(u) {
-  const users = getUsers();
-  u = { ...(users[u.id] || {}), ...u };
-  users[u.id] = u; setUsers(users);
-  ME = u; DB.set('session', u.id); bootApp();
+  ME = u; DB.set('session', u.id); DB.set('session_user', JSON.stringify(u));
+  bootApp();
 }
-function trySession() {
+async function trySession() {
   const sid = DB.get('session'); if (!sid) return false;
-  const u = getUsers()[sid];
-  if (!u || !u.username || !u.id) { DB.del('session'); return false; }
-  ME = u; return true;
+  // Intentar cargar del servidor
+  const res = await api('GET', '/api/user/' + sid);
+  if (res.ok && res.user && res.user.username) {
+    if (res.user.banned) {
+      const isPerm = res.user.banned.permanent;
+      const expiry = res.user.banned.until ? new Date(res.user.banned.until) : null;
+      if (isPerm || (expiry && expiry > new Date())) {
+        ME = res.user; showBanScreenData(res.user.banned); return true;
+      }
+    }
+    ME = res.user; return true;
+  }
+  // Fallback a caché local
+  try {
+    const cached = JSON.parse(DB.get('session_user') || 'null');
+    if (cached && cached.id === sid) { ME = cached; return true; }
+  } catch {}
+  DB.del('session'); return false;
 }
-function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
+function showBanScreenData(b) {
+  document.getElementById('s-auth').classList.remove('active');
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const durTxt = b.permanent ? 'PERMANENTE' : ('Hasta: ' + new Date(b.until).toLocaleString('es-AR'));
+  if (!document.getElementById('ban-screen')) {
+    document.body.insertAdjacentHTML('beforeend',
+      '<div id="ban-screen" style="position:fixed;inset:0;background:#080a0f;display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:16px;padding:24px">'+
+      '<div style="font-size:48px">🚫</div>'+
+      '<div style="font-family:var(--display);font-size:28px;font-weight:800;color:var(--red)">Cuenta Suspendida</div>'+
+      '<div style="background:var(--bg2);border:1px solid rgba(239,68,68,.3);border-radius:14px;padding:20px;max-width:400px;width:100%;display:flex;flex-direction:column;gap:10px">'+
+      '<div><span style="color:var(--text3);font-size:11px">DURACIÓN</span><div style="font-weight:700;color:var(--red)">'+durTxt+'</div></div>'+
+      '<div><span style="color:var(--text3);font-size:11px">MOTIVO</span><div style="font-weight:600">'+esc(b.reason||'Sin motivo')+'</div></div>'+
+      (b.notes ? '<div><span style="color:var(--text3);font-size:11px">NOTAS</span><div style="font-size:13px;color:var(--text2)">'+esc(b.notes)+'</div></div>' : '')+
+      '</div>'+
+      '<button class="btn btn-g" onclick="DB.del('session');location.reload()">← Cerrar sesión</button>'+
+      '</div>');
+  }
+}
+function saveMe() {
+  _usersCache[ME.id] = ME;
+  DB.set('session_user', JSON.stringify(ME));
+  saveUserToServer(ME).catch(()=>{});
+}
 function bootApp() {
   ensureDefaultMaps();
+  // Cargar datos globales del servidor
+  loadServerData().then(() => {
+    renderHome();
+    if (document.getElementById('s-discover').classList.contains('active')) renderDiscover();
+  }).catch(()=>{});
   // Verificar ban
   if (ME.banned) {
     const now = new Date();
@@ -740,6 +840,8 @@ function bootApp() {
     document.querySelector('.nav-tabs').appendChild(adminBtn);
   }
   ME.onlineAt = Date.now(); saveMe();
+  // Avisar al servidor que estamos online
+  if (socket && socket.connected) socket.emit('user_online', { userId: ME.id, username: ME.username, color: ME.color });
   window.addEventListener('beforeunload', () => { if(ME){ME.onlineAt=null;saveMe();} });
   goTab('home'); checkNotifs();
 }
@@ -851,7 +953,14 @@ function toggleLike(mapId, btn) {
   else { ME.liked.splice(idx,1); m.likes = Math.max(0,(m.likes||1)-1); btn.innerHTML = '\uD83E\uDD0D '+m.likes; btn.className = 'btn btn-g'; }
   saveMe(); maps[mapId] = m; setMaps(maps);
 }
-function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
+async function deleteMap(id) {
+  const maps = getMaps();
+  if (!maps[id] || (maps[id].authorId !== ME.id && !isAdmin())) { showToast('No podés borrar este mapa'); return; }
+  if (!confirm('¿Borrar "' + maps[id].name + '"?')) return;
+  await deleteMapFromServer(id);
+  ME.games = (ME.games||[]).filter(g => g !== id); saveMe();
+  showToast('🗑️ Mapa eliminado'); renderHome();
+}
 function editMap(id) { stMapId = id; initStudio(); goTab('studio'); }
 function handleUpload(e) {
   const file = e.target.files[0]; if (!file) return;
@@ -884,26 +993,21 @@ function handleUpload(e) {
         if (p.scripts) mapData.scripts = p.scripts;
       } catch {}
     }
-    maps[id] = mapData; setMaps(maps);
-    ME.games = ME.games || []; ME.games.push(id); saveMe();
-    showToast('✅ Importado: ' + mapData.name); renderHome();
+    saveMapToServer(mapData).then(()=>{ ME.games = ME.games || []; ME.games.push(id); saveMe(); showToast('✅ Importado: ' + mapData.name); renderHome(); });
   };
   if (file.type.startsWith('image/')) reader.readAsDataURL(file);
   else reader.readAsText(file);
   e.target.value = '';
 }
-function createNewGame() {
+async function createNewGame() {
   const id = nextId('map');
   const maps = getMaps();
   const name = 'Mi Juego ' + (Object.values(maps).filter(m => m.authorId === ME.id).length + 1);
-  const m = {
-    id, name, desc: '', genre: 'adventure',
+  const m = { id, name, desc: '', genre: 'adventure', privacy: 'public',
     authorId: ME.id, authorName: ME.username,
     plays: 0, likes: 0, created: new Date().toISOString(),
-    parts: [...defaultParts()], scripts: [], thumb: null,
-    htmlContent: null, isHtmlGame: false
-  };
-  maps[id] = m; setMaps(maps);
+    parts: [...defaultParts()], scripts: [], thumb: null, htmlContent: null, isHtmlGame: false };
+  await saveMapToServer(m);
   ME.games = ME.games || []; ME.games.push(id); saveMe();
   stMapId = id; goTab('studio');
   showToast('✅ Nuevo juego creado: ' + name);
@@ -1088,7 +1192,12 @@ function renderConv(cid, userId) { const users = getUsers(); const other = users
 function sendMsg() { if (!activeConvId) return; const inp = document.getElementById('msg-text'); const text = inp.value.trim(); if (!text) return; pushMsg(activeConvId, { type:'text', text, from:ME.id, time:timeStr(), read:false }); inp.value = ''; inp.style.height = ''; }
 function msgKeydown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } }
 function autoResize(t) { t.style.height = ''; t.style.height = Math.min(t.scrollHeight, 110) + 'px'; }
-function pushMsg(cid, msg) { const convs = getConvs(); convs[cid] = convs[cid] || []; convs[cid].push(msg); setConvs(convs); const otherId = cid.split('_').find(p => p !== ME.id); renderConv(cid, otherId); loadConvList(); }
+function pushMsg(cid, msg) {
+  _convsCache[cid] = _convsCache[cid] || []; _convsCache[cid].push(msg);
+  saveMsgToServer(cid, msg).catch(()=>{});
+  const otherId = cid.split('_').find(p => p !== ME.id);
+  renderConv(cid, otherId); loadConvList();
+}
 function sendFile(e) { if (!activeConvId) return; const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { const isImg = file.type.startsWith('image/'); pushMsg(activeConvId, { type:isImg?'image':'file', data:ev.target.result, filename:file.name, from:ME.id, time:timeStr(), read:false }); }; reader.readAsDataURL(file); e.target.value = ''; }
 function filterConvs(q) { document.querySelectorAll('.msg-conv').forEach(el => { const name = el.querySelector('.conv-name').textContent.toLowerCase(); el.style.display = name.includes(q.toLowerCase()) ? '' : 'none'; }); }
 let mediaRec = null, audioChunks = [];
@@ -1222,12 +1331,20 @@ function toggleFolder(el) { el.classList.toggle('open'); }
 function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖'}[t]||'📦'; }
 function updateStStatus() { document.getElementById('stu-status').textContent = `${stParts.length} partes · ${stScripts.length} scripts · #${stMapId||'?'}`; }
 function delScript(id) { stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
-function stuSave() { if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); setMaps(maps); showToast('💾 Guardado'); }
+function stuSave() {
+  if (!stMapId) return;
+  const maps = getMaps();
+  if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; }
+  maps[stMapId].parts = stParts.map(p => ({...p.data}));
+  maps[stMapId].scripts = stScripts.map(s => ({...s}));
+  if (maps[stMapId].lighting === undefined) maps[stMapId].lighting = {...stLighting};
+  saveMapToServer(maps[stMapId]).then(() => showToast('💾 Guardado')).catch(() => showToast('💾 Guardado localmente'));
+}
 function stuTest() { stuSave(); if (stMapId) playMap(stMapId); }
 let pubThumbData = null;
 function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; openModal('mo-publish'); }
 function previewThumb(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { pubThumbData = ev.target.result; document.getElementById('pub-thumb-name').textContent = f.name; const canvas = document.getElementById('pub-thumb-preview'); const img = new Image(); img.onload = () => { canvas.style.display='block'; canvas.getContext('2d').drawImage(img,0,0,canvas.width=canvas.clientWidth,canvas.height=canvas.clientWidth*9/16); }; img.src = pubThumbData; }; r.readAsDataURL(f); }
-function confirmPublish() {
+async function confirmPublish() {
   const name = document.getElementById('pub-name').value.trim();
   const desc = document.getElementById('pub-desc').value.trim();
   const genre = document.getElementById('pub-genre').value;
@@ -1240,7 +1357,9 @@ function confirmPublish() {
   m.assignedPlayers = privacy === 'assigned' ? assignedRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
   m.authorId = ME.id; m.authorName = ME.username;
   if (pubThumbData) m.thumb = pubThumbData;
-  setMaps(maps); closeModal('mo-publish'); showToast('🚀 ¡Publicado!');
+  await saveMapToServer(m);
+  ME.games = ME.games || []; if (!ME.games.includes(m.id)) ME.games.push(m.id); saveMe();
+  closeModal('mo-publish'); showToast('🚀 ¡Publicado!');
 }
 const NPC_LIB = [{id:'dummy',name:'Dummy',icon:'🪆',type:'Humanoid',color:'#cc6644',hp:100},{id:'zombie',name:'Zombie',icon:'🧟',type:'Enemy',color:'#3d6e3d',hp:50},{id:'robot',name:'Robot',icon:'🤖',type:'NPC',color:'#4466aa',hp:200},{id:'merchant',name:'Comerciante',icon:'🧙',type:'Friendly',color:'#cc9933',hp:100},{id:'guard',name:'Guardia',icon:'💂',type:'Friendly',color:'#334488',hp:150},{id:'cat',name:'Gato',icon:'🐱',type:'Passive',color:'#aaaaaa',hp:30}];
 function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
@@ -1307,7 +1426,41 @@ function exitGame() { gKeys = {}; netLeaveGame(); document.getElementById('s-gam
 let socket = null, netConnected = false, netCurrentMapId = null, netTick = 0;
 const NET_RATE = 3;
 let remotePlayers = {};
-function netConnect() { const serverUrl = window.location.origin; try { socket = io(serverUrl, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 1500, reconnectionAttempts: 10 }); } catch(e) { console.warn('[NET] Socket.IO no disponible — modo offline'); return; } socket.on('connect', () => { netConnected = true; updateNetPill('🟢', socket.id?.substring(0,6)); if (netCurrentMapId) netJoinGame(netCurrentMapId); }); socket.on('disconnect', () => { netConnected = false; updateNetPill('🔴', 'Offline'); clearRemotePlayers(); }); socket.on('connect_error', () => { netConnected = false; updateNetPill('🟡', 'Sin servidor'); }); socket.on('room_state', ({ players, chat, mapId }) => { clearRemotePlayers(); players.forEach(p => spawnRemote(p)); if (chat?.length) chat.forEach(msg => addGMsg(`${msg.username}: ${msg.text}`, 'chat')); updateNetPill('🟢', `${players.length + 1} jugadores`); }); socket.on('join_ack', ({ playerCount }) => { updateNetPill('🟢', `${playerCount} jugador${playerCount !== 1 ? 'es' : ''}`); addGMsg(`✅ Conectado (${playerCount} en sala)`, 'sys'); }); socket.on('player_joined', (playerData) => { spawnRemote(playerData); addGMsg(`→ ${playerData.username} entró`, 'sys'); updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('player_moved', ({ socketId, x, y, z, ry, anim, moving }) => { const rp = remotePlayers[socketId]; if (!rp) return; rp.targetPos.set(x, y, z); rp.targetRY = ry; rp.anim = anim; rp.moving = moving; }); socket.on('player_left', ({ socketId }) => { const rp = remotePlayers[socketId]; if (rp) { if (gScene) gScene.remove(rp.group); addGMsg(`← ${rp.data.username} salió`, 'sys'); delete remotePlayers[socketId]; } updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('game_chat', ({ socketId, username, text }) => { if (socketId === socket.id) return; addGMsg(`${username}: ${text}`, 'chat'); }); socket.on('pong_res', (ts) => { const ping = Date.now() - ts; const pill = document.getElementById('g-net-pill'); if (pill) pill.textContent = `🟢 ${Object.keys(remotePlayers).length + 1}p · ${ping}ms`; }); }
+function netConnect() { const serverUrl = window.location.origin; try { socket = io(serverUrl, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 1500, reconnectionAttempts: 10 }); } catch(e) { console.warn('[NET] Socket.IO no disponible — modo offline'); return; } socket.on('connect', () => { netConnected = true; updateNetPill('🟢', socket.id?.substring(0,6)); if (netCurrentMapId) netJoinGame(netCurrentMapId); }); socket.on('disconnect', () => { netConnected = false; updateNetPill('🔴', 'Offline'); clearRemotePlayers(); }); socket.on('connect_error', () => { netConnected = false; updateNetPill('🟡', 'Sin servidor'); }); socket.on('room_state', ({ players, chat, mapId }) => { clearRemotePlayers(); players.forEach(p => spawnRemote(p)); if (chat?.length) chat.forEach(msg => addGMsg(`${msg.username}: ${msg.text}`, 'chat')); updateNetPill('🟢', `${players.length + 1} jugadores`); }); socket.on('join_ack', ({ playerCount }) => { updateNetPill('🟢', `${playerCount} jugador${playerCount !== 1 ? 'es' : ''}`); addGMsg(`✅ Conectado (${playerCount} en sala)`, 'sys'); }); socket.on('player_joined', (playerData) => { spawnRemote(playerData); addGMsg(`→ ${playerData.username} entró`, 'sys'); updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('player_moved', ({ socketId, x, y, z, ry, anim, moving }) => { const rp = remotePlayers[socketId]; if (!rp) return; rp.targetPos.set(x, y, z); rp.targetRY = ry; rp.anim = anim; rp.moving = moving; }); socket.on('player_left', ({ socketId }) => { const rp = remotePlayers[socketId]; if (rp) { if (gScene) gScene.remove(rp.group); addGMsg(`← ${rp.data.username} salió`, 'sys'); delete remotePlayers[socketId]; } updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('game_chat', ({ socketId, username, text }) => { if (socketId === socket.id) return; addGMsg(`${username}: ${text}`, 'chat'); }); socket.on('pong_res', (ts) => { const ping = Date.now() - ts; const pill = document.getElementById('g-net-pill'); if (pill) pill.textContent = '🟢 ' + (Object.keys(remotePlayers).length + 1) + 'p · ' + ping + 'ms'; });
+
+  socket.on('user_updated', ({ userId }) => {
+    api('GET', '/api/user/' + userId).then(r => {
+      if (r.ok) { _usersCache[userId] = r.user; if (viewingUserId === userId) renderProfile(userId); }
+    });
+  });
+  socket.on('map_updated', () => {
+    api('GET', '/api/maps' + (ME ? '?userId='+ME.id : '')).then(r => {
+      if (r.ok) { _mapsCache = r.maps; if (document.getElementById('s-home').classList.contains('active')) renderHome(); }
+    });
+  });
+  socket.on('map_deleted', ({ mapId }) => {
+    delete _mapsCache[mapId];
+    if (document.getElementById('s-home').classList.contains('active')) renderHome();
+  });
+  socket.on('online_update', ({ userId, online }) => {
+    if (_usersCache[userId]) _usersCache[userId].onlineAt = online ? Date.now() : null;
+    if (viewingUserId === userId) renderProfile(userId);
+  });
+  socket.on('new_private_msg', ({ convId, msg }) => {
+    _convsCache[convId] = _convsCache[convId] || []; _convsCache[convId].push(msg);
+    if (document.getElementById('s-msg').classList.contains('active')) {
+      loadConvList();
+      if (activeConvId === convId) { const otherId = convId.split('_').find(p => p !== ME.id); renderConv(convId, otherId); }
+    }
+    checkNotifs();
+  });
+  socket.on('connect', () => {
+    netConnected = true;
+    if (ME) socket.emit('user_online', { userId: ME.id, username: ME.username, color: ME.color });
+    if (netCurrentMapId) netJoinGame(netCurrentMapId);
+    updateNetPill('🟢', socket.id?.substring(0,6));
+  });
+}
 function netJoinGame(mapId) { if (!socket || !netConnected || !ME) return; netCurrentMapId = mapId; socket.emit('join_game', { mapId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def' }); }
 function netLeaveGame() { if (!socket || !netConnected) return; socket.emit('leave_game'); clearRemotePlayers(); netCurrentMapId = null; const pill = document.getElementById('g-net-pill'); if (pill) pill.style.display = 'none'; }
 function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
@@ -1356,8 +1509,15 @@ function _patchGameLoopWithNet() { if (_netPatchApplied) return; _netPatchApplie
 const _origPlayMap = window.playMap;
 window.playMap = function(mapId) { _origPlayMap(mapId); setTimeout(() => { netJoinGame(mapId); _patchGameLoopWithNet(); }, 200); };
 ensureDefaultMaps();
-if (trySession()) bootApp();
-else document.getElementById('s-auth').classList.add('active');
+(async () => {
+  // Cargar usuarios/mapas públicos antes de mostrar auth
+  const [uRes, mRes] = await Promise.all([api('GET','/api/users'), api('GET','/api/maps')]);
+  if (uRes.ok) _usersCache = uRes.users;
+  if (mRes.ok) _mapsCache = mRes.maps;
+  const ok = await trySession();
+  if (ok && ME && !ME.banned) bootApp();
+  else if (!ok) document.getElementById('s-auth').classList.add('active');
+})();
 document.getElementById('a-p').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 document.getElementById('r-p2').addEventListener('keydown', e => { if(e.key==='Enter') doRegister(); });
 document.getElementById('nav-search-inp').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(e.target.value); });
