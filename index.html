@@ -797,7 +797,7 @@ function showBanScreenData(b) {
       '<div><span style="color:var(--text3);font-size:11px">MOTIVO</span><div style="font-weight:600">'+esc(b.reason||'Sin motivo')+'</div></div>'+
       (b.notes ? '<div><span style="color:var(--text3);font-size:11px">NOTAS</span><div style="font-size:13px;color:var(--text2)">'+esc(b.notes)+'</div></div>' : '')+
       '</div>'+
-      '<button class="btn btn-g" onclick="DB.del('session');location.reload()">← Cerrar sesión</button>'+
+      '<button class="btn btn-g" onclick="DB.del(\'session\');location.reload()">← Cerrar sesión</button>'+
       '</div>');
   }
 }
