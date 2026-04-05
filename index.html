@@ -499,8 +499,8 @@ input,select,textarea{font-family:var(--font);}
     <div id="msg-messages"></div>
     <div id="msg-input-area">
       <div id="msg-input-row">
-        <label class="mic-btn" title="Archivo">
-          📎<input type="file" style="display:none" id="file-attach" onchange="sendFile(event)">
+        <label class="mic-btn" title="Imagen/Video/Archivo">
+          📎<input type="file" style="display:none" id="file-attach" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.zip,.txt" onchange="sendFile(event)">
         </label>
         <button class="mic-btn" id="rec-btn" onclick="toggleRecord()" title="Audio">🎤</button>
         <textarea id="msg-text" rows="1" placeholder="Escribí un mensaje..." onkeydown="msgKeydown(event)" oninput="autoResize(this)"></textarea>
@@ -834,7 +834,18 @@ async function trySession() {
         ME = res.user; showBanScreenData(res.user.banned); return true;
       }
     }
-    ME = res.user; return true;
+    ME = res.user;
+    // Cargar solicitudes pendientes desde el servidor
+    if (res.user.friendRequests_recv && res.user.friendRequests_recv.length > 0) {
+      // Asegurar que están en caché
+      for (const fid of res.user.friendRequests_recv) {
+        if (!_usersCache[fid]) {
+          const fr = await api('GET', '/api/user/'+fid).catch(()=>({ok:false}));
+          if (fr.ok) _usersCache[fid] = fr.user;
+        }
+      }
+    }
+    return true;
   }
   // Fallback a caché local
   try {
@@ -900,6 +911,10 @@ function bootApp() {
     document.querySelector('.nav-tabs').appendChild(adminBtn);
   }
   ME.onlineAt = Date.now(); saveMe();
+  // Pedir permisos de notificación del navegador
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
   // Avisar al servidor que estamos online
   if (socket && socket.connected) socket.emit('user_online', { userId: ME.id, username: ME.username, color: ME.color });
   window.addEventListener('beforeunload', () => { if(ME){ME.onlineAt=null;saveMe();} });
@@ -938,7 +953,23 @@ function goTab(t, extra) {
 function showToast(m, dur = 3000) { const t = document.getElementById('toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = 'none', dur); }
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-function checkNotifs() { const convs = getConvs(); let total = 0; (ME.friends||[]).forEach(fid => { const cid = convId(ME.id, fid); const msgs = convs[cid] || []; total += msgs.filter(m => m.from !== ME.id && !m.read).length; }); document.getElementById('notif-dot').style.display = total > 0 ? 'block' : 'none'; }
+function checkNotifs() {
+  const convs = getConvs();
+  let total = 0;
+  // Mensajes no leídos
+  (ME.friends||[]).forEach(fid => {
+    const cid = convId(ME.id, fid);
+    const msgs = convs[cid] || [];
+    total += msgs.filter(m => m.from !== ME.id && !m.read).length;
+  });
+  // Solicitudes de amistad pendientes
+  total += (ME.friendRequests_recv||[]).length;
+  document.getElementById('notif-dot').style.display = total > 0 ? 'block' : 'none';
+  // Badge numérico en el tab de chat
+  const msgTab = document.querySelector('.nav-tab[onclick*="msg"]');
+  if (msgTab && total > 0) msgTab.textContent = '💬 Chat (' + total + ')';
+  else if (msgTab) msgTab.textContent = '💬 Chat';
+}
 function ensureDefaultMaps() {
   const maps = getMaps();
   ['sys1','sys2','sys3','sys4'].forEach(id => { if (maps[id]) delete maps[id]; });
@@ -1262,12 +1293,52 @@ function toggleFollow(uid) {
   saveMe(); renderProfile(viewingUserId);
 }
 async function addFriend(uid) {
+  if (uid === ME.id) { showToast('No podés agregarte a vos mismo'); return; }
   if ((ME.friends||[]).includes(uid)) { showToast('Ya son amigos'); return; }
-  ME.friends = ME.friends || []; ME.friends.push(uid);
-  await saveUserToServer(ME);
-  showToast('✅ Amigo agregado'); renderProfile(viewingUserId);
+  // Verificar si ya mandaste solicitud
+  const myReqs = ME.friendRequests_sent || [];
+  if (myReqs.includes(uid)) { showToast('Ya mandaste solicitud, esperá que la acepten'); return; }
+  // Mandar solicitud al servidor
+  const res = await api('POST', '/api/friend-request', { fromId: ME.id, toId: uid });
+  if (!res.ok) { showToast('Error: ' + (res.err||'no se pudo enviar')); return; }
+  ME.friendRequests_sent = [...myReqs, uid];
+  saveMe();
+  showToast('✅ Solicitud de amistad enviada');
+  renderProfile(viewingUserId);
 }
-function addFriendByName() { const val = (document.getElementById('add-friend-inp')||{}).value; if (!val) return; const name = val.trim(); const found = Object.values(getUsers()).find(u => u.username.toLowerCase() === name.toLowerCase()); if (!found) { showToast('❌ Usuario no encontrado'); return; } if (found.id === ME.id) { showToast('No podés agregarte a vos mismo'); return; } addFriend(found.id); document.getElementById('add-friend-inp').value = ''; }
+async function acceptFriend(uid) {
+  const res = await api('POST', '/api/friend-accept', { fromId: uid, toId: ME.id });
+  if (!res.ok) { showToast('Error aceptando solicitud'); return; }
+  // Actualizar local
+  ME.friends = ME.friends || [];
+  if (!ME.friends.includes(uid)) ME.friends.push(uid);
+  ME.friendRequests_recv = (ME.friendRequests_recv||[]).filter(id => id !== uid);
+  saveMe();
+  // Recargar datos frescos del servidor
+  await loadServerData();
+  showToast('✅ ¡Ahora son amigos!');
+  renderProfile(ME.id);
+  checkNotifs();
+}
+async function rejectFriend(uid) {
+  await api('POST', '/api/friend-reject', { fromId: uid, toId: ME.id });
+  ME.friendRequests_recv = (ME.friendRequests_recv||[]).filter(id => id !== uid);
+  saveMe();
+  showToast('Solicitud rechazada');
+  renderProfile(ME.id);
+  checkNotifs();
+}
+function addFriendByName() {
+  const val = (document.getElementById('add-friend-inp')||{}).value;
+  if (!val) return;
+  const name = val.trim();
+  const found = Object.values(getUsers()).find(u => u.username && u.username.toLowerCase() === name.toLowerCase());
+  if (!found) { showToast('❌ Usuario no encontrado'); return; }
+  if (found.id === ME.id) { showToast('No podés agregarte a vos mismo'); return; }
+  addFriend(found.id);
+  const inp = document.getElementById('add-friend-inp');
+  if (inp) inp.value = '';
+}
 function editProfile() { const bio = prompt('Editá tu bio:', ME.bio || ''); if (bio === null) return; ME.bio = bio.slice(0, 120); saveMe(); renderProfile(ME.id); }
 function logout() {
   if (!confirm('\u00bfCerrar sesi\u00f3n?')) return;
@@ -1353,21 +1424,240 @@ function makeAdmin(uid) {
 let activeConvId = null;
 function convId(a, b) { return [a, b].sort().join('_'); }
 function openConvWith(userId) { goTab('msg'); const cid = convId(ME.id, userId); activeConvId = cid; loadConvList(); renderConv(cid, userId); }
-function loadConvList() { const users = getUsers(); const frds = (ME.friends||[]).map(fid => users[fid]).filter(Boolean); const el = document.getElementById('msg-list'); if (!frds.length) { el.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Sin amigos. Agregá desde Perfil.</div>'; checkNotifs(); return; } const convs = getConvs(); el.innerHTML = frds.map(f => { const cid = convId(ME.id, f.id); const msgs = convs[cid] || []; const last = msgs[msgs.length - 1]; const unread = msgs.filter(m => m.from !== ME.id && !m.read).length; const lastTxt = last ? (last.type === 'audio' ? '🎤 Audio' : last.type === 'file' ? '📎 Archivo' : last.type === 'image' ? '🖼 Imagen' : last.text) : 'Sin mensajes'; return `<div class="msg-conv ${activeConvId===cid?'active':''}" onclick="openConvWith('${f.id}')"><div class="conv-av" style="background:${f.color}">${f.username[0].toUpperCase()}</div><div class="conv-info"><div class="conv-name">${esc(f.username)}</div><div class="conv-last">${esc(lastTxt)}</div>${unread ? `<div class="unread-badge">${unread}</div>` : ''}</div></div>`; }).join(''); checkNotifs(); }
-function renderConv(cid, userId) { const users = getUsers(); const other = users[userId]; if (!other) return; document.getElementById('msg-hd-av').textContent = other.username[0].toUpperCase(); document.getElementById('msg-hd-av').style.background = other.color; document.getElementById('msg-hd-name').textContent = other.username; document.getElementById('msg-hd-sub').textContent = '#' + other.id; const convs = getConvs(); const msgs = convs[cid] || []; msgs.forEach(m => { if (m.from !== ME.id) m.read = true; }); convs[cid] = msgs; setConvs(convs); const el = document.getElementById('msg-messages'); el.innerHTML = msgs.map(m => { const isMe = m.from === ME.id; const cls = isMe ? 'me' : 'other'; let body = ''; if (m.type === 'text') body = `<div class="mb ${cls}">${esc(m.text)}</div>`; if (m.type === 'audio') body = `<div class="mb ${cls}" style="padding:8px 12px;display:flex;align-items:center;gap:8px">🎤<audio controls src="${m.data}" style="height:26px;max-width:170px"></audio></div>`; if (m.type === 'file') body = `<div class="mb ${cls}">📎 <a href="${m.data}" download="${m.filename}" style="color:var(--acc)">${esc(m.filename)}</a></div>`; if (m.type === 'image') body = `<div class="mb ${cls}" style="padding:4px"><img src="${m.data}" style="max-width:210px;border-radius:8px;display:block"></div>`; return `<div class="mb-wrap ${cls}">${body}<div class="mb-time">${m.time||''}</div></div>`; }).join(''); el.scrollTop = el.scrollHeight; }
-function sendMsg() { if (!activeConvId) return; const inp = document.getElementById('msg-text'); const text = inp.value.trim(); if (!text) return; pushMsg(activeConvId, { type:'text', text, from:ME.id, time:timeStr(), read:false }); inp.value = ''; inp.style.height = ''; }
+function loadConvList() {
+  const users = getUsers();
+  const el = document.getElementById('msg-list');
+  let html = '';
+
+  // ── Solicitudes de amistad pendientes ──
+  const pendingReqs = (ME.friendRequests_recv||[])
+    .map(fid => users[fid]).filter(Boolean);
+  if (pendingReqs.length > 0) {
+    html += '<div style="padding:8px 12px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--acc);text-transform:uppercase;border-bottom:1px solid var(--border)">Solicitudes ('+pendingReqs.length+')</div>';
+    html += pendingReqs.map(u =>
+      '<div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">'+
+      '<div class="conv-av" style="background:'+(u.color||'#5b8def')+';flex-shrink:0">'+u.username[0].toUpperCase()+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700">'+esc(u.username)+'</div>'+
+      '<div style="font-size:11px;color:var(--text2)">Quiere ser tu amigo</div></div>'+
+      '<div style="display:flex;gap:4px;flex-shrink:0">'+
+      '<button class="btn btn-green" style="font-size:11px;padding:4px 8px" onclick="acceptFriend(this.dataset.uid)" data-uid="'+u.id+'">✓</button>'+
+      '<button class="btn btn-red"   style="font-size:11px;padding:4px 8px" onclick="rejectFriend(this.dataset.uid)" data-uid="'+u.id+'">✗</button>'+
+      '</div></div>'
+    ).join('');
+  }
+
+  // ── Conversaciones con amigos ──
+  const frds = (ME.friends||[]).map(fid => users[fid]).filter(Boolean);
+  if (!frds.length && !pendingReqs.length) {
+    el.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Aún no tenés amigos.<br>Buscalos en Descubrir.</div>';
+    checkNotifs(); return;
+  }
+  const convs = getConvs();
+  // Ordenar por último mensaje
+  const frdsOrdered = [...frds].sort((a,b) => {
+    const ca = convs[convId(ME.id,a.id)]||[];
+    const cb = convs[convId(ME.id,b.id)]||[];
+    const la = ca[ca.length-1]?.time||'';
+    const lb = cb[cb.length-1]?.time||'';
+    return lb > la ? 1 : -1;
+  });
+  html += frdsOrdered.map(f => {
+    const cid = convId(ME.id, f.id);
+    const msgs = convs[cid] || [];
+    const last = msgs[msgs.length-1];
+    const unread = msgs.filter(m => m.from !== ME.id && !m.read).length;
+    const isOnline = f.onlineAt && (Date.now()-f.onlineAt<120000);
+    let lastTxt = 'Sin mensajes';
+    if (last) {
+      if (last.type==='audio') lastTxt='🎤 Audio';
+      else if (last.type==='file') lastTxt='📎 '+esc(last.filename||'Archivo');
+      else if (last.type==='image') lastTxt='🖼 Imagen';
+      else if (last.type==='video') lastTxt='🎥 Video';
+      else lastTxt = esc((last.text||'').substring(0,40));
+    }
+    return '<div class="msg-conv '+(activeConvId===cid?'active':'')+'" onclick="openConvWith(this.dataset.uid)" data-uid="'+f.id+'">'+
+      '<div style="position:relative;flex-shrink:0">'+
+      '<div class="conv-av" style="background:'+(f.color||'#5b8def')+'">'+f.username[0].toUpperCase()+'</div>'+
+      '<div style="position:absolute;bottom:0;right:0;width:9px;height:9px;border-radius:50%;background:'+(isOnline?'var(--green)':'var(--text3)')+';border:2px solid var(--bg2)"></div>'+
+      '</div>'+
+      '<div class="conv-info">'+
+      '<div class="conv-name">'+esc(f.username)+'</div>'+
+      '<div class="conv-last">'+lastTxt+'</div>'+
+      '</div>'+
+      (unread?'<div class="unread-badge">'+unread+'</div>':'')+
+      '</div>';
+  }).join('');
+  el.innerHTML = html;
+  checkNotifs();
+}
+function renderConv(cid, userId) {
+  const users = getUsers();
+  const other = users[userId];
+  if (!other) return;
+  // NUNCA mezclar datos: verificar que el cid corresponde a ME.id y userId
+  const expectedCid = convId(ME.id, userId);
+  if (cid !== expectedCid) { console.error('[MSG] convId no coincide!', cid, expectedCid); return; }
+
+  document.getElementById('msg-hd-av').textContent = other.username[0].toUpperCase();
+  document.getElementById('msg-hd-av').style.background = other.color||'#5b8def';
+  document.getElementById('msg-hd-name').textContent = other.username;
+  document.getElementById('msg-hd-sub').textContent = '#' + other.id;
+
+  const convs = getConvs();
+  const msgs = (convs[cid] || []);
+  // Marcar como leídos solo los del otro
+  let changed = false;
+  msgs.forEach(m => { if (m.from !== ME.id && !m.read) { m.read = true; changed = true; } });
+  if (changed) { _convsCache[cid] = msgs; }
+
+  const el = document.getElementById('msg-messages');
+  el.innerHTML = msgs.map(m => {
+    // Verificar que el mensaje pertenece a esta conversación
+    if (m.from !== ME.id && m.from !== userId) return '';
+    const isMe = m.from === ME.id;
+    const cls = isMe ? 'me' : 'other';
+    let body = '';
+
+    if (m.type === 'text') {
+      // Permitir TODOS los caracteres — solo escapar HTML peligroso
+      body = '<div class="mb '+cls+'" style="white-space:pre-wrap;word-break:break-word">'+esc(m.text||'')+'</div>';
+    }
+    else if (m.type === 'audio') {
+      if (m.data && m.data.length > 50) {
+        body = '<div class="mb '+cls+'" style="padding:8px 12px;display:flex;align-items:center;gap:8px;min-width:200px">'+
+               '🎤 <audio controls preload="auto" style="flex:1;height:32px;max-width:200px">'+
+               '<source src="'+m.data+'" type="audio/webm">'+
+               '<source src="'+m.data+'" type="audio/ogg">'+
+               '<source src="'+m.data+'" type="audio/mp4">'+
+               'Tu navegador no soporta audio.</audio></div>';
+      } else {
+        body = '<div class="mb '+cls+'">🎤 Audio (sin datos)</div>';
+      }
+    }
+    else if (m.type === 'video') {
+      if (m.data && m.data.length > 50) {
+        body = '<div class="mb '+cls+'" style="padding:4px">'+
+               '<video controls preload="metadata" style="max-width:260px;border-radius:8px;display:block;background:#000">'+
+               '<source src="'+m.data+'">'+
+               '</video></div>';
+      } else {
+        body = '<div class="mb '+cls+'">🎥 Video (sin datos)</div>';
+      }
+    }
+    else if (m.type === 'file') {
+      body = '<div class="mb '+cls+'">📎 <a href="'+m.data+'" download="'+esc(m.filename||'archivo')+'" style="color:var(--acc)">'+esc(m.filename||'archivo')+'</a></div>';
+    }
+    else if (m.type === 'image') {
+      body = '<div class="mb '+cls+'" style="padding:4px"><img src="'+m.data+'" style="max-width:220px;border-radius:8px;display:block;cursor:pointer" onclick="window.open(this.src)"></div>';
+    }
+
+    const senderName = isMe ? '' : '<div style="font-size:10px;color:var(--text3);margin-bottom:2px">'+esc(other.username)+'</div>';
+    return '<div class="mb-wrap '+cls+'">'+senderName+body+'<div class="mb-time">'+(m.time||'')+'</div></div>';
+  }).filter(Boolean).join('');
+  el.scrollTop = el.scrollHeight;
+  checkNotifs();
+}
+function sendMsg() {
+  if (!activeConvId) return;
+  const inp = document.getElementById('msg-text');
+  const text = inp.value; // NO trim() — preservar espacios y saltos de línea
+  if (!text || text.length === 0) return;
+  // Verificar que el destinatario es correcto
+  const otherId = activeConvId.split('_').find(p => p !== ME.id);
+  if (!otherId) return;
+  pushMsg(activeConvId, { type:'text', text, from:ME.id, time:timeStr(), read:false });
+  inp.value = '';
+  inp.style.height = '';
+}
 function msgKeydown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } }
 function autoResize(t) { t.style.height = ''; t.style.height = Math.min(t.scrollHeight, 110) + 'px'; }
 function pushMsg(cid, msg) {
-  _convsCache[cid] = _convsCache[cid] || []; _convsCache[cid].push(msg);
-  saveMsgToServer(cid, msg).catch(()=>{});
+  // Validar que el cid contiene el ID del usuario actual
+  if (!cid.split('_').includes(ME.id)) {
+    console.error('[MSG] convId no incluye ME.id — abortando para no mezclar cuentas', cid, ME.id);
+    return;
+  }
+  // Validar que el mensaje tiene from correcto
+  if (msg.from !== ME.id) {
+    console.error('[MSG] msg.from no coincide con ME.id', msg.from, ME.id);
+    return;
+  }
+  _convsCache[cid] = _convsCache[cid] || [];
+  _convsCache[cid].push(msg);
+  saveMsgToServer(cid, msg).catch(e => console.warn('[MSG] Error guardando:', e));
   const otherId = cid.split('_').find(p => p !== ME.id);
-  renderConv(cid, otherId); loadConvList();
+  if (otherId) { renderConv(cid, otherId); }
+  loadConvList();
 }
-function sendFile(e) { if (!activeConvId) return; const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { const isImg = file.type.startsWith('image/'); pushMsg(activeConvId, { type:isImg?'image':'file', data:ev.target.result, filename:file.name, from:ME.id, time:timeStr(), read:false }); }; reader.readAsDataURL(file); e.target.value = ''; }
+function sendFile(e) {
+  if (!activeConvId) return;
+  const file = e.target.files[0]; if (!file) return;
+  const MAX_MB = 10;
+  if (file.size > MAX_MB * 1024 * 1024) { showToast('Archivo demasiado grande (máx '+MAX_MB+'MB)'); e.target.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    if (!ev.target.result) return;
+    let type = 'file';
+    if (file.type.startsWith('image/')) type = 'image';
+    else if (file.type.startsWith('video/')) type = 'video';
+    pushMsg(activeConvId, {
+      type, data: ev.target.result,
+      filename: file.name, from: ME.id,
+      time: timeStr(), read: false
+    });
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+}
 function filterConvs(q) { document.querySelectorAll('.msg-conv').forEach(el => { const name = el.querySelector('.conv-name').textContent.toLowerCase(); el.style.display = name.includes(q.toLowerCase()) ? '' : 'none'; }); }
 let mediaRec = null, audioChunks = [];
-function toggleRecord() { const btn = document.getElementById('rec-btn'); if (mediaRec && mediaRec.state === 'recording') { mediaRec.stop(); btn.classList.remove('rec'); btn.textContent = '🎤'; } else { navigator.mediaDevices.getUserMedia({audio:true}).then(stream => { audioChunks = []; mediaRec = new MediaRecorder(stream); mediaRec.ondataavailable = e => audioChunks.push(e.data); mediaRec.onstop = () => { const blob = new Blob(audioChunks, {type:'audio/webm'}); const r = new FileReader(); r.onload = ev => { if (activeConvId) pushMsg(activeConvId, {type:'audio',data:ev.target.result,from:ME.id,time:timeStr(),read:false}); }; r.readAsDataURL(blob); stream.getTracks().forEach(t => t.stop()); }; mediaRec.start(); btn.classList.add('rec'); btn.textContent = '⏹️'; }).catch(() => showToast('⚠️ Sin acceso al micrófono')); } }
+function toggleRecord() {
+  const btn = document.getElementById('rec-btn');
+  if (mediaRec && mediaRec.state === 'recording') {
+    mediaRec.stop();
+    btn.classList.remove('rec');
+    btn.textContent = '🎤';
+  } else {
+    if (!activeConvId) { showToast('Abrí un chat primero'); return; }
+    navigator.mediaDevices.getUserMedia({audio:true}).then(stream => {
+      audioChunks = [];
+      // Usar el mejor formato soportado
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/ogg') ? 'audio/ogg'
+        : '';
+      const opts = mimeType ? {mimeType} : {};
+      mediaRec = new MediaRecorder(stream, opts);
+      mediaRec.ondataavailable = e => { if (e.data && e.data.size > 0) audioChunks.push(e.data); };
+      mediaRec.onstop = () => {
+        if (audioChunks.length === 0) { showToast('No se grabó audio'); return; }
+        const blob = new Blob(audioChunks, {type: mimeType || 'audio/webm'});
+        if (blob.size < 100) { showToast('Audio demasiado corto'); return; }
+        const r = new FileReader();
+        r.onload = ev => {
+          if (!activeConvId || !ev.target.result) return;
+          const otherId = activeConvId.split('_').find(p => p !== ME.id);
+          if (!otherId) return;
+          pushMsg(activeConvId, {
+            type:'audio',
+            data: ev.target.result,
+            from: ME.id,
+            time: timeStr(),
+            read: false,
+            mimeType: mimeType || 'audio/webm'
+          });
+        };
+        r.readAsDataURL(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mediaRec.start(100); // chunks cada 100ms
+      btn.classList.add('rec');
+      btn.textContent = '⏹️';
+      showToast('🎤 Grabando... tocá ⏹️ para parar');
+    }).catch(err => showToast('⚠️ Sin acceso al micrófono: ' + err.message));
+  }
+}
 let callStream = null;
 function startCall(type) { if (!activeConvId) { showToast('Abrí un chat primero'); return; } const otherId = activeConvId.split('_').find(p => p !== ME.id); const other = getUsers()[otherId]; if (!other) return; document.getElementById('call-av').textContent = other.username[0].toUpperCase(); document.getElementById('call-av').style.background = other.color; document.getElementById('call-name').textContent = other.username; document.getElementById('call-status').textContent = type === 'video' ? 'Video llamada (simulado)...' : 'Llamada de voz (simulado)...'; document.getElementById('vid-wrap').style.display = type === 'video' ? 'flex' : 'none'; document.getElementById('call-overlay').classList.add('open'); if (type === 'video') { navigator.mediaDevices.getUserMedia({video:true,audio:true}).then(stream => { callStream = stream; document.getElementById('vid-local').srcObject = stream; document.getElementById('call-status').textContent = '🟢 Conectado'; }).catch(() => { document.getElementById('call-status').textContent = 'Sin acceso a cámara/micro'; }); } }
 let _muted = false, _camOff = false;
@@ -1650,6 +1940,74 @@ function netConnect() { const serverUrl = window.location.origin; try { socket =
     if (ME) socket.emit('user_online', { userId: ME.id, username: ME.username, color: ME.color });
     if (netCurrentMapId) netJoinGame(netCurrentMapId);
     updateNetPill('🟢', socket.id?.substring(0,6));
+  });
+
+  // Solicitud de amistad recibida en tiempo real
+  socket.on('friend_request', ({ from }) => {
+    ME.friendRequests_recv = ME.friendRequests_recv || [];
+    if (!ME.friendRequests_recv.includes(from.id)) {
+      ME.friendRequests_recv.push(from.id);
+      _usersCache[from.id] = { ..._usersCache[from.id], ...from };
+      saveMe();
+    }
+    showToast('👋 ' + from.username + ' te envió una solicitud de amistad');
+    checkNotifs();
+    if (document.getElementById('s-msg').classList.contains('active')) loadConvList();
+    // Notificación del navegador
+    if (Notification.permission === 'granted') {
+      new Notification('Crix — Nueva solicitud', {
+        body: from.username + ' quiere ser tu amigo',
+        icon: '/favicon.ico'
+      });
+    }
+  });
+
+  // Solicitud aceptada
+  socket.on('friend_accepted', async ({ by }) => {
+    ME.friends = ME.friends || [];
+    if (!ME.friends.includes(by.id)) ME.friends.push(by.id);
+    _usersCache[by.id] = { ..._usersCache[by.id], ...by };
+    saveMe();
+    showToast('🎉 ' + by.username + ' aceptó tu solicitud de amistad');
+    checkNotifs();
+    await loadServerData();
+    if (document.getElementById('s-msg').classList.contains('active')) loadConvList();
+  });
+
+  // Mensaje privado en tiempo real (ya existía pero lo reforzamos)
+  socket.on('new_private_msg', ({ convId: cid, msg }) => {
+    if (!cid || !msg) return;
+    // Verificar que el convId nos incluye
+    if (!cid.split('_').includes(ME.id)) return;
+    _convsCache[cid] = _convsCache[cid] || [];
+    // No duplicar
+    const last = _convsCache[cid][_convsCache[cid].length-1];
+    if (last && last.time === msg.time && last.from === msg.from) return;
+    _convsCache[cid].push(msg);
+    checkNotifs();
+    if (document.getElementById('s-msg').classList.contains('active')) {
+      loadConvList();
+      if (activeConvId === cid) {
+        const otherId = cid.split('_').find(p => p !== ME.id);
+        renderConv(cid, otherId);
+      }
+    }
+    // Notificación del navegador si el chat no está abierto o la ventana no tiene foco
+    if (!document.hasFocus() || !document.getElementById('s-msg').classList.contains('active')) {
+      const sender = _usersCache[msg.from];
+      const senderName = sender?.username || 'Alguien';
+      if (Notification.permission === 'granted') {
+        const preview = msg.type==='text' ? (msg.text||'').substring(0,60)
+                       : msg.type==='audio' ? '🎤 Audio'
+                       : msg.type==='image' ? '🖼 Imagen'
+                       : msg.type==='video' ? '🎥 Video'
+                       : '📎 Archivo';
+        new Notification('Crix — ' + senderName, {
+          body: preview,
+          icon: '/favicon.ico'
+        });
+      }
+    }
   });
 }
 function netJoinGame(mapId) { if (!socket || !netConnected || !ME) return; netCurrentMapId = mapId; socket.emit('join_game', { mapId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def' }); }
