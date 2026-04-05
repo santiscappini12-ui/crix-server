@@ -732,14 +732,46 @@ async function doLogin() {
   const u = document.getElementById('a-u').value.trim();
   const p = document.getElementById('a-p').value;
   if (!u || !p) { authErr('Completá los campos.'); return; }
-  const pwHash = btoa(unescape(encodeURIComponent(p)));
+  const pwHash   = btoa(unescape(encodeURIComponent(p)));
   const pwLegacy = btoa(p);
-  // Intentar con servidor
+
+  // 1. Intentar con servidor (ambos hashes)
   let res = await api('POST', '/api/login', { username: u, pw: pwHash });
-  if (!res.ok) res = await api('POST', '/api/login', { username: u, pw: pwLegacy });
+  if (!res.ok && res.err === 'Contraseña incorrecta') {
+    res = await api('POST', '/api/login', { username: u, pw: pwLegacy });
+  }
+
+  // 2. Si el usuario no existe en servidor pero existe en localStorage → migrarlo
+  if (!res.ok && res.err === 'Usuario no encontrado') {
+    const localUsers = DB.get('users') || {};
+    const localUser = Object.values(localUsers).find(
+      x => x.username && x.username.toLowerCase() === u.toLowerCase()
+    );
+    if (localUser && (localUser.pw === pwHash || localUser.pw === pwLegacy)) {
+      // Migrar al servidor
+      const migRes = await api('POST', '/api/register', {
+        username: localUser.username,
+        pw: pwHash,
+        color: localUser.color || '#5b8def',
+        id: localUser.id,
+      });
+      if (migRes.ok) {
+        // También migrar sus mapas si tiene
+        const localMaps = DB.get('maps') || {};
+        const myMaps = Object.values(localMaps).filter(m => m.authorId === localUser.id);
+        for (const m of myMaps) {
+          await api('POST', '/api/maps', m).catch(()=>{});
+        }
+        showToast('✅ Cuenta migrada al servidor automáticamente');
+        loginAs(migRes.user);
+        return;
+      }
+    }
+  }
+
   if (!res.ok) {
     if (res.banned) { showBanScreenData(res.banned); return; }
-    authErr(res.err || 'Error al iniciar sesión');
+    authErr(res.err || 'No se pudo conectar. Verificá tu conexión.');
     return;
   }
   loginAs(res.user);
@@ -764,6 +796,9 @@ function loginAs(u) {
 }
 async function trySession() {
   const sid = DB.get('session'); if (!sid) return false;
+  // Mostrar loading mientras esperamos al servidor
+  const authEl = document.getElementById('s-auth');
+  if (authEl) authEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:16px"><div style="font-family:var(--display);font-size:48px;font-weight:800;background:linear-gradient(135deg,#5b8def,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Crix</div><div style="color:var(--text2);font-size:13px">Conectando...</div></div>';
   // Intentar cargar del servidor
   const res = await api('GET', '/api/user/' + sid);
   if (res.ok && res.user && res.user.username) {
@@ -862,7 +897,19 @@ function showBanScreen() {
       <button class="btn btn-g" onclick="DB.del('session');location.reload()">← Cerrar sesión</button>
     </div>`);
 }
-function goTab(t, extra) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); const el = document.getElementById('s-' + t); if (el) el.classList.add('active'); document.querySelectorAll('.nav-tab').forEach((b, i) => { b.classList.toggle('active', ['home','discover','studio','msg','profile'][i] === t); }); if (t === 'home') renderHome(); if (t === 'discover') renderDiscover(); if (t === 'studio') initStudio(); if (t === 'msg') loadConvList(); if (t === 'profile') renderProfile(extra || ME.id); }
+function goTab(t, extra) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('s-' + t);
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach((b, i) => {
+    b.classList.toggle('active', ['home','discover','studio','msg','profile'][i] === t);
+  });
+  if (t === 'home')    { loadServerData().then(renderHome); }
+  if (t === 'discover'){ loadServerData().then(() => renderDiscover()); }
+  if (t === 'studio')  initStudio();
+  if (t === 'msg')     { loadConvList(); }
+  if (t === 'profile') renderProfile(extra || ME.id);
+}
 function showToast(m, dur = 3000) { const t = document.getElementById('toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = 'none', dur); }
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -1019,15 +1066,65 @@ function exitIframe() {
   document.getElementById('nav').style.display = 'flex';
 }
 let discCurrentFilter = 'all';
-function renderDiscover(filter) { if (filter) discCurrentFilter = filter; const allMaps = Object.values(getMaps()); let filtered = allMaps; if (discCurrentFilter === 'popular') filtered = [...allMaps].sort((a,b)=>(b.plays||0)-(a.plays||0)); else if (discCurrentFilter === 'new') filtered = [...allMaps].sort((a,b)=>new Date(b.created)-new Date(a.created)); else if (!['all'].includes(discCurrentFilter)) filtered = allMaps.filter(m => m.genre === discCurrentFilter); renderGrid('grid-discover', filtered.slice(0, 20), 'hot'); const users = getUsers(); const active = Object.values(users).filter(u => u.id !== ME.id).slice(0, 12); const el = document.getElementById('grid-creators'); if (el) { if (!active.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px">Aún no hay más usuarios.</div>'; return; } el.innerHTML = active.map(u => `<div class="friend-card" onclick="renderProfile('${u.id}');goTab('profile','${u.id}')"><div class="friend-av" style="background:${u.color}">${u.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join(''); } }
+function renderDiscover(filter) {
+  if (filter) discCurrentFilter = filter;
+  const allMaps = Object.values(getMaps()).filter(m => m.authorId !== 'system');
+  let filtered = allMaps;
+  if (discCurrentFilter === 'popular') filtered = [...allMaps].sort((a,b)=>(b.plays||0)-(a.plays||0));
+  else if (discCurrentFilter === 'new') filtered = [...allMaps].sort((a,b)=>new Date(b.created)-new Date(a.created));
+  else if (discCurrentFilter !== 'all') filtered = allMaps.filter(m => m.genre === discCurrentFilter);
+  renderGrid('grid-discover', filtered.slice(0, 20), 'hot');
+  // Usuarios del servidor
+  const users = getUsers();
+  const active = Object.values(users).filter(u => u.id !== ME.id && !(u.banned && u.banned.permanent));
+  const el = document.getElementById('grid-creators'); if (!el) return;
+  if (!active.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px">Aún no hay más usuarios registrados.</div>'; return; }
+  const onlineNow = Object.keys(onlineUsers || {});
+  el.innerHTML = active.map(u => {
+    const isOnline = u.onlineAt && (Date.now() - u.onlineAt < 120000);
+    return '<div class="friend-card" onclick="goTab(\'profile\',\''+u.id+'\')">'+
+      '<div style="position:relative;width:44px;height:44px;margin:0 auto 8px">'+
+      '<div class="friend-av" style="background:'+(u.color||'#5b8def')+';width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px">'+(u.username||'?')[0].toUpperCase()+'</div>'+
+      '<div style="position:absolute;bottom:1px;right:1px;width:10px;height:10px;border-radius:50%;background:'+(isOnline?'var(--green)':'var(--text3)')+';border:2px solid var(--bg2)"></div>'+
+      '</div>'+
+      '<div style="font-size:12px;font-weight:700">'+esc(u.username)+'</div>'+
+      '<div style="font-size:9px;color:var(--text3)">#'+u.id+'</div>'+
+      (isOnline?'<div style="font-size:9px;color:var(--green)">● En línea</div>':'')+
+      '</div>';
+  }).join('');
+}
 function discFilter(f, el) { document.querySelectorAll('#s-discover .filter-btn').forEach(b => b.classList.remove('active')); if (el) el.classList.add('active'); renderDiscover(f); }
 let searchQuery = ''; let searchTab = 'games';
 function doSearch(q) { q = (q || '').trim(); if (!q) return; searchQuery = q; document.getElementById('search-query-lbl').textContent = q; goTab('search'); runSearch(); }
-function runSearch() { const q = searchQuery.toLowerCase(); const allMaps = Object.values(getMaps()); const allUsers = Object.values(getUsers()); const gResults = allMaps.filter(m => m.name.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q)); const uResults = allUsers.filter(u => u.username.toLowerCase().includes(q)); renderGrid('search-games-results', gResults, 'hot'); const uEl = document.getElementById('search-users-results'); uEl.innerHTML = uResults.length ? uResults.map(u => `<div class="friend-card" onclick="goTab('profile','${u.id}')"><div class="friend-av" style="background:${u.color}">${u.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join('') : '<div style="color:var(--text3);font-size:12px">Sin resultados.</div>'; }
+function runSearch() {
+  const q = searchQuery.toLowerCase();
+  const allMaps  = Object.values(getMaps()).filter(m => !['sys1','sys2','sys3','sys4'].includes(m.id));
+  const allUsers = Object.values(getUsers()).filter(u => !(u.banned && u.banned.permanent));
+  const gResults = allMaps.filter(m => m.name.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q));
+  const uResults = allUsers.filter(u => u.username && u.username.toLowerCase().includes(q));
+  renderGrid('search-games-results', gResults, 'hot');
+  const uEl = document.getElementById('search-users-results');
+  uEl.innerHTML = uResults.length
+    ? uResults.map(u => {
+        const isOnline = u.onlineAt && (Date.now()-u.onlineAt<120000);
+        return '<div class="friend-card" onclick="goTab(\'profile\',\''+u.id+'\')">'+
+          '<div class="friend-av" style="background:'+(u.color||'#5b8def')+'">'+(u.username||'?')[0].toUpperCase()+'</div>'+
+          '<div style="font-size:12px;font-weight:700">'+esc(u.username)+'</div>'+
+          '<div style="font-size:9px;color:var(--text3)">#'+u.id+'</div>'+
+          (isOnline?'<div style="font-size:9px;color:var(--green)">● En línea</div>':'')+
+          '</div>';
+      }).join('')
+    : '<div style="color:var(--text3);font-size:12px">Sin resultados.</div>';
+}
 function switchSearchTab(tab) { searchTab = tab; document.getElementById('search-games-results').style.display = tab === 'games' ? 'grid' : 'none'; document.getElementById('search-users-results').style.display = tab === 'users' ? 'grid' : 'none'; document.getElementById('sf-games').classList.toggle('active', tab === 'games'); document.getElementById('sf-users').classList.toggle('active', tab === 'users'); }
 let viewingUserId = null;
-function renderProfile(uid) {
+async function renderProfile(uid) {
   viewingUserId = uid || ME.id;
+  // Refrescar datos del servidor
+  if (viewingUserId !== ME.id) {
+    const fresh = await api('GET', '/api/user/' + viewingUserId).catch(()=>({ok:false}));
+    if (fresh.ok && fresh.user) _usersCache[viewingUserId] = fresh.user;
+  }
   const users = getUsers(); const u = users[viewingUserId] || ME;
   const isMe = viewingUserId === ME.id;
   const myMaps = Object.values(getMaps()).filter(m => m.authorId === u.id);
@@ -1040,41 +1137,80 @@ function renderProfile(uid) {
   const adminBanBtn = isAdmin() && !isMe ? (isBanned
     ? '<button class="btn btn-green" style="font-size:12px" onclick="unbanUser(\''+u.id+'\')">✅ Desbanear</button>'
     : '<button class="btn btn-red" style="font-size:12px" onclick="banUser(\''+u.id+'\')">🚫 Banear</button>') : '';
+  const onlineDot = isOnline ? '🟢' : '⚫';
+  const privacyBadge = isOnline
+    ? '<span style="color:var(--green);font-size:11px">● En línea</span>'
+    : '<span style="color:var(--text3);font-size:11px">● Desconectado</span>';
+
   document.getElementById('profile-inner').innerHTML =
-    '<div class="pf-banner">'+
-    '<div class="pf-av" style="width:72px;height:72px;font-size:28px;background:'+u.color+'">'+u.username[0].toUpperCase()+'</div>'+
-    '<div style="flex:1">'+
-    '<div class="pf-name">'+(isBanned&&!isMe?'<span style="color:var(--red)">🚫 </span>':'')+esc(u.username)+'</div>'+
-    '<div class="pf-handle">#'+u.id+'</div>'+
-    '<div class="pf-join">Miembro desde '+dateStr(u.created)+'</div>'+
-    (u.bio ? '<div class="pf-bio">'+esc(u.bio)+'</div>' : '')+
-    '<div class="pf-stats">'+
-    '<div><div class="pstat-v">'+myMaps.length+'</div><div class="pstat-l">Juegos</div></div>'+
-    '<div><div class="pstat-v">'+((u.friends||[]).length)+'</div><div class="pstat-l">Amigos</div></div>'+
-    '<div><div class="pstat-v">'+(u.visits||0)+'</div><div class="pstat-l">Visitas</div></div>'+
+    // ── Banner ──
+    '<div style="background:linear-gradient(135deg,'+u.color+'18,var(--bg2));border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:16px;position:relative;overflow:hidden">'+
+    '<div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:'+u.color+';opacity:0.07;pointer-events:none"></div>'+
+    // Avatar + nombre
+    '<div style="display:flex;gap:18px;align-items:flex-start">'+
+    '<div style="flex-shrink:0;position:relative">'+
+    '<div style="width:76px;height:76px;border-radius:50%;background:'+u.color+';display:flex;align-items:center;justify-content:center;font-weight:800;font-size:30px;font-family:var(--display);border:3px solid '+(isOnline?'var(--green)':'var(--border)')+'">'+u.username[0].toUpperCase()+'</div>'+
+    '<div style="position:absolute;bottom:2px;right:2px;width:14px;height:14px;border-radius:50%;background:'+(isOnline?'var(--green)':'var(--text3)')+';border:2px solid var(--bg2)"></div>'+
     '</div>'+
-    '<div class="pf-btns">'+
+    '<div style="flex:1;min-width:0">'+
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px">'+
+    '<div style="font-family:var(--display);font-size:24px;font-weight:800;letter-spacing:-1px">'+esc(u.username)+'</div>'+
+    (u.isAdmin ? '<span style="background:linear-gradient(135deg,var(--yellow),var(--orange));color:#000;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:800">⚡ ADMIN</span>' : '')+
+    (isBanned&&!isMe ? '<span style="background:rgba(239,68,68,.2);color:var(--red);padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700">🚫 BANEADO</span>' : '')+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">#'+u.id+'</div>'+
+    privacyBadge+
+    '<div style="font-size:11px;color:var(--text3);margin-top:3px">Miembro desde '+dateStr(u.created)+'</div>'+
+    (u.bio ? '<div style="font-size:13px;color:var(--text2);margin-top:8px;line-height:1.5">'+esc(u.bio)+'</div>' : '')+
+    '</div></div>'+
+    // Stats
+    '<div style="display:flex;gap:0;margin-top:18px;background:var(--bg3);border-radius:10px;overflow:hidden;border:1px solid var(--border)">'+
+    [['🎮',myMaps.length,'Juegos'],['👥',(u.friends||[]).length,'Amigos'],['❤️',followersCount,'Seguidores'],['➕',followingCount,'Seguidos'],['👁',u.visits||0,'Visitas']].map((s,i)=>
+      '<div style="flex:1;padding:10px 6px;text-align:center'+(i>0?';border-left:1px solid var(--border)':'')+'">'+
+      '<div style="font-size:18px;font-weight:800;color:var(--acc);font-family:var(--display)">'+s[1]+'</div>'+
+      '<div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-top:1px">'+s[2]+'</div>'+
+      '</div>'
+    ).join('')+
+    '</div>'+
+    // Botones de acción
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">'+
+    (()=>{
+      const _uid = u.id;
+      if (isMe) return '<button class="btn btn-g" style="font-size:12px" onclick="editProfile()">✏️ Editar bio</button>'+'<button class="btn btn-red" style="font-size:12px;margin-left:auto" onclick="logout()">← Cerrar sesión</button>';
+      let btns = isFriend
+        ? '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(this.dataset.id)" data-id="'+_uid+'">💬 Mensaje</button>'
+        : '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(this.dataset.id)" data-id="'+_uid+'">+ Agregar amigo</button>';
+      btns += '<button class="btn '+(isFollowing?'btn-red':'btn-g')+'" style="font-size:12px" onclick="toggleFollow(this.dataset.id)" data-id="'+_uid+'">'+(isFollowing?'➖ Dejar de seguir':'➕ Seguir')+'</button>';
+      if (isAdmin()&&!isMe) btns += isBanned
+        ? '<button class="btn btn-green" style="font-size:12px;margin-left:auto" onclick="unbanUser(this.dataset.id)" data-id="'+_uid+'">✅ Desbanear</button>'
+        : '<button class="btn btn-red" style="font-size:12px;margin-left:auto" onclick="banUser(this.dataset.id)" data-id="'+_uid+'">🚫 Banear</button>';
+      return btns;
+    })()+
+
+    '</div></div>'+
+
+    // Barra buscar amigo (solo si es tu perfil)
     (isMe
-      ? '<button class="btn btn-g" style="font-size:12px" onclick="editProfile()">✏️ Editar bio</button><button class="btn btn-red" style="font-size:12px" onclick="logout()">← Cerrar sesión</button>'
-      : (!isFriend
-          ? '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(\''+u.id+'\')">+ Agregar amigo</button>'
-          : '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje</button>')+
-        '<button class="btn '+(isFollowing?'btn-red':'btn-g')+'" style="font-size:12px" onclick="toggleFollow(\''+u.id+'\')">'+(isFollowing?'➖ Dejar de seguir':'➕ Seguir')+'</button>'+
-        adminBanBtn)+
-    '</div></div></div>'+
-    (isMe ? '<div style="display:flex;gap:8px;margin-bottom:14px"><input class="inp" style="flex:1" id="add-friend-inp" placeholder="Buscar y agregar amigo..."><button class="btn btn-p" onclick="addFriendByName()">+ Amigo</button></div>' : '')+
+      ? '<div style="display:flex;gap:8px;margin-bottom:14px">'+
+        '<input class="inp" style="flex:1" id="add-friend-inp" placeholder="Buscar usuario para agregar...">'+
+        '<button class="btn btn-p" onclick="addFriendByName()">+ Amigo</button>'+
+        '</div>'
+      : '')+
+
+    // Tabs
     '<div class="tab-row">'+
-    '<button class="tab active" id="pftab-games" onclick="pfTab(\'games\',this)">🎮 Juegos ('+myMaps.length+')</button>'+
-    '<button class="tab" id="pftab-friends" onclick="pfTab(\'friends\',this)">👥 Amigos ('+((u.friends||[]).length)+')</button>'+
-    (isMe ? '<button class="tab" id="pftab-liked" onclick="pfTab(\'liked\',this)">❤️ Favoritos</button>' : '')+
-    '<button class="tab" id="pftab-followers" onclick="pfTab(\'followers\',this)">👥 Seguidores ('+followersCount+')</button>'+
-    '<button class="tab" id="pftab-following" onclick="pfTab(\'following\',this)">➕ Seguidos ('+followingCount+')</button>'+
+    '<button class="tab active" id="pftab-games" onclick="pfTab(&quot;games&quot;,this)">🎮 Juegos ('+myMaps.length+')</button>'+
+    '<button class="tab" id="pftab-friends" onclick="pfTab(&quot;friends&quot;,this)">👥 Amigos ('+(u.friends||[]).length+')</button>'+
+    '<button class="tab" id="pftab-followers" onclick="pfTab(&quot;followers&quot;,this)">❤️ Seguidores ('+followersCount+')</button>'+
+    '<button class="tab" id="pftab-following" onclick="pfTab(&quot;following&quot;,this)">➕ Seguidos ('+followingCount+')</button>'+
+    (isMe ? '<button class="tab" id="pftab-liked" onclick="pfTab(&quot;liked&quot;,this)">🌟 Favoritos</button>' : '')+
     '</div>'+
     '<div id="pf-games-tab" class="games-grid"></div>'+
     '<div id="pf-friends-tab" class="friends-grid" style="display:none"></div>'+
     '<div id="pf-followers-tab" class="friends-grid" style="display:none"></div>'+
     '<div id="pf-following-tab" class="friends-grid" style="display:none"></div>'+
-    (isMe ? '<div id="pf-liked-tab" class="games-grid" style="display:none"></div>' : ''); pfTab('games'); }
+    (isMe ? '<div id="pf-liked-tab" class="games-grid" style="display:none"></div>' : '');
+  pfTab('games'); }
 function pfTab(tab, el) { ['games','friends','liked'].forEach(t => { const e1 = document.getElementById('pf-'+t+'-tab'); const e2 = document.getElementById('pftab-'+t); if (e1) e1.style.display = 'none'; if (e2) e2.classList.remove('active'); }); const tEl = document.getElementById('pf-'+tab+'-tab'); const hEl = el || document.getElementById('pftab-'+tab); if (tEl) tEl.style.display = 'grid'; if (hEl) hEl.classList.add('active'); const users = getUsers(); const u = users[viewingUserId] || ME; if (tab === 'games') { const mine = Object.values(getMaps()).filter(m => m.authorId === u.id); renderGrid('pf-games-tab', mine, u.id === ME.id ? 'mine' : ''); } else if (tab === 'friends') { const frds = (u.friends||[]).map(fid => users[fid]).filter(Boolean); const el2 = document.getElementById('pf-friends-tab'); if (!frds.length) { el2.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin amigos todavía.</div>'; return; } el2.innerHTML = frds.map(f => `<div class="friend-card" onclick="goTab('profile','${f.id}')"><div class="friend-av" style="background:${f.color||'#5b8def'}">${f.username[0].toUpperCase()}</div><div style="font-size:12px;font-weight:700">${esc(f.username)}</div><div style="font-size:9px;color:var(--text3)">#${f.id}</div><button class="btn btn-g" style="font-size:10px;padding:3px 8px;margin-top:6px" onclick="event.stopPropagation();openConvWith('${f.id}')">💬</button></div>`).join(''); } else if (tab === 'liked') { const liked = Object.values(getMaps()).filter(m => (ME.liked||[]).includes(m.id)); renderGrid('pf-liked-tab', liked, ''); }
   else if (tab === 'followers') {
     const el2=document.getElementById('pf-followers-tab'); if(!el2)return;
@@ -1100,7 +1236,12 @@ function toggleFollow(uid) {
   else { ME.following.splice(idx, 1); showToast('Dejaste de seguir'); }
   saveMe(); renderProfile(viewingUserId);
 }
-function addFriend(uid) { if ((ME.friends||[]).includes(uid)) { showToast('Ya son amigos'); return; } ME.friends = ME.friends || []; ME.friends.push(uid); saveMe(); showToast('✅ Amigo agregado'); renderProfile(viewingUserId); }
+async function addFriend(uid) {
+  if ((ME.friends||[]).includes(uid)) { showToast('Ya son amigos'); return; }
+  ME.friends = ME.friends || []; ME.friends.push(uid);
+  await saveUserToServer(ME);
+  showToast('✅ Amigo agregado'); renderProfile(viewingUserId);
+}
 function addFriendByName() { const val = (document.getElementById('add-friend-inp')||{}).value; if (!val) return; const name = val.trim(); const found = Object.values(getUsers()).find(u => u.username.toLowerCase() === name.toLowerCase()); if (!found) { showToast('❌ Usuario no encontrado'); return; } if (found.id === ME.id) { showToast('No podés agregarte a vos mismo'); return; } addFriend(found.id); document.getElementById('add-friend-inp').value = ''; }
 function editProfile() { const bio = prompt('Editá tu bio:', ME.bio || ''); if (bio === null) return; ME.bio = bio.slice(0, 120); saveMe(); renderProfile(ME.id); }
 function logout() {
@@ -1510,17 +1651,37 @@ const _origPlayMap = window.playMap;
 window.playMap = function(mapId) { _origPlayMap(mapId); setTimeout(() => { netJoinGame(mapId); _patchGameLoopWithNet(); }, 200); };
 ensureDefaultMaps();
 (async () => {
-  // Cargar usuarios/mapas públicos antes de mostrar auth
-  const [uRes, mRes] = await Promise.all([api('GET','/api/users'), api('GET','/api/maps')]);
-  if (uRes.ok) _usersCache = uRes.users;
-  if (mRes.ok) _mapsCache = mRes.maps;
+  // Mostrar pantalla de carga con spinner
+  const authEl = document.getElementById('s-auth');
+  const origAuthHTML = authEl.innerHTML;
+  authEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:16px"><div style="font-family:var(--display);font-size:56px;font-weight:800;letter-spacing:-3px;background:linear-gradient(135deg,#5b8def 0%,#8b5cf6 50%,#ec4899 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Crix</div><div style="color:var(--text2);font-size:13px;animation:pulse 1.5s infinite">Cargando...</div></div>';
+  authEl.classList.add('active');
+  // Cargar datos globales
+  try {
+    const [uRes, mRes] = await Promise.all([api('GET','/api/users'), api('GET','/api/maps')]);
+    if (uRes.ok) _usersCache = uRes.users;
+    if (mRes.ok) _mapsCache  = mRes.maps;
+  } catch(e) { console.warn('Sin servidor, modo local'); }
+  // Intentar restaurar sesión
   const ok = await trySession();
-  if (ok && ME && !ME.banned) bootApp();
-  else if (!ok) document.getElementById('s-auth').classList.add('active');
+  if (ok && ME) {
+    const isBanned = ME.banned && (ME.banned.permanent || (ME.banned.until && new Date(ME.banned.until)>new Date()));
+    if (!isBanned) { bootApp(); return; }
+  }
+  // Sin sesión → mostrar login
+  authEl.innerHTML = origAuthHTML;
+  authEl.classList.add('active');
+  bindListeners();
 })();
-document.getElementById('a-p').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
-document.getElementById('r-p2').addEventListener('keydown', e => { if(e.key==='Enter') doRegister(); });
-document.getElementById('nav-search-inp').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(e.target.value); });
+// addEventListener después de que el DOM esté listo
+function bindListeners() {
+  const ap = document.getElementById('a-p');
+  const rp2 = document.getElementById('r-p2');
+  const ns = document.getElementById('nav-search-inp');
+  if (ap)  ap.addEventListener('keydown',  e => { if(e.key==='Enter') doLogin(); });
+  if (rp2) rp2.addEventListener('keydown', e => { if(e.key==='Enter') doRegister(); });
+  if (ns)  ns.addEventListener('keydown',  e => { if(e.key==='Enter') doSearch(e.target.value); });
+}
 netConnect();
 </script>
 </body>
