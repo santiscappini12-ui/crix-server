@@ -219,6 +219,59 @@ app.post('/api/convs/:convId', (req, res) => {
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
 
+// ── SOLICITUDES DE AMISTAD ──
+app.post('/api/friend-request', (req, res) => {
+  try {
+    const { fromId, toId } = req.body;
+    if (!fromId || !toId || fromId === toId) return res.json({ok:false,err:'IDs inválidos'});
+    const from = DB.users[fromId]; const to = DB.users[toId];
+    if (!from || !to) return res.json({ok:false,err:'Usuario no encontrado'});
+    // No duplicar solicitudes
+    to.friendRequests_recv = to.friendRequests_recv || [];
+    from.friendRequests_sent = from.friendRequests_sent || [];
+    if (!to.friendRequests_recv.includes(fromId)) to.friendRequests_recv.push(fromId);
+    if (!from.friendRequests_sent.includes(toId)) from.friendRequests_sent.push(toId);
+    DB.users[fromId] = from; DB.users[toId] = to; saveDB();
+    // Notificar en tiempo real si está online
+    const toOnline = onlineUsers[toId];
+    if (toOnline) io.to(toOnline.socketId).emit('friend_request', { from: { id:from.id, username:from.username, color:from.color } });
+    res.json({ok:true});
+  } catch(e) { res.json({ok:false,err:e.message}); }
+});
+
+app.post('/api/friend-accept', (req, res) => {
+  try {
+    const { fromId, toId } = req.body; // from=quien mandó, to=quien acepta
+    if (!fromId || !toId) return res.json({ok:false,err:'IDs inválidos'});
+    const from = DB.users[fromId]; const to = DB.users[toId];
+    if (!from || !to) return res.json({ok:false,err:'Usuario no encontrado'});
+    // Agregar como amigos mutuamente
+    from.friends = from.friends||[]; to.friends = to.friends||[];
+    if (!from.friends.includes(toId)) from.friends.push(toId);
+    if (!to.friends.includes(fromId)) to.friends.push(fromId);
+    // Limpiar solicitudes
+    to.friendRequests_recv = (to.friendRequests_recv||[]).filter(id=>id!==fromId);
+    from.friendRequests_sent = (from.friendRequests_sent||[]).filter(id=>id!==toId);
+    DB.users[fromId]=from; DB.users[toId]=to; saveDB();
+    // Notificar a ambos
+    const fromOnline = onlineUsers[fromId];
+    if (fromOnline) io.to(fromOnline.socketId).emit('friend_accepted', { by: { id:to.id, username:to.username, color:to.color } });
+    io.emit('user_updated', {userId:fromId}); io.emit('user_updated', {userId:toId});
+    res.json({ok:true});
+  } catch(e) { res.json({ok:false,err:e.message}); }
+});
+
+app.post('/api/friend-reject', (req, res) => {
+  try {
+    const { fromId, toId } = req.body;
+    const from = DB.users[fromId]; const to = DB.users[toId];
+    if (from) { from.friendRequests_sent=(from.friendRequests_sent||[]).filter(id=>id!==toId); DB.users[fromId]=from; }
+    if (to)   { to.friendRequests_recv=(to.friendRequests_recv||[]).filter(id=>id!==fromId);   DB.users[toId]=to;   }
+    saveDB();
+    res.json({ok:true});
+  } catch(e) { res.json({ok:false,err:e.message}); }
+});
+
 // ── STATUS ──
 app.get('/status', (req, res) => res.json({
   ok:true, online: Object.keys(onlineUsers).length,
