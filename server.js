@@ -302,6 +302,8 @@ io.on('connection', socket => {
     if (!userId) return;
     onlineUsers[userId] = { socketId: socket.id, username, color };
     connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color };
+    // Persistir onlineAt en DB para que el cliente lo vea
+    if (DB.users[userId]) { DB.users[userId].onlineAt = Date.now(); }
     io.emit('online_update', { userId, online:true });
   });
 
@@ -353,11 +355,16 @@ io.on('connection', socket => {
     const meta = connSockets[socket.id]; if (meta?.mapId) leaveRoom(socket, meta.mapId);
   });
 
+  socket.on('get_online_users', () => {
+    socket.emit('online_users_list', Object.keys(onlineUsers));
+  });
+
   socket.on('disconnect', () => {
     const meta = connSockets[socket.id];
     if (meta?.mapId) leaveRoom(socket, meta.mapId);
     if (meta?.userId) {
       delete onlineUsers[meta.userId];
+      if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
       io.emit('online_update', { userId:meta.userId, online:false });
     }
     delete connSockets[socket.id];
