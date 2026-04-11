@@ -23,7 +23,7 @@ const DATA_FILE = path.join(__dirname, 'crix_data.json');
 // sobreviva reinicios se usa un backup en memoria
 // y se guarda frecuentemente.
 // ══════════════════════════════════════════════
-let DB = { users: {}, maps: {}, convs: {}, _v: 0 };
+let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], _v: 0 };
 
 function loadDB() {
   try {
@@ -272,6 +272,100 @@ app.post('/api/friend-reject', (req, res) => {
   } catch(e) { res.json({ok:false,err:e.message}); }
 });
 
+// ── VIDEOS ──
+app.get('/api/videos', (req, res) => {
+  const vids = DB.videos || [];
+  // No devolver los datos binarios en el listado (demasiado pesado)
+  const safe = vids.map(v => ({ ...v, data: v.data ? '[data]' : null }));
+  res.json({ ok: true, videos: safe });
+});
+
+app.get('/api/videos/:id/data', (req, res) => {
+  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  if (!v) return res.json({ ok: false });
+  res.json({ ok: true, data: v.data, thumb: v.thumb });
+});
+
+app.post('/api/videos', (req, res) => {
+  try {
+    const v = req.body;
+    if (!v || !v.id || !v.title) return res.json({ ok: false, err: 'Faltan campos' });
+    DB.videos = DB.videos || [];
+    // Reemplazar si ya existe
+    const idx = DB.videos.findIndex(x => x.id === v.id);
+    if (idx >= 0) DB.videos[idx] = v; else DB.videos.push(v);
+    saveDB();
+    io.emit('video_new', { id: v.id, title: v.title, authorName: v.authorName, cat: v.cat, thumb: v.thumb, created: v.created });
+    res.json({ ok: true });
+  } catch(e) { res.json({ ok: false, err: e.message }); }
+});
+
+app.post('/api/videos/:id/like', (req, res) => {
+  const { userId } = req.body;
+  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  if (!v) return res.json({ ok: false });
+  v.likes = v.likes || [];
+  const idx = v.likes.indexOf(userId);
+  if (idx === -1) v.likes.push(userId); else v.likes.splice(idx, 1);
+  saveDB();
+  res.json({ ok: true, likes: v.likes.length });
+});
+
+app.post('/api/videos/:id/comment', (req, res) => {
+  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  if (!v) return res.json({ ok: false });
+  v.comments = v.comments || [];
+  v.comments.push(req.body.comment);
+  saveDB();
+  res.json({ ok: true });
+});
+
+// ── POSTS (Foros) ──
+app.get('/api/posts', (req, res) => {
+  const posts = (DB.posts || []).slice(-200); // últimos 200
+  res.json({ ok: true, posts });
+});
+
+app.post('/api/posts', (req, res) => {
+  try {
+    const p = req.body;
+    if (!p || !p.id) return res.json({ ok: false });
+    DB.posts = DB.posts || [];
+    DB.posts.unshift(p);
+    if (DB.posts.length > 500) DB.posts = DB.posts.slice(0, 500);
+    saveDB();
+    io.emit('new_post', { id: p.id, authorId: p.authorId, authorName: p.authorName, text: (p.text||'').substring(0,100) });
+    res.json({ ok: true });
+  } catch(e) { res.json({ ok: false, err: e.message }); }
+});
+
+app.delete('/api/posts/:id', (req, res) => {
+  DB.posts = (DB.posts || []).filter(p => p.id !== req.params.id);
+  saveDB();
+  io.emit('post_deleted', { id: req.params.id });
+  res.json({ ok: true });
+});
+
+app.post('/api/posts/:id/like', (req, res) => {
+  const { userId } = req.body;
+  const p = (DB.posts || []).find(x => x.id === req.params.id);
+  if (!p) return res.json({ ok: false });
+  p.likes = p.likes || [];
+  const idx = p.likes.indexOf(userId);
+  if (idx === -1) p.likes.push(userId); else p.likes.splice(idx, 1);
+  saveDB();
+  res.json({ ok: true, likes: p.likes.length });
+});
+
+app.post('/api/posts/:id/reply', (req, res) => {
+  const p = (DB.posts || []).find(x => x.id === req.params.id);
+  if (!p) return res.json({ ok: false });
+  p.replies = p.replies || [];
+  p.replies.push(req.body.reply);
+  saveDB();
+  res.json({ ok: true });
+});
+
 // ── STATUS ──
 app.get('/status', (req, res) => res.json({
   ok:true, online: Object.keys(onlineUsers).length,
@@ -357,6 +451,34 @@ io.on('connection', socket => {
 
   socket.on('get_online_users', () => {
     socket.emit('online_users_list', Object.keys(onlineUsers));
+  });
+
+  // Kick/ban en tiempo real
+  socket.on('kick_user', ({ userId, banned }) => {
+    if (!userId) return;
+    const target = onlineUsers[userId];
+    if (target) {
+      io.to(target.socketId).emit('you_are_banned', { banned });
+    }
+    // Persistir ban en DB
+    if (DB.users[userId]) {
+      DB.users[userId].banned = banned;
+      saveDB();
+    }
+    log('BAN', userId);
+  });
+
+  socket.on('unban_user', ({ userId }) => {
+    if (!userId) return;
+    if (DB.users[userId]) {
+      delete DB.users[userId].banned;
+      saveDB();
+    }
+    const target = onlineUsers[userId];
+    if (target) {
+      io.to(target.socketId).emit('you_are_unbanned');
+    }
+    log('UNBAN', userId);
   });
 
   socket.on('disconnect', () => {
