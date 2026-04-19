@@ -392,6 +392,33 @@ setInterval(() => {
 io.on('connection', socket => {
   stats.total++;
 
+  socket.on('call_invite', ({ to, from, fromName, type }) => {
+    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
+    if (target) target.emit('call_invite', { from, fromName, type });
+  });
+  socket.on('call_accept', ({ to, from }) => {
+    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
+    if (target) target.emit('call_accept', { from });
+  });
+  socket.on('call_end', ({ to, from }) => {
+    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
+    if (target) target.emit('call_end', { from });
+  });
+  socket.on('friend_request', ({ to, from, fromName }) => {
+    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
+    if (target) target.emit('friend_request', { from, fromName });
+  });
+  socket.on('friend_accepted', ({ to, from, fromName }) => {
+    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
+    if (target) target.emit('friend_accepted', { from, fromName });
+  });
+  socket.on('msg', ({ convId, msg }) => {
+    // Reenviar al destinatario si está conectado
+    const [uid1, uid2] = convId.split('_');
+    const targetId = uid1 === socket.userId ? uid2 : uid1;
+    const target = Object.values(io.sockets.sockets).find(s => s.userId === targetId);
+    if (target) target.emit('msg_incoming', { convId, msg });
+  });
   socket.on('user_online', ({ userId, username, color }) => {
     if (!userId) return;
     onlineUsers[userId] = { socketId: socket.id, username, color };
