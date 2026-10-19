@@ -5,6 +5,7 @@ const path     = require('path');
 const fs       = require('fs');
 const https    = require('https');
 const crypto   = require('crypto');
+const { fork } = require('node:child_process');
 
 const app    = express();
 const server = http.createServer(app);
@@ -91,11 +92,162 @@ function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId])
 function gameChannel(mapId, instanceId) { return `game:${encodeURIComponent(mapId)}:${instanceId}`; }
 function getRoom(mapId, instanceId) {
   const key = roomKey(mapId, instanceId);
-  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[] };
+  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[], worldParts:null, basePartIds:new Set(), changedPartIds:new Set(), removedPartIds:new Set(), physicsVelocities:{}, scriptStarted:false, scriptStatus:'stopped', pendingReset:false, commandTimes:[] };
   return rooms[key];
 }
 function roomPlayers(room) { return Object.values(room.players); }
 function log(t,d) { console.log(`[${new Date().toLocaleTimeString()}] ${t}:`, d); }
+
+function normalizeRoomPart(id, source = {}) {
+  const pos=source.position||{}, size=source.size||{};
+  const number=(value,fallback=0,min=-10000,max=10000)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;};
+  const types=['Block','Sphere','Cylinder','Wedge','TrussPart','Spawn','ImportedMesh'];
+  const materials=['SmoothPlastic','Neon','Metal','Glass','Grass','Brick','Wood'];
+  const type=types.includes(source.type)?source.type:'Block';
+  const part={
+    id:String(id).slice(0,120), name:String(source.name||'Part').slice(0,80), type,
+    x:number(source.x??pos.x??pos.X),y:number(source.y??pos.y??pos.Y),z:number(source.z??pos.z??pos.Z),
+    sx:number(source.sx??size.x??size.X,4,0.1,1000),sy:number(source.sy??size.y??size.Y,4,0.1,1000),sz:number(source.sz??size.z??size.Z,4,0.1,1000),
+    rx:number(source.rx),ry:number(source.ry),rz:number(source.rz),
+    color:/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?String(source.color):'#5b8def',
+    material:materials.includes(source.material)?source.material:'SmoothPlastic',
+    anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:number(source.transparent,0,0,0.95),
+  };
+  if(type==='ImportedMesh'&&typeof source.meshData==='string'&&source.meshData.length<=2*1024*1024)part.meshData=source.meshData;
+  return part;
+}
+
+function initializeRoomWorld(room, map) {
+  room.worldParts={}; room.basePartIds=new Set(); room.changedPartIds=new Set(); room.removedPartIds=new Set(); room.physicsVelocities={};
+  for(const [index,source] of (Array.isArray(map?.parts)?map.parts:[]).entries()){
+    if(!source||source.isNPC)continue;
+    const id=String(source.id||`map-part-${index}`),part=normalizeRoomPart(id,source);
+    room.worldParts[id]=part;room.basePartIds.add(id);
+  }
+  room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];
+}
+
+function roomWorldSnapshot(room) {
+  const runtimeParts=Object.values(room.worldParts||{}).filter(part=>!room.basePartIds.has(part.id)&&part.type!=='Spawn');
+  const worldChanges=Array.from(room.changedPartIds).map(id=>room.worldParts[id]).filter(part=>part&&part.type!=='Spawn');
+  return {runtimeParts,worldChanges,removedParts:[...room.removedPartIds]};
+}
+
+let scriptRunner=null, scriptRunnerError=null;
+function ensureScriptRunner() {
+  if(scriptRunner?.connected)return scriptRunner;
+  if(scriptRunnerError)return null;
+  try{
+    const major=Number(process.versions.node.split('.')[0]);
+    scriptRunner=fork(path.join(__dirname,'script-runner.js'),[],{execArgv:major>=20?['--no-node-snapshot']:[],stdio:['ignore','inherit','inherit','ipc']});
+    scriptRunner.on('message',handleScriptRunnerMessage);
+    scriptRunner.on('error',error=>{scriptRunnerError=error.message;log('SCRIPT_RUNNER',error.message);});
+    scriptRunner.on('exit',(code)=>{scriptRunner=null;if(code!==0){scriptRunnerError='El proceso aislado de scripts terminó ('+code+'). Reiniciá Crix para volver a intentar.';log('SCRIPT_RUNNER',scriptRunnerError);for(const room of Object.values(rooms)){if(room.scriptStarted){room.scriptStarted=false;room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError});}}}});
+    return scriptRunner;
+  }catch(error){scriptRunnerError=error.message;log('SCRIPT_RUNNER',error.message);return null;}
+}
+
+function startRoomServerScripts(room,map) {
+  if(room.scriptStarted)return;
+  const scripts=(Array.isArray(map?.scripts)?map.scripts:[]).filter(script=>script?.type==='Script');
+  if(!scripts.length){room.scriptStarted=true;room.scriptStatus='ready';return;}
+  const runner=ensureScriptRunner();
+  if(!runner){room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError||'No se pudo iniciar el entorno de scripts.'});return;}
+  room.scriptStarted=true;room.scriptStatus='starting';
+  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Array.isArray(map.parts)?map.parts:[],players:roomPlayers(room)});
+}
+
+function sendRoomPlayersToRunner(room) {
+  if(!scriptRunner?.connected||!room?.scriptStarted)return;
+  scriptRunner.send({type:'players',roomId:roomKey(room.mapId,room.instanceId),players:roomPlayers(room)});
+}
+
+function handleScriptRunnerMessage(message) {
+  if(!message||typeof message!=='object')return;
+  if(message.type==='fatal'){scriptRunnerError=String(message.message||'Falló el entorno aislado de scripts.');log('SCRIPT_RUNNER',scriptRunnerError);return;}
+  const room=Object.values(rooms).find(item=>roomKey(item.mapId,item.instanceId)===String(message.roomId||''));
+  if(!room)return;
+  if(message.type==='started'){
+    room.scriptStatus='ready';
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'ready',scriptCount:message.scriptCount||0});
+    return;
+  }
+  if(message.type==='roomError'){
+    room.scriptStarted=false;room.scriptStatus='error';
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:String(message.message||'Error al iniciar scripts.').slice(0,300)});
+    return;
+  }
+  if(message.type==='output'){
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('script_output',{script:String(message.script||'Script').slice(0,80),text:String(message.text||'').slice(0,500),cls:message.cls==='warn'?'warn':message.cls==='err'?'err':''});
+    return;
+  }
+  if(message.type==='sceneCommand')applyServerScriptCommand(room,message.command,message.payload||{});
+}
+
+function applyServerScriptCommand(room,command,payload) {
+  const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
+  if(room.commandTimes.length>=100)return;
+  room.commandTimes.push(now);
+  const id=String(payload.id||'').slice(0,120);
+  if(command==='createPart'){
+    if(Object.keys(room.worldParts||{}).length>=1000||!/^server-[a-z0-9-]{1,100}$/i.test(id)||room.worldParts[id])return;
+    const part=normalizeRoomPart(id,payload.data||{});room.worldParts[id]=part;
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'upsertPart',payload:{part}});
+    return;
+  }
+  if(command==='updatePart'){
+    const current=room.worldParts?.[id];if(!current)return;
+    const patch=payload.patch&&typeof payload.patch==='object'?payload.patch:{};
+    const merged={...current,...patch,id};
+    if(patch.position)for(const axis of ['x','y','z'])if(patch.position[axis]!==undefined||patch.position[axis.toUpperCase()]!==undefined)merged[axis]=patch.position[axis]??patch.position[axis.toUpperCase()];
+    if(patch.size)for(const axis of ['x','y','z'])if(patch.size[axis]!==undefined||patch.size[axis.toUpperCase()]!==undefined)merged['s'+axis]=patch.size[axis]??patch.size[axis.toUpperCase()];
+    const part=normalizeRoomPart(id,merged);room.worldParts[id]=part;
+    if(room.basePartIds.has(id))room.changedPartIds.add(id);
+    if(part.anchored)room.physicsVelocities[id]=0;
+    scriptRunner?.send({type:'worldPart',roomId:roomKey(room.mapId,room.instanceId),part});
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'upsertPart',payload:{part}});
+    return;
+  }
+  if(command==='destroyPart'){
+    if(!room.worldParts?.[id])return;
+    delete room.worldParts[id];delete room.physicsVelocities[id];
+    if(room.basePartIds.has(id))room.removedPartIds.add(id);
+    scriptRunner?.send({type:'worldRemove',roomId:roomKey(room.mapId,room.instanceId),id});
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'destroyPart',payload:{id}});
+  }
+}
+
+function stepServerWorldPhysics() {
+  for(const room of Object.values(rooms)){
+    if(!Object.keys(room.players).length||!room.worldParts)continue;
+    const parts=Object.values(room.worldParts);
+    for(const part of parts){
+      if(part.type==='Spawn'||part.anchored||part.isNPC)continue;
+      const velocity=Math.max(-0.8,(room.physicsVelocities[part.id]||0)-0.018);
+      const oldY=part.y,oldBottom=oldY-part.sy/2,oldTop=oldY+part.sy/2;
+      part.y+=velocity;room.physicsVelocities[part.id]=velocity;
+      if(part.canCollide){
+        for(const other of parts){
+          if(other.id===part.id||other.type==='Spawn'||!other.canCollide)continue;
+          const overlapX=Math.abs(part.x-other.x)<(part.sx+other.sx)/2;
+          const overlapZ=Math.abs(part.z-other.z)<(part.sz+other.sz)/2;
+          if(!overlapX||!overlapZ)continue;
+          const bottom=part.y-part.sy/2,top=part.y+part.sy/2,otherBottom=other.y-other.sy/2,otherTop=other.y+other.sy/2;
+          if(velocity<=0&&oldBottom>=otherTop-0.08&&bottom<otherTop){part.y=otherTop+part.sy/2;room.physicsVelocities[part.id]=0;break;}
+          if(velocity>0&&oldTop<=otherBottom+0.08&&top>otherBottom){part.y=otherBottom-part.sy/2;room.physicsVelocities[part.id]=0;break;}
+        }
+      }
+      if(Math.abs(part.y-oldY)>0.0001){
+        if(room.basePartIds.has(part.id))room.changedPartIds.add(part.id);
+        const positionUpdate={id:part.id,x:part.x,y:part.y,z:part.z};
+        scriptRunner?.send({type:'worldPosition',roomId:roomKey(room.mapId,room.instanceId),part:positionUpdate});
+        io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'upsertPart',payload:{part:positionUpdate}});
+      }
+    }
+  }
+}
+setInterval(stepServerWorldPhysics,50);
+
 function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,...s}=u; return s; }
 function publicUser(u) {
   if (!u) return null;
@@ -779,11 +931,12 @@ io.on('connection', socket => {
     const prev = connSockets[socket.id];
     if (prev?.mapId && (prev.mapId !== mapId || prev.instanceId !== instanceId)) leaveRoom(socket, prev.mapId, prev.instanceId);
     const room = getRoom(mapId, instanceId);
+    if (!room.worldParts || room.pendingReset) initializeRoomWorld(room,storedMap);
     const channel = gameChannel(mapId, instanceId);
     const pd = {
       socketId: socket.id, userId: userId||socket.id,
       username: username.substring(0,30), color: color||'#5b8def',
-      x:0,y:3,z:0, ry:0, anim:0, moving:false, mapId, instanceId, joinedAt:Date.now(),
+      x:0,y:3,z:0, ry:0, anim:0, moving:false, onGround:false, mapId, instanceId, joinedAt:Date.now(),
     };
     room.players[socket.id] = pd;
     connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color, mapId, instanceId };
@@ -792,10 +945,13 @@ io.on('connection', socket => {
       onlineUsers[user.id] = { ...(onlineUsers[user.id]||{}), socketId:socket.id, username, color, mapId, instanceId };
       io.emit('online_update', { userId:user.id, online:true, mapId, instanceId });
     }
+    startRoomServerScripts(room,storedMap);
+    sendRoomPlayersToRunner(room);
     log('JOIN', `${username} → ${mapId} / ${instanceId}`);
     socket.emit('room_state', {
       players: roomPlayers(room).filter(p=>p.socketId!==socket.id),
       chat: room.chat.slice(-30), mapId, instanceId,
+      ...roomWorldSnapshot(room), scriptRuntime:room.scriptStatus,
     });
     socket.to(channel).emit('player_joined', pd);
     socket.emit('join_ack', { socketId:socket.id, mapId, instanceId, playerCount:Object.keys(room.players).length });
@@ -805,8 +961,10 @@ io.on('connection', socket => {
     const meta = connSockets[socket.id]; if (!meta?.mapId) return;
     const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id]) return;
     const p = room.players[socket.id];
-    p.x=data.x??p.x; p.y=data.y??p.y; p.z=data.z??p.z;
-    p.ry=data.ry??p.ry; p.anim=data.anim??p.anim; p.moving=data.moving??p.moving;
+    const bounded=(value,previous,min=-10000,max=10000)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):previous;};
+    p.x=bounded(data?.x,p.x);p.y=bounded(data?.y,p.y);p.z=bounded(data?.z,p.z);
+    p.ry=bounded(data?.ry,p.ry,-1000,1000);p.anim=bounded(data?.anim,p.anim,-10,10);p.moving=!!data?.moving;p.onGround=!!data?.onGround;
+    sendRoomPlayersToRunner(room);
     socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
       { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving });
   });
@@ -880,6 +1038,11 @@ function leaveRoom(socket, mapId, instanceId) {
     socket.to(channel).emit('player_left', { socketId:socket.id });
     delete room.players[socket.id];
   }
+  if(Object.keys(room.players).length){sendRoomPlayersToRunner(room);}
+  else{
+    if(scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'stop',roomId:roomKey(mapId,instanceId)});
+    room.scriptStarted=false;room.scriptStatus='stopped';room.pendingReset=true;
+  }
   socket.leave(channel);
   const meta = connSockets[socket.id];
   if (meta) { meta.mapId = null; meta.instanceId = null; }
@@ -893,14 +1056,20 @@ function leaveRoom(socket, mapId, instanceId) {
 // Limpiar zombies cada 30s
 setInterval(() => {
   for (const [key, room] of Object.entries(rooms)) {
+    let removedPlayer=false;
     for (const sid of Object.keys(room.players)) {
       const s = io.sockets.sockets.get(sid);
       if (!s||!s.connected) {
         delete room.players[sid];
+        removedPlayer=true;
         io.to(gameChannel(room.mapId, room.instanceId)).emit('player_left', { socketId:sid });
       }
     }
-    if (!Object.keys(room.players).length && Date.now()-room.createdAt > 30*60*1000) delete rooms[key];
+    if(removedPlayer){
+      if(Object.keys(room.players).length)sendRoomPlayersToRunner(room);
+      else{if(scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'stop',roomId:roomKey(room.mapId,room.instanceId)});room.scriptStarted=false;room.scriptStatus='stopped';room.pendingReset=true;}
+    }
+    if (!Object.keys(room.players).length && Date.now()-room.createdAt > 30*60*1000) { if(scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'stop',roomId:roomKey(room.mapId,room.instanceId)});delete rooms[key]; }
   }
 }, 30000);
 
