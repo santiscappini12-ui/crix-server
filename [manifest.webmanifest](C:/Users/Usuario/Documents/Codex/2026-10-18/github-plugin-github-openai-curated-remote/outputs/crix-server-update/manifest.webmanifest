@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "Crix — Juegos y creación",
+  "short_name": "Crix",
+  "description": "Jugá, publicá juegos y creá con Crix.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080a0f",
+  "theme_color": "#080a0f",
+  "icons": [
+    {
+      "src": "/crix-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
