@@ -99,7 +99,7 @@ input,select,textarea{font-family:var(--font);}
 .game-act-btn:hover{background:var(--acc);}
 .upload-zone{border:2px dashed var(--border);border-radius:12px;padding:28px;text-align:center;cursor:pointer;color:var(--text3);font-size:13px;transition:all .2s;margin-bottom:12px;}
 .upload-zone:hover{border-color:var(--acc);color:var(--text2);background:rgba(91,141,239,.04);}
-/* ... resto de estilos (sin cambios) ... */
+/* ... resto de styles (sin cambios) ... */
 @media(max-width:650px){
   #stu-sidebar{width:170px;}#props-panel{display:none;}
   #msg-sidebar{width:210px;}
@@ -148,9 +148,10 @@ input,select,textarea{font-family:var(--font);}
         <label class="field-lbl">Contraseña</label>
         <input class="inp" id="a-p" type="password" placeholder="••••••••" autocomplete="current-password">
       </div>
-      <button class="btn btn-p" style="width:100%;margin-top:4px" onclick="doLogin()">Entrar →</button>
+      <!-- FIX: agregar type="button" para evitar comportamiento submit/reload -->
+      <button type="button" class="btn btn-p" style="width:100%;margin-top:4px" onclick="doLogin()">Entrar →</button>
       <div style="text-align:center;font-size:12px;color:var(--text2);margin-top:14px">
-        ¿Sin cuenta? <button class="link-btn" onclick="swapForm('reg')">Registrate gratis</button>
+        ¿Sin cuenta? <button type="button" class="link-btn" onclick="swapForm('reg')">Registrate gratis</button>
       </div>
     </div>
     <div id="form-reg" style="display:none">
@@ -167,9 +168,10 @@ input,select,textarea{font-family:var(--font);}
         <label class="field-lbl">Repetir Contraseña</label>
         <input class="inp" id="r-p2" type="password" placeholder="••••••••">
       </div>
-      <button class="btn btn-p" style="width:100%;margin-top:4px" onclick="doRegister()">Crear Cuenta →</button>
+      <!-- FIX: agregar type="button" para evitar comportamiento submit/reload -->
+      <button type="button" class="btn btn-p" style="width:100%;margin-top:4px" onclick="doRegister()">Crear Cuenta →</button>
       <div style="text-align:center;font-size:12px;color:var(--text2);margin-top:14px">
-        ¿Ya tenés? <button class="link-btn" onclick="swapForm('login')">Iniciá sesión</button>
+        ¿Ya tenés? <button type="button" class="link-btn" onclick="swapForm('login')">Iniciá sesión</button>
       </div>
     </div>
   </div>
@@ -242,8 +244,6 @@ input,select,textarea{font-family:var(--font);}
   <div class="games-grid" id="grid-mine"></div>
 </div></div>
 </div>
-
-<!-- ... el resto del contenido HTML (pantallas, modales, scripts) permanece igual hasta antes de la segunda copia que estaba duplicada ... -->
 
 <!-- INSERTAMOS UN BLOQUE SEGURO (guards) PARA EVITAR REDECLARACIONES SI SE PEGARA OTRO HTML -->
 <script>
