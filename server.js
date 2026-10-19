@@ -31,6 +31,18 @@ function loadDB() {
       DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
       DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {};
+      // Los mensajes anteriores al cifrado E2EE no se pueden proteger retroactivamente.
+      // Eliminarlos evita volver a servir o conservar conversaciones en texto plano.
+      let legacyMessagesRemoved = 0;
+      for (const [conversationId, messages] of Object.entries(DB.convs)) {
+        const encrypted = (Array.isArray(messages) ? messages : []).filter(message =>
+          message?.e2ee?.v === 1 && typeof message.e2ee.peer?.ciphertext === 'string' &&
+          typeof message.e2ee.self?.ciphertext === 'string'
+        );
+        legacyMessagesRemoved += (Array.isArray(messages) ? messages.length : 0) - encrypted.length;
+        if (encrypted.length) DB.convs[conversationId] = encrypted;
+        else delete DB.convs[conversationId];
+      }
       let rolesChanged = false;
       const crixUser = Object.values(DB.users).find(user => user.username?.toLowerCase() === 'crix');
       const crixAdminConfigured = !!(crixUser && process.env.CRIX_ADMIN_PASSWORD && verifyPassword(process.env.CRIX_ADMIN_PASSWORD, crixUser.pw));
@@ -42,6 +54,10 @@ function loadDB() {
         }
       }
       if (rolesChanged) saveDB();
+      if (legacyMessagesRemoved) {
+        console.warn(`[E2EE] Eliminados ${legacyMessagesRemoved} mensajes antiguos que estaban en texto plano`);
+        saveDB();
+      }
       console.log(`[DB] Cargado: ${Object.keys(DB.users).length} usuarios, ${Object.keys(DB.maps).length} mapas`);
     } else {
       console.log('[DB] Archivo nuevo — empezando vacío');
@@ -77,10 +93,10 @@ function getRoom(mapId) {
 }
 function roomPlayers(mapId) { return Object.values(getRoom(mapId).players); }
 function log(t,d) { console.log(`[${new Date().toLocaleTimeString()}] ${t}:`, d); }
-function safeUser(u) { if (!u) return null; const {pw:_,...s}=u; return s; }
+function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,...s}=u; return s; }
 function publicUser(u) {
   if (!u) return null;
-  const { pw:_, banned:__, adminGrantedBy:___, friendRequests:____, friendRequests_recv:_____, friendRequests_sent:______, ...profile } = u;
+  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, ...profile } = u;
   return profile;
 }
 
@@ -351,17 +367,48 @@ app.post('/api/maps/:id/play', (req, res) => {
   res.json({ ok:true, plays:map.plays });
 });
 
-// ── GET conversaciones de un usuario ──
-app.get('/api/convs/:userId', (req, res) => {
+// ── Claves públicas y bóveda privada cifrada del chat E2EE ──
+app.get('/api/e2ee/keys/:id', (req, res) => {
+  const target = DB.users[req.params.id];
+  if (!target) return res.status(404).json({ ok:false, err:'Usuario no encontrado' });
+  const viewer = readSession(req);
+  res.json({
+    ok:true,
+    publicKey:target.e2eePublicKey || null,
+    vault:viewer?.id === target.id ? (target.e2eeVault || null) : undefined
+  });
+});
+
+app.post('/api/e2ee/keys', requireAuth, (req, res) => {
+  const { publicKey, vault } = req.body || {};
+  const isBase64 = value => typeof value === 'string' && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+  if (!publicKey || publicKey.kty !== 'EC' || publicKey.crv !== 'P-256' ||
+      !/^[A-Za-z0-9_-]{43}$/.test(publicKey.x || '') || !/^[A-Za-z0-9_-]{43}$/.test(publicKey.y || '') ||
+      !vault || vault.v !== 1 || !isBase64(vault.salt) ||
+      !isBase64(vault.iv) || !isBase64(vault.ciphertext) ||
+      !Number.isInteger(vault.iterations) || vault.iterations < 100000 || vault.iterations > 1000000 ||
+      Buffer.from(vault.salt, 'base64').length !== 16 || Buffer.from(vault.iv, 'base64').length !== 12 ||
+      vault.ciphertext.length > 8192)
+    return res.status(400).json({ ok:false, err:'Formato de clave cifrada inválido' });
+  if (req.user.e2eePublicKey || req.user.e2eeVault)
+    return res.status(409).json({ ok:false, err:'Esta cuenta ya tiene claves cifradas configuradas' });
+  req.user.e2eePublicKey = { kty:'EC', crv:'P-256', x:publicKey.x, y:publicKey.y, ext:true, key_ops:[] };
+  req.user.e2eeVault = { v:1, salt:vault.salt, iv:vault.iv, ciphertext:vault.ciphertext, iterations:vault.iterations };
+  saveDB();
+  res.json({ ok:true, publicKey:req.user.e2eePublicKey });
+});
+
+// ── GET una conversación cifrada de la cuenta autenticada ──
+app.get('/api/convs/:userId/:convId', (req, res) => {
   const uid = req.params.userId;
+  const convId = req.params.convId;
   const user = readSession(req);
   if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
-  if (user.id !== uid && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés leer estas conversaciones' });
-  const out = {};
-  for (const [cid, msgs] of Object.entries(DB.convs)) {
-    if (cid.split('_').includes(uid)) out[cid] = msgs;
-  }
-  res.json({ ok:true, convs: out });
+  const members = convId.split('_');
+  if (user.id !== uid || members.length !== 2 || !members.includes(uid))
+    return res.status(403).json({ ok:false, err:'No podés leer esta conversación' });
+  const messages = Array.isArray(DB.convs[convId]) ? DB.convs[convId].filter(message => message?.e2ee?.v === 1) : [];
+  res.json({ ok:true, messages });
 });
 
 // ── POST mensaje ──
@@ -371,19 +418,38 @@ app.post('/api/convs/:convId', (req, res) => {
     const user = readSession(req);
     const members = convId.split('_');
     if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
-    if (members.length !== 2 || !members.includes(user.id))
+    if (members.length !== 2 || new Set(members).size !== 2 || convId !== [...members].sort().join('_') || !members.includes(user.id))
       return res.status(403).json({ ok:false, err:'No pertenecés a esta conversación' });
     const { msg } = req.body;
-    if (!msg) return res.json({ ok:false });
+    if (!msg || typeof msg.id !== 'string' || msg.id.length > 100 || msg.from !== user.id ||
+        msg.e2ee?.v !== 1 || typeof msg.e2ee.salt !== 'string' ||
+        typeof msg.e2ee.peer?.iv !== 'string' || typeof msg.e2ee.peer?.ciphertext !== 'string' ||
+        typeof msg.e2ee.self?.iv !== 'string' || typeof msg.e2ee.self?.ciphertext !== 'string')
+      return res.status(400).json({ ok:false, err:'El chat solo acepta mensajes E2EE' });
+    const isBase64 = value => typeof value === 'string' && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+    if (!isBase64(msg.e2ee.salt) || Buffer.from(msg.e2ee.salt,'base64').length !== 16 ||
+        !isBase64(msg.e2ee.peer.iv) || Buffer.from(msg.e2ee.peer.iv,'base64').length !== 12 ||
+        !isBase64(msg.e2ee.self.iv) || Buffer.from(msg.e2ee.self.iv,'base64').length !== 12 ||
+        !isBase64(msg.e2ee.peer.ciphertext) || !isBase64(msg.e2ee.self.ciphertext))
+      return res.status(400).json({ ok:false, err:'Sobre E2EE incompleto o inválido' });
+    if (JSON.stringify(msg.e2ee).length > 45 * 1024 * 1024)
+      return res.status(413).json({ ok:false, err:'El adjunto cifrado supera el límite del chat' });
+    if (!DB.users[members[0]]?.e2eePublicKey || !DB.users[members[1]]?.e2eePublicKey)
+      return res.status(409).json({ ok:false, err:'Ambas cuentas deben activar el chat cifrado iniciando sesión' });
+    const encryptedMessage = {
+      id:msg.id,
+      from:user.id,
+      t:Number.isFinite(msg.t) ? msg.t : Date.now(),
+      e2ee:{ v:1, salt:msg.e2ee.salt, peer:msg.e2ee.peer, self:msg.e2ee.self }
+    };
     DB.convs[convId] = DB.convs[convId] || [];
-    DB.convs[convId].push(msg);
-    if (DB.convs[convId].length > 500)
-      DB.convs[convId] = DB.convs[convId].slice(-500);
+    if (!DB.convs[convId].some(existing => existing.id === encryptedMessage.id))
+      DB.convs[convId].push(encryptedMessage);
     saveDB();
     // Notificar en tiempo real
     convId.split('_').forEach(uid => {
       const o = onlineUsers[uid];
-      if (o) io.to(o.socketId).emit('new_private_msg', { convId, msg });
+      if (o) io.to(o.socketId).emit('new_private_msg', { convId, msg:encryptedMessage });
     });
     res.json({ ok:true });
   } catch(e) { res.json({ ok:false, err:e.message }); }
@@ -543,8 +609,7 @@ app.delete('/api/videos/:id', (req, res) => {
 
 // ── POSTS (Foros) ──
 app.get('/api/posts', (req, res) => {
-  const posts = (DB.posts || []).slice(0, 200); // últimas 200
-  res.json({ ok: true, posts });
+  res.json({ ok: true, posts:DB.posts || [] });
 });
 
 app.post('/api/posts', (req, res) => {
@@ -644,17 +709,8 @@ io.on('connection', socket => {
     const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
     if (target) target.emit('call_end', { from });
   });
-  // Las solicitudes y aceptaciones se persisten por API. Ignoramos eventos
-  // homónimos del cliente para impedir notificaciones con identidad falsificada.
-  socket.on('msg', ({ convId, msg }) => {
-    const user = socket.data.user;
-    if (!user || !convId || !convId.split('_').includes(user.id)) return;
-    // Reenviar al destinatario si está conectado
-    const [uid1, uid2] = convId.split('_');
-    const targetId = uid1 === user.id ? uid2 : uid1;
-    const target = Object.values(io.sockets.sockets).find(s => s.userId === targetId);
-    if (target) target.emit('msg_incoming', { convId, msg });
-  });
+  // El chat privado solo se almacena y notifica mediante la API E2EE.
+  // No se reenvían eventos `msg` antiguos que pudieran contener texto plano.
   socket.on('user_online', ({ userId, username, color }) => {
     const user = socket.data.user;
     if (!user || user.id !== userId) return;
