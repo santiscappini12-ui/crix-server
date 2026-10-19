@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#080a0f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/crix-icon.svg" type="image/svg+xml">
 <title>Crix — Plataforma de Juegos</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
@@ -464,6 +469,7 @@ input,select,textarea{font-family:var(--font);}
   <div class="section-hd"><div class="section-hd-accent" style="background:var(--green)"></div>Mis Juegos
     <div style="margin-left:auto;display:flex;gap:8px">
       <button class="btn btn-p" style="font-size:12px;padding:6px 14px" onclick="createNewGame()">➕ Nuevo juego</button>
+      <button class="btn btn-g" style="font-size:12px;padding:6px 14px" onclick="createNewApp()">📱 Nueva app</button>
       <label class="btn btn-g" style="font-size:12px;padding:6px 14px;cursor:pointer">
         📁 Importar
         <input type="file" style="display:none" id="upload-file" accept=".html,.crix,.json,image/*" onchange="handleUpload(event)">
@@ -477,7 +483,17 @@ input,select,textarea{font-family:var(--font);}
 <!-- ═══ IFRAME GAME (para juegos HTML importados) ═══ -->
 <div id="s-iframe" class="screen" style="background:#000">
   <button id="iframe-back-btn" style="position:fixed;top:10px;right:10px;z-index:9999;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.15);color:white;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:12px;font-weight:700" onclick="exitIframe()">← Salir</button>
-  <iframe id="game-iframe" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
+  <iframe id="game-iframe" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+</div>
+
+<div class="mo-overlay" id="mo-app-editor">
+  <div class="mo-box" style="width:min(900px,96vw);max-height:92vh;display:flex;flex-direction:column">
+    <h3>📱 Editor de app</h3>
+    <div class="field-grp"><label class="field-lbl">Nombre</label><input class="inp" id="app-name" maxlength="80"></div>
+    <div class="field-grp"><label class="field-lbl">Visibilidad</label><select class="inp" id="app-privacy"><option value="public">🌍 Público</option><option value="private">🔒 Privado</option></select></div>
+    <div class="field-grp" style="flex:1;min-height:0"><label class="field-lbl">Código HTML de la app</label><textarea class="inp" id="app-source" spellcheck="false" maxlength="1000000" style="height:48vh;resize:vertical;font-family:var(--mono);font-size:12px"></textarea></div>
+    <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-app-editor')">Cancelar</button><button class="btn btn-p" onclick="saveAppSource()">💾 Guardar y publicar</button></div>
+  </div>
 </div>
 
 <!-- ═══ DISCOVER ═══ -->
@@ -568,6 +584,7 @@ input,select,textarea{font-family:var(--font);}
   <div class="field-grp"><label class="field-lbl">Título</label><input class="inp" id="uv-title" placeholder="Título del video"></div>
   <div class="field-grp"><label class="field-lbl">Descripción</label><textarea class="inp" id="uv-desc" style="height:60px;resize:none" placeholder="De qué trata..."></textarea></div>
   <div class="field-grp"><label class="field-lbl">Categoría</label><select class="inp" id="uv-cat"><option value="gaming">🎮 Gaming</option><option value="tutorial">📚 Tutorial</option><option value="music">🎵 Música</option><option value="art">🎨 Arte</option><option value="other">🌐 Otro</option></select></div>
+  <div class="field-grp"><label class="field-lbl">Visibilidad</label><select class="inp" id="uv-privacy"><option value="public">🌍 Público: visible para todos</option><option value="private">🔒 Privado: solo yo</option></select></div>
   <div class="field-grp"><label class="field-lbl">Archivo de video</label><label class="upload-zone" style="padding:12px">📹 Seleccioná un video<input type="file" id="uv-file" accept="video/*" style="display:none" onchange="previewVideoUpload(event)"></label><video id="uv-preview" style="display:none;width:100%;border-radius:8px;margin-top:8px;max-height:180px" controls></video></div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-upload-video')">Cancelar</button><button class="btn btn-p" onclick="confirmUploadVideo()">📤 Publicar</button></div>
 </div>
@@ -689,6 +706,8 @@ input,select,textarea{font-family:var(--font);}
 <div id="code-overlay">
 <div id="code-hd">
   <div id="code-tabs-bar"></div>
+  <select id="code-language" class="inp" style="width:auto;font-size:11px;padding:4px 8px" aria-label="Lenguaje" onchange="setScriptLanguage(this.value)"><option value="crixscript">CrixScript</option><option value="javascript">JavaScript</option></select>
+  <select id="code-event" class="inp" style="width:auto;font-size:11px;padding:4px 8px" aria-label="Evento" onchange="setScriptEvent(this.value)"><option value="onStart">onStart</option><option value="onUpdate">onUpdate</option><option value="onStop">onStop</option></select>
   <button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="stuAdd('Script')">+ Script</button>
   <button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="stuAdd('LocalScript')">+ Local</button>
   <button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="stuAdd('ModuleScript')">+ Módulo</button>
@@ -810,10 +829,45 @@ BC.addEventListener('message', e => {
   if (e.data.type === 'msg_update') { if (document.getElementById('s-msg').classList.contains('active')) loadConvList(); }
   if (e.data.type === 'map_update') { if (document.getElementById('s-home').classList.contains('active')) renderHome(); }
 });
+let CLOUD_READY = false;
+async function apiRequest(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const token = options.token !== undefined ? options.token : DB.get('token');
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const init = { method: options.method || 'GET', headers };
+  if (options.body !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(options.body); }
+  const response = await fetch(url, init);
+  let data = {};
+  try { data = await response.json(); } catch {}
+  if (!response.ok || data.ok === false) { const err = new Error(data.err || 'No se pudo conectar con Crix'); err.status = response.status; err.payload = data; throw err; }
+  return data;
+}
 function getUsers()  { return DB.get('users')  || {}; }
-function setUsers(u) { DB.set('users', u); }
+function setUsers(u) {
+  const previous = DB.get('users') || {};
+  DB.set('users', u);
+  if (!CLOUD_READY || !ME || !DB.get('token')) return;
+  Object.entries(u).forEach(([id, user]) => {
+    if (!user || JSON.stringify(previous[id]) === JSON.stringify(user)) return;
+    if (id !== ME.id && !ME.isAdmin) return;
+    const { pw, ...safe } = user;
+    apiRequest('/api/user/' + encodeURIComponent(id), { method:'POST', body:safe }).catch(() => {});
+  });
+}
 function getMaps()   { return DB.get('maps')   || {}; }
-function setMaps(m)  { DB.set('maps', m); BC.postMessage({ type: 'map_update' }); }
+function setMaps(m)  {
+  const previous = DB.get('maps') || {};
+  DB.set('maps', m); BC.postMessage({ type: 'map_update' });
+  if (!CLOUD_READY || !ME || !DB.get('token')) return;
+  Object.entries(m).forEach(([id, map]) => {
+    if (map?.authorId === ME.id && JSON.stringify(previous[id]) !== JSON.stringify(map))
+      apiRequest('/api/maps', { method:'POST', body:map }).catch(() => {});
+  });
+  Object.entries(previous).forEach(([id, map]) => {
+    if (map?.authorId === ME.id && !m[id])
+      apiRequest('/api/maps/' + encodeURIComponent(id), { method:'DELETE' }).catch(() => {});
+  });
+}
 function getConvs()  { return DB.get('convs')  || {}; }
 function setConvs(c) { DB.set('convs', c); BC.postMessage({ type: 'msg_update' }); }
 function nextId(type) { const k = 'ctr_' + type; let n = DB.get(k) || 1000; n++; DB.set(k, n); return String(n); }
@@ -823,12 +877,135 @@ function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 function timeStr() { return new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); }
 function dateStr(iso) { return new Date(iso).toLocaleDateString('es-AR',{year:'numeric',month:'short',day:'numeric'}); }
 let ME = null;
+function sessionProfile(user, users = {}) {
+  const pending = Array.isArray(user?.friendRequests_recv) ? user.friendRequests_recv : [];
+  return { ...user, friendRequests:pending.map(from => {
+    const sender = users[from] || {};
+    return { from, fromName:sender.username || 'Usuario', fromColor:sender.color || '#5b8def', at:new Date().toISOString() };
+  }) };
+}
 function swapForm(to) { document.getElementById('form-login').style.display = to === 'login' ? '' : 'none'; document.getElementById('form-reg').style.display = to === 'reg' ? '' : 'none'; document.getElementById('auth-err').style.display = 'none'; }
 function authErr(m) { const e = document.getElementById('auth-err'); e.textContent = m; e.style.display = 'block'; }
-function doLogin() { const u = document.getElementById('a-u').value.trim(); const p = document.getElementById('a-p').value; if (!u || !p) { authErr('Completá los campos.'); return; } const users = getUsers(); const found = Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase()); if (!found) { authErr('Usuario no encontrado.'); return; } if (found.pw !== btoa(unescape(encodeURIComponent(p)))) { authErr('Contraseña incorrecta.'); return; } loginAs(found); }
-function doRegister() { const u = document.getElementById('r-u').value.trim(); const p = document.getElementById('r-p').value; const p2 = document.getElementById('r-p2').value; if (!u || !p) { authErr('Completá todos los campos.'); return; } if (u.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; } if (p.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; } if (p !== p2) { authErr('Las contraseñas no coinciden.'); return; } if (!/^[a-zA-Z0-9_]+$/.test(u)) { authErr('Solo letras, números y guión bajo.'); return; } const users = getUsers(); if (Object.values(users).find(x => x.username.toLowerCase() === u.toLowerCase())) { authErr('Ese nombre ya está en uso.'); return; } const id = nextId('user'); const nu = { id, username: u, pw: btoa(unescape(encodeURIComponent(p))), created: new Date().toISOString(), color: randColor(), friends: [], games: [], visits: 0, bio: '' }; users[id] = nu; setUsers(users); loginAs(nu); }
-function loginAs(u) { ME = u; DB.set('session', u.id); bootApp(); }
-function trySession() { const sid = DB.get('session'); if (!sid) return false; const u = getUsers()[sid]; if (u) { ME = u; return true; } return false; }
+async function doLogin() {
+  const username = document.getElementById('a-u').value.trim();
+  const password = document.getElementById('a-p').value;
+  if (!username || !password) { authErr('Completá los campos.'); return; }
+  try {
+    const result = await apiRequest('/api/login', { method:'POST', body:{ username, pw:password }, token:'' });
+    loginAs(result.user, result.token);
+  } catch (err) {
+    if (err.payload?.err !== 'Usuario no encontrado') { authErr(err.message); return; }
+    const legacy = Object.values(getUsers()).find(x => x.username.toLowerCase() === username.toLowerCase());
+    if (!legacy || legacy.pw !== btoa(unescape(encodeURIComponent(password)))) { authErr('Usuario no encontrado o contraseña incorrecta.'); return; }
+    try {
+      const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color }, token:'' });
+      loginAs(result.user, result.token, legacy.id);
+    } catch (migrationError) { authErr(migrationError.message); }
+  }
+}
+async function doRegister() {
+  const username = document.getElementById('r-u').value.trim();
+  const password = document.getElementById('r-p').value;
+  const repeat = document.getElementById('r-p2').value;
+  if (!username || !password) { authErr('Completá todos los campos.'); return; }
+  if (username.length < 3) { authErr('Mínimo 3 caracteres en el nombre.'); return; }
+  if (password.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; }
+  if (password !== repeat) { authErr('Las contraseñas no coinciden.'); return; }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) { authErr('Solo letras, números y guión bajo.'); return; }
+  try {
+    const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor() }, token:'' });
+    loginAs(result.user, result.token);
+  } catch (err) { authErr(err.message); }
+}
+function loginAs(user, token, legacyId) {
+  const users = getUsers();
+  const legacy = legacyId ? users[legacyId] : null;
+  const profile = { ...user };
+  if (legacy) {
+    ['bio','color','friends','games','visits','following','liked','avatar'].forEach(key => {
+      if (legacy[key] !== undefined) profile[key] = legacy[key];
+    });
+    const maps = getMaps();
+    Object.values(maps).forEach(map => { if (map.authorId === legacyId) { map.authorId = profile.id; map.authorName = profile.username; } });
+    DB.set('maps', maps);
+    const videos = getVideos();
+    videos.forEach(video => { if (video.authorId === legacyId) { video.authorId = profile.id; video.authorName = profile.username; } });
+    DB.set('crix_videos', videos);
+    const posts = getPosts();
+    posts.forEach(post => { if (post.authorId === legacyId) { post.authorId = profile.id; post.authorName = profile.username; } });
+    DB.set('crix_posts', posts);
+    delete users[legacyId];
+  }
+  users[profile.id] = profile;
+  DB.set('users', users); DB.set('session', profile.id); DB.set('token', token);
+  ME = profile; bootApp();
+  if (socket) { socket.auth = { token }; socket.disconnect().connect(); }
+  syncCloudData();
+}
+function trySession() { const sid = DB.get('session'); if (!DB.get('token') || !sid) return false; const u = getUsers()[sid]; if (u) { ME = u; return true; } return false; }
+async function restoreSession() {
+  try {
+    const result = await apiRequest('/api/session');
+    ME = result.user;
+    const users = getUsers(); users[ME.id] = ME; DB.set('users', users); DB.set('session', ME.id);
+    bootApp(); await syncCloudData();
+  } catch {
+    DB.del('token'); DB.del('session'); ME = null;
+    document.getElementById('s-auth').classList.add('active');
+  }
+}
+async function syncCloudData() {
+  CLOUD_READY = false;
+  const localMaps = getMaps();
+  const localVideos = getVideos();
+  const localPosts = getPosts();
+  try {
+    const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id);
+    const ownVideos = localVideos.filter(video => video.authorId === ME.id);
+    const ownPosts = localPosts.filter(post => post.authorId === ME.id);
+    await Promise.all([
+      ...ownMaps.map(map => apiRequest('/api/maps', { method:'POST', body:map }).catch(() => null)),
+      ...ownVideos.map(video => apiRequest('/api/videos', { method:'POST', body:video }).catch(() => null)),
+      ...ownPosts.map(post => apiRequest('/api/posts', { method:'POST', body:post }).catch(() => null)),
+      apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:ME }).catch(() => null)
+    ]);
+    const [usersResult, mapsResult, videosResult, postsResult, sessionResult] = await Promise.all([
+      apiRequest('/api/users'), apiRequest('/api/maps'), apiRequest('/api/videos'), apiRequest('/api/posts'), apiRequest('/api/session')
+    ]);
+    const users = { ...(usersResult.users || {}) };
+    const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
+    const maps = { ...(mapsResult.maps || {}) };
+    const vidsById = Object.fromEntries(localVideos.map(video => [video.id, video]));
+    const videos = (videosResult.videos || []).map(video => ({ ...video, data: video.data === '[data]' ? (vidsById[video.id]?.data || null) : video.data }));
+    const postsById = Object.fromEntries(localPosts.map(post => [post.id, post]));
+    const posts = (postsResult.posts || []).map(post => postsById[post.id] || post);
+    DB.set('users', users); DB.set('maps', maps); DB.set('crix_videos', videos); DB.set('crix_posts', posts);
+    ME = users[ownProfile.id];
+    CLOUD_READY = true;
+    checkNotifs();
+    if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
+  } catch (err) { console.warn('[CLOUD] No se pudieron sincronizar los datos:', err.message); }
+}
+async function refreshCloudContent() {
+  if (!CLOUD_READY || !ME) return;
+  try {
+    const localVideos = getVideos();
+    const [usersResult, mapsResult, videosResult, postsResult, sessionResult] = await Promise.all([
+      apiRequest('/api/users'), apiRequest('/api/maps'), apiRequest('/api/videos'), apiRequest('/api/posts'), apiRequest('/api/session')
+    ]);
+    const users = { ...(usersResult.users || {}) };
+    const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
+    const videosById = Object.fromEntries(localVideos.map(video => [video.id, video]));
+    const videos = (videosResult.videos || []).map(video => ({ ...video, data:video.data === '[data]' ? (videosById[video.id]?.data || null) : video.data }));
+    DB.set('users', users); DB.set('maps', mapsResult.maps || {}); DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
+    ME = ownProfile;
+    checkNotifs();
+    if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
+    if (document.getElementById('s-discover')?.classList.contains('active')) renderDiscover();
+    if (document.getElementById('s-videos')?.classList.contains('active')) renderVideos();
+    if (document.getElementById('s-forums')?.classList.contains('active')) renderForums();
+  } catch (err) { console.warn('[CLOUD] No se pudo actualizar el contenido:', err.message); }
+}
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
 function bootApp() {
   ensureDefaultMaps();
@@ -850,7 +1027,7 @@ function bootApp() {
   av.textContent = ME.username[0].toUpperCase();
   av.style.background = ME.color;
   // Boton admin si es Crix
-  if (ME.username.toLowerCase() === 'crix' || ME.isAdmin) {
+  if (ME.isAdmin) {
     const adminBtn = document.createElement('button');
     adminBtn.className = 'nav-tab';
     adminBtn.innerHTML = '⚡ Admin';
@@ -878,7 +1055,7 @@ function showBanScreen() {
         <div><span style="color:var(--text3);font-size:11px">MOTIVO</span><div style="font-weight:600">${esc(b.reason||'Sin motivo especificado')}</div></div>
         ${b.notes ? '<div><span style="color:var(--text3);font-size:11px">NOTAS</span><div style="font-size:13px;color:var(--text2)">' + esc(b.notes) + '</div></div>' : ''}
       </div>
-      <button class="btn btn-g" onclick="DB.del('session');location.reload()">← Cerrar sesión</button>
+      <button class="btn btn-g" onclick="DB.del('session');DB.del('token');location.reload()">← Cerrar sesión</button>
     </div>`);
 }
 function goTab(t, extra) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); const el = document.getElementById('s-' + t); if (el) el.classList.add('active'); document.querySelectorAll('.nav-tab').forEach((b, i) => { const tabs=['home','discover','videos','forums','studio','msg','profile']; b.classList.toggle('active', tabs[i] === t); }); if (t === 'home') renderHome(); if (t === 'discover') renderDiscover(); if (t === 'studio') initStudio(); if (t === 'videos') initVideos(); if (t === 'forums') initForums(); if (t === 'msg') loadConvList(); if (t === 'profile') renderProfile(extra || ME.id); }
@@ -899,7 +1076,7 @@ const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt
 function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine'); }
 function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${m.thumb ? `<img src="${m.thumb}">` : ''}<span class="thumb-icon">${THUMB_ICONS[i%THUMB_ICONS.length]}</span>${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
-function editMap(id) { stMapId = id; initStudio(); goTab('studio'); }
+function editMap(id) { const item = getMaps()[id]; if (item?.isHtmlGame) { openAppEditor(id); return; } stMapId = id; initStudio(); goTab('studio'); }
 function handleUpload(e) {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
@@ -954,6 +1131,37 @@ function createNewGame() {
   ME.games = ME.games || []; ME.games.push(id); saveMe();
   stMapId = id; goTab('studio');
   showToast('✅ Nuevo juego creado: ' + name);
+}
+function createNewApp() {
+  const id = nextId('map');
+  const maps = getMaps();
+  const name = 'Mi App ' + (Object.values(maps).filter(item => item.authorId === ME.id && item.kind === 'app').length + 1);
+  const htmlContent = '<!doctype html>\n<html lang="es">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + esc(name) + '</title>\n<style>body{font:16px system-ui;margin:0;padding:32px;background:#101522;color:#eef}main{max-width:720px;margin:auto}button{padding:10px 16px;border:0;border-radius:8px;background:#5b8def;color:white}</style>\n</head>\n<body><main><h1>Mi primera app Crix</h1><p>Editá este HTML para empezar.</p><button onclick="document.querySelector(\'p\').textContent=\'¡Funciona!\'">Probar</button></main></body>\n</html>';
+  const app = { id, kind:'app', name, desc:'App creada con Crix', genre:'other', authorId:ME.id, authorName:ME.username, privacy:'public', plays:0, likes:0, created:new Date().toISOString(), parts:[], scripts:[], thumb:null, htmlContent, isHtmlGame:true };
+  maps[id] = app; setMaps(maps);
+  ME.games = ME.games || []; ME.games.push(id); saveMe();
+  openAppEditor(id);
+}
+function openAppEditor(id) {
+  const app = getMaps()[id];
+  if (!app || (app.authorId !== ME.id && !isAdmin())) { showToast('No podés editar esta app'); return; }
+  stMapId = id;
+  document.getElementById('app-name').value = app.name || 'Mi App';
+  document.getElementById('app-source').value = app.htmlContent || '';
+  document.getElementById('app-privacy').value = app.privacy === 'private' ? 'private' : 'public';
+  openModal('mo-app-editor');
+}
+function saveAppSource() {
+  const maps = getMaps(); const app = maps[stMapId];
+  if (!app || (app.authorId !== ME.id && !isAdmin())) { showToast('No podés editar esta app'); return; }
+  const source = document.getElementById('app-source').value;
+  if (!source.trim()) { showToast('La app necesita código HTML'); return; }
+  if (source.length > 1000000) { showToast('El código debe ser menor a 1 MB'); return; }
+  app.kind = 'app'; app.isHtmlGame = true; app.htmlContent = source;
+  app.name = document.getElementById('app-name').value.trim().slice(0,80) || 'Mi App';
+  app.privacy = document.getElementById('app-privacy').value === 'private' ? 'private' : 'public';
+  app.updated = new Date().toISOString();
+  setMaps(maps); closeModal('mo-app-editor'); renderHome(); showToast('✅ App guardada');
 }
 function exitIframe() {
   document.getElementById('s-iframe').classList.remove('active');
@@ -1060,14 +1268,16 @@ function addFriendByName() { const val = (document.getElementById('add-friend-in
 function editProfile() { const bio = prompt('Editá tu bio:', ME.bio || ''); if (bio === null) return; ME.bio = bio.slice(0, 120); saveMe(); renderProfile(ME.id); }
 function logout() {
   if (!confirm('\u00bfCerrar sesi\u00f3n?')) return;
-  DB.del('session'); ME = null;
+  apiRequest('/api/logout', { method:'POST' }).catch(() => {});
+  if (socket) { socket.auth = {}; socket.disconnect(); }
+  DB.del('session'); DB.del('token'); ME = null; CLOUD_READY = false;
   document.getElementById('nav').style.display = 'none';
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('s-auth').classList.add('active');
   document.getElementById('a-u').value = '';
   document.getElementById('a-p').value = '';
 }
-function isAdmin() { return ME && (ME.username.toLowerCase() === 'crix' || ME.isAdmin); }
+function isAdmin() { return !!(ME && ME.isAdmin); }
 function openAdminPanel() {
   const users = getUsers();
   const maps = getMaps();
@@ -1350,11 +1560,78 @@ function openCodeEditor(scriptId) { if (!scriptId && stScripts.length > 0) scrip
 function closeCodeEditor() { saveActiveScript(); document.getElementById('code-overlay').classList.remove('open'); }
 function renderCodeUI() { document.getElementById('code-tabs-bar').innerHTML = stScripts.map(s => `<div class="code-tab ${s.id===activeScriptId?'active':''}" onclick="switchScript('${s.id}')">${s.type==='Script'?'📜':s.type==='LocalScript'?'📋':'📦'} ${esc(s.name)}</div>`).join(''); const byParent = {}; stScripts.forEach(s => { byParent[s.parent] = byParent[s.parent]||[]; byParent[s.parent].push(s); }); let treeHtml = '<div style="padding:6px 8px;font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase">Scripts</div>'; FOLDERS.forEach(f => { const scripts = byParent[f.id]||[]; if (!scripts.length) return; treeHtml += `<div style="padding:4px 8px;font-size:9px;color:var(--text3)">${f.icon} ${f.label}</div>`; scripts.forEach(s => { treeHtml += `<div style="padding:4px 8px 4px 16px;font-size:11px;cursor:pointer;${activeScriptId===s.id?'color:var(--acc);background:var(--bg3)':''}" onclick="switchScript('${s.id}')">${s.type==='Script'?'📜':s.type==='LocalScript'?'📋':'📦'} ${esc(s.name)}</div>`; }); }); document.getElementById('code-tree').innerHTML = treeHtml; }
 function switchScript(id) { saveActiveScript(); activeScriptId = id; renderCodeUI(); loadScript(id); }
-function loadScript(id) { const s = stScripts.find(x => x.id === id); if (!s) return; document.getElementById('code-ta').value = s.code||''; updateLineNums(); }
-function saveActiveScript() { if (!activeScriptId) return; const s = stScripts.find(x => x.id === activeScriptId); if (s) s.code = document.getElementById('code-ta').value; }
+function loadScript(id) { const s = stScripts.find(x => x.id === id); if (!s) return; document.getElementById('code-ta').value = s.code||''; document.getElementById('code-language').value = s.language||'crixscript'; document.getElementById('code-event').value = s.event||'onStart'; updateLineNums(); }
+function saveActiveScript() { if (!activeScriptId) return; const s = stScripts.find(x => x.id === activeScriptId); if (s) { s.code = document.getElementById('code-ta').value; s.language = document.getElementById('code-language').value; s.event = document.getElementById('code-event').value; } }
+function setScriptLanguage(language) {
+  const s = stScripts.find(x => x.id === activeScriptId); if (!s) return;
+  s.language = language;
+  const editor = document.getElementById('code-ta');
+  if (language === 'javascript' && /^\s*--/.test(editor.value)) editor.value = 'function onStart() {\n  print("Hola desde JavaScript!");\n}';
+  else if (language === 'crixscript' && /^\s*function onStart\(/.test(editor.value)) editor.value = 'print("Hola desde CrixScript!")';
+  updateLineNums(); saveActiveScript();
+}
+function setScriptEvent(eventName) { const s = stScripts.find(x => x.id === activeScriptId); if (s) { s.event = eventName; saveActiveScript(); } }
 function updateLineNums() { const lines = document.getElementById('code-ta').value.split('\n').length; document.getElementById('code-nums').textContent = Array.from({length:lines},(_,i)=>i+1).join('\n'); }
 function codeKeydown(e) { if (e.key === 'Tab') { e.preventDefault(); const ta = document.getElementById('code-ta'); const s = ta.selectionStart; ta.value = ta.value.substring(0,s) + '  ' + ta.value.substring(ta.selectionEnd); ta.selectionStart = ta.selectionEnd = s + 2; updateLineNums(); } }
-function runScript() { saveActiveScript(); const s = stScripts.find(x => x.id === activeScriptId); if (!s) { appendOutput('[error] No hay script seleccionado', 'err'); return; } const out = document.getElementById('code-output'); out.innerHTML = ''; appendOutput(`-- Ejecutando: ${s.name}`, 'sys'); const env = { print: (...a) => appendOutput(a.map(x => typeof x === 'object' ? JSON.stringify(x) : x).join('\t')), warn: (...a) => appendOutput('[warn] ' + a.join('\t'), 'warn'), error: (...a) => appendOutput('[error] ' + a.join('\t'), 'err'), workspace: { FindFirstChild: n => { const p = stParts.find(x => x.data.name === n); if (!p) return null; return { Name: p.data.name, Position: {X:p.data.x,Y:p.data.y,Z:p.data.z} }; }, GetChildren: () => stParts.map(p => ({Name:p.data.name})) }, math: { random: Math.random, floor: Math.floor, ceil: Math.ceil, abs: Math.abs, max: Math.max, min: Math.min, sqrt: Math.sqrt, pi: Math.PI }, print: (...a) => appendOutput(a.join('\t')), tonumber: n => Number(n), tostring: v => String(v) }; try { let code = s.code.replace(/--[^\n]*/g,'').replace(/\blocal\s+(\w+)/g,'let $1').replace(/\bthen\b/g,') {').replace(/\bdo\b/g,'{').replace(/\bend\b/g,'}').replace(/\bif\b\s*(.*?)\s*then/g,'if ($1)').replace(/\bnot\s+/g,'!').replace(/\band\s+/g,'&& ').replace(/\bor\s+/g,'|| ').replace(/\bnil\b/g,'null').replace(/\bprint\b/g,'env.print').replace(/\bwarn\b/g,'env.warn').replace(/\berror\b/g,'env.error').replace(/\bworkspace\b/g,'env.workspace').replace(/\bmath\b/g,'env.math').replace(/\btonumber\b/g,'env.tonumber').replace(/\btostring\b/g,'env.tostring').replace(/\.\./g,'+'); const fn = new Function('env', code); fn(env); appendOutput('-- ✓ Ejecutado correctamente', 'sys'); } catch(err) { appendOutput('[error] ' + err.message, 'err'); } }
+function runScript(scriptOverride, partsOverride) {
+  if (!scriptOverride) saveActiveScript();
+  const script = scriptOverride || stScripts.find(x => x.id === activeScriptId);
+  if (!script) { appendOutput('[error] No hay script seleccionado', 'err'); return; }
+  const language = script.language || 'crixscript';
+  const eventName = script.event || 'onStart';
+  let code = script.code || '';
+  if (language === 'crixscript') {
+    code = code.replace(/--[^\n]*/g,'')
+      .replace(/\blocal\s+(\w+)/g,'let $1')
+      .replace(/\bif\b\s*(.*?)\s*then/g,'if ($1) {')
+      .replace(/\bwhile\s+(.*?)\s+do/g,'while ($1) {')
+      .replace(/\bthen\b/g,'').replace(/\bdo\b/g,'{')
+      .replace(/\bnot\s+/g,'!').replace(/\band\s+/g,'&& ')
+      .replace(/\bor\s+/g,'|| ').replace(/\bnil\b/g,'null')
+      .replace(/\bprint\b/g,'env.print').replace(/\bwarn\b/g,'env.warn')
+      .replace(/\berror\b/g,'env.error').replace(/\bworkspace\b/g,'env.workspace')
+      .replace(/\bmath\b/g,'env.math').replace(/\btonumber\b/g,'env.tonumber')
+      .replace(/\btostring\b/g,'env.tostring').replace(/\.\./g,'+')
+      .replace(/\bend\b/g,'}');
+  }
+  const output = document.getElementById('code-output');
+  output.innerHTML = '';
+  appendOutput('-- Ejecutando ' + script.name + ' · ' + language + ' · ' + eventName, 'sys');
+  const workerSource = [
+    "for (const key of ['fetch','XMLHttpRequest','WebSocket','EventSource','importScripts']) { try { self[key] = undefined; } catch (_) {} }",
+    "self.onmessage = function(message) {",
+    "  const cfg = message.data;",
+    "  const send = (type, text, cls) => self.postMessage({type, text, cls});",
+    "  const format = value => typeof value === 'string' ? value : JSON.stringify(value);",
+    "  const print = (...values) => send('output', values.map(format).join(String.fromCharCode(9)), '');",
+    "  const warn = (...values) => send('output', '[warn] ' + values.map(format).join(String.fromCharCode(9)), 'warn');",
+    "  const error = (...values) => send('output', '[error] ' + values.map(format).join(String.fromCharCode(9)), 'err');",
+    "  const makePart = part => ({name:part.name, Name:part.name, type:part.type, Type:part.type, position:part.position, Position:{X:part.position.x,Y:part.position.y,Z:part.position.z}});",
+    "  const workspace = { FindFirstChild:name => { const part = cfg.parts.find(item => item.name === name); return part ? makePart(part) : null; }, GetChildren:() => cfg.parts.map(makePart) };",
+    "  const math = { random:Math.random, floor:Math.floor, ceil:Math.ceil, abs:Math.abs, max:Math.max, min:Math.min, sqrt:Math.sqrt, pi:Math.PI };",
+    "  const env = { print, warn, error, workspace, math, tonumber:value => Number(value), tostring:value => String(value) };",
+    "  try {",
+    "    const callback = new Function('env','print','warn','error','workspace','math','tonumber','tostring', cfg.code + '\\nreturn typeof ' + cfg.event + ' === \"function\" ? ' + cfg.event + ' : null;');",
+    "    const handler = callback(env, print, warn, error, workspace, math, env.tonumber, env.tostring);",
+    "    if (handler) handler(env); else if (cfg.event !== 'onStart') throw new Error('Definí function ' + cfg.event + '() para ese evento');",
+    "    send('done', '', '');",
+    "  } catch (err) { send('error', err && err.message ? err.message : String(err), 'err'); }",
+    "};"
+  ].join('\n');
+  const blobUrl = URL.createObjectURL(new Blob([workerSource], {type:'text/javascript'}));
+  const worker = new Worker(blobUrl);
+  let finished = false;
+  const finish = () => { if (finished) return; finished = true; worker.terminate(); URL.revokeObjectURL(blobUrl); };
+  worker.onmessage = message => {
+    if (message.data.type === 'output') appendOutput(message.data.text, message.data.cls);
+    if (message.data.type === 'error') { appendOutput('[error] ' + message.data.text, 'err'); finish(); }
+    if (message.data.type === 'done') { appendOutput('-- ✓ Ejecutado correctamente', 'sys'); finish(); }
+  };
+  worker.onerror = event => { appendOutput('[error] ' + event.message, 'err'); finish(); };
+  setTimeout(() => { if (!finished) { appendOutput('[error] Tiempo de ejecución excedido (3 s)', 'err'); finish(); } }, 3000);
+  const parts = (partsOverride || stParts.map(part => part.data)).map(part => ({name:part.name, type:part.type, position:{x:part.x,y:part.y,z:part.z}}));
+  worker.postMessage({ code, event:eventName, parts });
+}
 function appendOutput(line, cls = '') { const out = document.getElementById('code-output'); const span = document.createElement('span'); span.className = cls === 'err' ? 'code-out-err' : cls === 'warn' ? 'code-out-warn' : cls === 'sys' ? 'code-out-sys' : ''; span.textContent = line + '\n'; out.appendChild(span); out.scrollTop = out.scrollHeight; }
 let gScene, gCamera, gRenderer; let gPlayer = null, gPlayerParts = {}; let gKeys = {}, joyPos = {x:0, y:0}; let gVelY = 0, gOnGround = false; let gCamTheta = 0, gCamPhi = 0.45, gCamDist = 16; let gTargetRY = 0, gAnimT = 0; let gColliders = [], gNPCs = []; let gGameInited = false; let _prevPos = new THREE.Vector3(); let gFps = 0, gFpsT = 0, gFpsCount = 0;
 const G_SPD = 0.23, G_JUMP = 0.35, G_GRAV = 0.018; const AV_HW = 0.50, AV_HD = 0.50, AV_H = 3.05;
@@ -1370,6 +1647,10 @@ function playMap(mapId) {
   const maps = getMaps(); const m = maps[mapId]; if (!m) { showToast('Mapa no encontrado'); return; }
   if (!canPlayMap(m)) { showToast('🔒 No tenés acceso a este juego'); return; }
   m.plays = (m.plays||0) + 1; setMaps(maps); ME.visits = (ME.visits||0) + 1; saveMe();
+  (m.scripts||[]).filter(script => (script.event||'onStart') === 'onStart').forEach(script => runScript(script, m.parts||[]));
+  apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/play', { method:'POST', body:{} }).then(result => {
+    const current = getMaps(); if (!current[mapId]) return; current[mapId].plays = result.plays; DB.set('maps', current);
+  }).catch(() => {});
   // Si es un juego HTML importado, lanzarlo en iframe
   if (m.isHtmlGame && m.htmlContent) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -1400,7 +1681,7 @@ function exitGame() { gKeys = {}; netLeaveGame(); document.getElementById('s-gam
 let socket = null, netConnected = false, netCurrentMapId = null, netTick = 0;
 const NET_RATE = 3;
 let remotePlayers = {};
-function netConnect() { const serverUrl = window.location.origin; try { socket = io(serverUrl, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 1500, reconnectionAttempts: 10 }); } catch(e) { console.warn('[NET] Socket.IO no disponible — modo offline'); return; } socket.on('connect', () => { netConnected = true; updateNetPill('🟢', socket.id?.substring(0,6)); if (netCurrentMapId) netJoinGame(netCurrentMapId); }); socket.on('disconnect', () => { netConnected = false; updateNetPill('🔴', 'Offline'); clearRemotePlayers(); }); socket.on('connect_error', () => { netConnected = false; updateNetPill('🟡', 'Sin servidor'); }); socket.on('room_state', ({ players, chat, mapId }) => { clearRemotePlayers(); players.forEach(p => spawnRemote(p)); if (chat?.length) chat.forEach(msg => addGMsg(`${msg.username}: ${msg.text}`, 'chat')); updateNetPill('🟢', `${players.length + 1} jugadores`); }); socket.on('join_ack', ({ playerCount }) => { updateNetPill('🟢', `${playerCount} jugador${playerCount !== 1 ? 'es' : ''}`); addGMsg(`✅ Conectado (${playerCount} en sala)`, 'sys'); }); socket.on('player_joined', (playerData) => { spawnRemote(playerData); addGMsg(`→ ${playerData.username} entró`, 'sys'); updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('player_moved', ({ socketId, x, y, z, ry, anim, moving }) => { const rp = remotePlayers[socketId]; if (!rp) return; rp.targetPos.set(x, y, z); rp.targetRY = ry; rp.anim = anim; rp.moving = moving; }); socket.on('player_left', ({ socketId }) => { const rp = remotePlayers[socketId]; if (rp) { if (gScene) gScene.remove(rp.group); addGMsg(`← ${rp.data.username} salió`, 'sys'); delete remotePlayers[socketId]; } updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('game_chat', ({ socketId, username, text }) => { if (socketId === socket.id) return; addGMsg(`${username}: ${text}`, 'chat'); }); socket.on('pong_res', (ts) => { const ping = Date.now() - ts; const pill = document.getElementById('g-net-pill'); if (pill) pill.textContent = `🟢 ${Object.keys(remotePlayers).length + 1}p · ${ping}ms`; }); }
+function netConnect() { const serverUrl = window.location.origin; try { socket = io(serverUrl, { auth:{ token:DB.get('token') }, transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 1500, reconnectionAttempts: 10 }); } catch(e) { console.warn('[NET] Socket.IO no disponible — modo offline'); return; } socket.on('connect', () => { netConnected = true; updateNetPill('🟢', socket.id?.substring(0,6)); if (ME) socket.emit('user_online', { userId:ME.id }); if (netCurrentMapId) netJoinGame(netCurrentMapId); }); socket.on('disconnect', () => { netConnected = false; updateNetPill('🔴', 'Offline'); clearRemotePlayers(); }); socket.on('connect_error', () => { netConnected = false; updateNetPill('🟡', 'Sin servidor'); }); socket.on('room_state', ({ players, chat, mapId }) => { clearRemotePlayers(); players.forEach(p => spawnRemote(p)); if (chat?.length) chat.forEach(msg => addGMsg(`${msg.username}: ${msg.text}`, 'chat')); updateNetPill('🟢', `${players.length + 1} jugadores`); }); socket.on('join_ack', ({ playerCount }) => { updateNetPill('🟢', `${playerCount} jugador${playerCount !== 1 ? 'es' : ''}`); addGMsg(`✅ Conectado (${playerCount} en sala)`, 'sys'); }); socket.on('player_joined', (playerData) => { spawnRemote(playerData); addGMsg(`→ ${playerData.username} entró`, 'sys'); updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('player_moved', ({ socketId, x, y, z, ry, anim, moving }) => { const rp = remotePlayers[socketId]; if (!rp) return; rp.targetPos.set(x, y, z); rp.targetRY = ry; rp.anim = anim; rp.moving = moving; }); socket.on('player_left', ({ socketId }) => { const rp = remotePlayers[socketId]; if (rp) { if (gScene) gScene.remove(rp.group); addGMsg(`← ${rp.data.username} salió`, 'sys'); delete remotePlayers[socketId]; } updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('game_chat', ({ socketId, username, text }) => { if (socketId === socket.id) return; addGMsg(`${username}: ${text}`, 'chat'); }); socket.on('pong_res', (ts) => { const ping = Date.now() - ts; const pill = document.getElementById('g-net-pill'); if (pill) pill.textContent = `🟢 ${Object.keys(remotePlayers).length + 1}p · ${ping}ms`; }); }
 function netJoinGame(mapId) { if (!socket || !netConnected || !ME) return; netCurrentMapId = mapId; socket.emit('join_game', { mapId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def' }); }
 function netLeaveGame() { if (!socket || !netConnected) return; socket.emit('leave_game'); clearRemotePlayers(); netCurrentMapId = null; const pill = document.getElementById('g-net-pill'); if (pill) pill.style.display = 'none'; }
 function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
@@ -1416,8 +1697,8 @@ function _patchGameLoopWithNet() { if (_netPatchApplied) return; _netPatchApplie
 const _origPlayMap = window.playMap;
 window.playMap = function(mapId) { _origPlayMap(mapId); setTimeout(() => { netJoinGame(mapId); _patchGameLoopWithNet(); }, 200); };
 ensureDefaultMaps();
-if (trySession()) bootApp();
-else document.getElementById('s-auth').classList.add('active');
+if (DB.get('token') && trySession()) restoreSession();
+else { DB.del('session'); document.getElementById('s-auth').classList.add('active'); }
 document.getElementById('a-p').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 document.getElementById('r-p2').addEventListener('keydown', e => { if(e.key==='Enter') doRegister(); });
 document.getElementById('nav-search-inp').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(e.target.value); });
@@ -1428,6 +1709,10 @@ function toggleLike(mapId, btn) {
   if (idx === -1) { ME.liked.push(mapId); m.likes = (m.likes||0)+1; btn.innerHTML = '❤️ '+m.likes; btn.className = 'btn btn-red'; }
   else { ME.liked.splice(idx,1); m.likes = Math.max(0,(m.likes||1)-1); btn.innerHTML = '🤍 '+m.likes; btn.className = 'btn btn-g'; }
   setMaps(maps); saveMe();
+  apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/like', { method:'POST', body:{} }).then(result => {
+    const current = getMaps(); if (current[mapId]) { current[mapId].likes = result.likes; DB.set('maps', current); }
+    if (btn) { btn.innerHTML = (result.liked?'❤️ ':'🤍 ') + result.likes; btn.className = 'btn ' + (result.liked?'btn-red':'btn-g'); }
+  }).catch(err => showToast(err.message));
 }
 
 // ══════════════════════════════════════════════════
@@ -1438,7 +1723,10 @@ let _activeVideoId = null;
 let _uvFileData = null;
 
 function getVideos() { const v = DB.get('crix_videos'); return Array.isArray(v) ? v : []; }
-function saveVideos(arr) { DB.set('crix_videos', arr); }
+function saveVideos(arr) {
+  const light = arr.map(video => video.data && video.data.length > 1500000 ? { ...video, data:null } : video);
+  DB.set('crix_videos', light);
+}
 
 function vidFilter(f, el) {
   _vidFilter = f;
@@ -1476,11 +1764,16 @@ function renderVideos() {
   }).join('');
 }
 
-function openVideoPlayer(vid) {
+async function openVideoPlayer(vid) {
   const vids = getVideos();
   const v = vids.find(x => x.id === vid); if (!v) return;
   v.views = (v.views || 0) + 1;
   saveVideos(vids);
+  apiRequest('/api/videos/' + encodeURIComponent(vid) + '/view', { method:'POST', body:{} }).then(result => { v.views = result.views; }).catch(() => {});
+  if ((!v.data || v.data === '[data]') && CLOUD_READY) {
+    try { const source = await apiRequest('/api/videos/' + encodeURIComponent(vid) + '/data'); v.data = source.data; }
+    catch (err) { console.warn('[VIDEO] No se pudo cargar el archivo:', err.message); }
+  }
   goTab('home'); // reset screens
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
@@ -1530,6 +1823,11 @@ function toggleVideoLike(vid) {
   const idx = v.likes.indexOf(ME.id);
   if (idx === -1) v.likes.push(ME.id); else v.likes.splice(idx,1);
   saveVideos(vids);
+  apiRequest('/api/videos/' + encodeURIComponent(vid) + '/like', { method:'POST', body:{} }).then(result => {
+    const latest = getVideos(); const item = latest.find(video => video.id === vid);
+    if (item) { item.likes = item.likes || []; const current = item.likes.indexOf(ME.id); if (result.liked && current < 0) item.likes.push(ME.id); if (!result.liked && current >= 0) item.likes.splice(current,1); DB.set('crix_videos', latest); }
+    const likeButton = document.getElementById('vp-like-btn'); if (likeButton) { likeButton.className = 'btn ' + (result.liked?'btn-red':'btn-g'); likeButton.textContent = '❤️ ' + result.likes; }
+  }).catch(err => showToast(err.message));
   const liked = v.likes.includes(ME.id);
   const btn = document.getElementById('vp-like-btn');
   if (btn) { btn.className = 'btn ' + (liked?'btn-red':'btn-g'); btn.textContent = '❤️ ' + v.likes.length; }
@@ -1547,18 +1845,21 @@ function renderVideoComments(v) {
   ).join('') : '<div style="color:var(--text3);font-size:13px;padding:12px 0">Sin comentarios todavía.</div>';
 }
 
-function submitVideoComment() {
+async function submitVideoComment() {
   const inp = document.getElementById('vp-comment-inp');
   const text = (inp?.value||'').trim(); if (!text || !_activeVideoId) return;
   const vids = getVideos(); const v = vids.find(x => x.id === _activeVideoId); if (!v) return;
   v.comments = v.comments || [];
-  v.comments.push({ id: 'c'+Date.now(), authorId: ME.id, authorName: ME.username, text, time: timeStr(), likes: [] });
-  saveVideos(vids); inp.value = '';
-  renderVideoComments(v);
+  try {
+    const result = await apiRequest('/api/videos/' + encodeURIComponent(_activeVideoId) + '/comment', { method:'POST', body:{ comment:text } });
+    v.comments.push(result.comment); saveVideos(vids); inp.value = ''; renderVideoComments(v);
+  } catch (err) { showToast(err.message); }
 }
 
-function deleteVideo(vid) {
+async function deleteVideo(vid) {
   if (!confirm('¿Borrar este video?')) return;
+  try { await apiRequest('/api/videos/' + encodeURIComponent(vid), { method:'DELETE' }); }
+  catch (err) { showToast(err.message); return; }
   const vids = getVideos().filter(v => v.id !== vid);
   saveVideos(vids);
   if (_activeVideoId === vid) goTab('videos');
@@ -1570,13 +1871,14 @@ function openUploadVideo() {
   _uvFileData = null;
   document.getElementById('uv-title').value = '';
   document.getElementById('uv-desc').value = '';
+  document.getElementById('uv-privacy').value = 'public';
   document.getElementById('uv-preview').style.display = 'none';
   openModal('mo-upload-video');
 }
 
 function previewVideoUpload(e) {
   const file = e.target.files[0]; if (!file) return;
-  if (file.size > 50 * 1024 * 1024) { showToast('El video debe ser menor a 50MB'); return; }
+  if (file.size > 30 * 1024 * 1024) { showToast('El video debe ser menor a 30 MB'); return; }
   const url = URL.createObjectURL(file);
   const preview = document.getElementById('uv-preview');
   preview.src = url; preview.style.display = 'block';
@@ -1585,7 +1887,7 @@ function previewVideoUpload(e) {
   reader.readAsDataURL(file);
 }
 
-function confirmUploadVideo() {
+async function confirmUploadVideo() {
   const title = document.getElementById('uv-title').value.trim();
   if (!title) { showToast('Poné un título'); return; }
   if (!_uvFileData) { showToast('Seleccioná un video primero'); return; }
@@ -1595,10 +1897,13 @@ function confirmUploadVideo() {
     desc: document.getElementById('uv-desc').value.trim(),
     cat: document.getElementById('uv-cat').value,
     authorId: ME.id, authorName: ME.username,
+    privacy: document.getElementById('uv-privacy').value,
     data: _uvFileData, thumb: null,
     views: 0, likes: [], comments: [],
     created: new Date().toISOString()
   };
+  try { await apiRequest('/api/videos', { method:'POST', body:v }); }
+  catch (err) { showToast('No se pudo subir: ' + err.message); return; }
   vids.push(v); saveVideos(vids);
   closeModal('mo-upload-video');
   showToast('¡Video publicado!');
@@ -1633,7 +1938,7 @@ function attachPostImage(e) {
   reader.readAsDataURL(file); e.target.value = '';
 }
 
-function submitPost() {
+async function submitPost() {
   const ta = document.getElementById('compose-text');
   const text = (ta?.value||'').trim();
   if (!text && !_postAttachment) { showToast('Escribí algo o adjuntá una imagen'); return; }
@@ -1644,6 +1949,8 @@ function submitPost() {
     text, media: _postAttachment || null, likes: [], reposts: [], replies: [],
     created: new Date().toISOString()
   };
+  try { await apiRequest('/api/posts', { method:'POST', body:post }); }
+  catch (err) { showToast('No se pudo publicar: ' + err.message); return; }
   posts.unshift(post); savePosts(posts);
   if (ta) ta.value = '';
   _postAttachment = null;
@@ -1715,6 +2022,11 @@ function likePost(pid) {
   const idx = p.likes.indexOf(ME.id);
   if (idx === -1) p.likes.push(ME.id); else p.likes.splice(idx,1);
   savePosts(posts);
+  apiRequest('/api/posts/' + encodeURIComponent(pid) + '/like', { method:'POST', body:{} }).then(result => {
+    const latest = getPosts(); const item = latest.find(post => post.id === pid);
+    if (item) { item.likes = item.likes || []; const current = item.likes.indexOf(ME.id); if (result.liked && current < 0) item.likes.push(ME.id); if (!result.liked && current >= 0) item.likes.splice(current,1); DB.set('crix_posts', latest); }
+    const likeButton = document.getElementById('like-' + pid); if (likeButton) likeButton.innerHTML = (result.liked?'❤️':'🤍') + ' ' + result.likes;
+  }).catch(err => showToast(err.message));
   const liked = p.likes.includes(ME.id);
   const btn = document.getElementById('like-'+pid);
   if (btn) { btn.style.color = liked?'var(--red)':'var(--text2)'; btn.innerHTML = (liked?'❤️':'🤍')+' '+p.likes.length; }
@@ -1730,18 +2042,23 @@ function openReply(pid) {
   if (!visible) inp.focus();
 }
 
-function submitReply(pid) {
+async function submitReply(pid) {
   const inp = document.getElementById('reply-inp-'+pid);
   const text = (inp?.value||'').trim(); if (!text) return;
   const posts = getPosts(); const p = posts.find(x => x.id === pid); if (!p) return;
   p.replies = p.replies || [];
-  p.replies.push({ id:'r'+Date.now(), authorId: ME.id, authorName: ME.username, authorColor: ME.color, text, created: new Date().toISOString() });
+  try {
+    const result = await apiRequest('/api/posts/' + encodeURIComponent(pid) + '/reply', { method:'POST', body:{ reply:text } });
+    p.replies.push(result.reply);
+  } catch (err) { showToast(err.message); return; }
   savePosts(posts); if (inp) inp.value = '';
   showToast('Respuesta enviada!'); renderForums();
 }
 
-function deletePost(pid) {
+async function deletePost(pid) {
   if (!confirm('¿Borrar este post?')) return;
+  try { await apiRequest('/api/posts/' + encodeURIComponent(pid), { method:'DELETE' }); }
+  catch (err) { showToast(err.message); return; }
   const posts = getPosts().filter(p => p.id !== pid);
   savePosts(posts); renderForums();
   showToast('Post eliminado');
@@ -1849,48 +2166,30 @@ function sendFriendRequest(uid) {
   const target = users[uid];
   if (!target) { showToast('Usuario no encontrado'); return; }
   if ((ME.friends||[]).includes(uid)) { showToast('Ya son amigos'); return; }
-
-  // Agregar solicitud al target
-  target.friendRequests = target.friendRequests || [];
-  if (target.friendRequests.find(r => r.from === ME.id)) {
+  if ((ME.friendRequests_sent||[]).includes(uid)) {
     showToast('Ya enviaste una solicitud'); return;
   }
-  target.friendRequests.push({ from: ME.id, fromName: ME.username, fromColor: ME.color, at: new Date().toISOString() });
-  users[uid] = target;
-  setUsers(users);
-  showToast('✅ Solicitud de amistad enviada a ' + target.username);
-
-  // Notificar por socket
-  if (socket) socket.emit('friend_request', { to: uid, from: ME.id, fromName: ME.username });
+  apiRequest('/api/friend-request', { method:'POST', body:{ toId:uid } })
+    .then(() => { showToast('✅ Solicitud de amistad enviada a ' + target.username); refreshCloudContent(); })
+    .catch(err => showToast(err.message));
 }
 
-function acceptFriendRequest(fromId) {
-  const users = getUsers();
-  const from = users[fromId];
-  if (!from) return;
-  // Agregar como amigos mutuamente
-  ME.friends = ME.friends || [];
-  if (!ME.friends.includes(fromId)) ME.friends.push(fromId);
-  from.friends = from.friends || [];
-  if (!from.friends.includes(ME.id)) from.friends.push(ME.id);
-  // Eliminar la solicitud
-  ME.friendRequests = (ME.friendRequests||[]).filter(r => r.from !== fromId);
-  users[ME.id] = ME;
-  users[fromId] = from;
-  setUsers(users);
-  saveMe();
-  showToast('✅ Ahora son amigos con ' + from.username);
-  if (socket) socket.emit('friend_accepted', { to: fromId, from: ME.id, fromName: ME.username });
-  renderFriendRequests();
+async function acceptFriendRequest(fromId) {
+  try {
+    await apiRequest('/api/friend-accept', { method:'POST', body:{ fromId } });
+    const from = getUsers()[fromId];
+    await refreshCloudContent();
+    showToast('✅ Ahora son amigos con ' + (from?.username || 'este usuario'));
+    renderFriendRequests();
+  } catch (err) { showToast(err.message); }
 }
 
-function rejectFriendRequest(fromId) {
-  ME.friendRequests = (ME.friendRequests||[]).filter(r => r.from !== fromId);
-  const users = getUsers();
-  users[ME.id] = ME;
-  setUsers(users);
-  saveMe();
-  renderFriendRequests();
+async function rejectFriendRequest(fromId) {
+  try {
+    await apiRequest('/api/friend-reject', { method:'POST', body:{ fromId } });
+    await refreshCloudContent();
+    renderFriendRequests();
+  } catch (err) { showToast(err.message); }
 }
 
 function renderFriendRequests() {
@@ -2127,14 +2426,16 @@ function initCallSocketEvents() {
   if (!socket) return;
 
   socket.on('friend_request', ({ from, fromName }) => {
-    // Recargar usuarios y renderizar solicitudes
-    renderFriendRequests();
-    showToast('👋 ' + fromName + ' quiere ser tu amigo');
-    sendBrowserNotif('Nueva solicitud de amistad', fromName + ' quiere ser tu amigo en Crix');
-    checkNotifs();
+    refreshCloudContent().then(() => {
+      renderFriendRequests();
+      showToast('👋 ' + fromName + ' quiere ser tu amigo');
+      sendBrowserNotif('Nueva solicitud de amistad', fromName + ' quiere ser tu amigo en Crix');
+      checkNotifs();
+    });
   });
 
   socket.on('friend_accepted', ({ from, fromName }) => {
+    refreshCloudContent();
     showToast('🎉 ' + fromName + ' aceptó tu solicitud de amistad');
     sendBrowserNotif('Solicitud aceptada', fromName + ' ahora es tu amigo en Crix');
     renderProfile(ME.id);
@@ -2188,6 +2489,10 @@ function renderMsgBubble(msg, isMe) {
 
 
 netConnect();
+const _goTabCloud = goTab;
+goTab = function(tab, extra) { _goTabCloud(tab, extra); if (CLOUD_READY) refreshCloudContent(); };
+setInterval(() => { if (CLOUD_READY) refreshCloudContent(); }, 60000);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch(err => console.warn('[PWA] No se pudo instalar el caché:', err.message));
 </script>
 
 <!-- GAME PAGE MODAL -->
