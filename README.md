@@ -29,6 +29,7 @@ En un alojamiento que borra el disco local al reiniciar, montá un volumen persi
 - Las publicaciones del foro y sus imágenes son públicas.
 - Los medios que se guardan en el servidor requieren que el alojamiento tenga espacio de disco suficiente y mantenga el volumen persistente.
 - Los videos cargados desde la interfaz tienen un límite de 30 MB.
+- La foto de perfil se cambia desde el perfil propio. Crix la recorta a 256 × 256, la comprime y la muestra en perfiles públicos y listas de usuarios; se guarda junto a la cuenta en el servidor.
 
 ## Editor y scripting
 
