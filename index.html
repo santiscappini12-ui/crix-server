@@ -486,6 +486,7 @@ input,select,textarea{font-family:var(--font);}
     <button class="filter-btn" onclick="discFilter('roleplay',this)">🎭 Rol</button>
   </div>
   <div class="games-grid" id="grid-discover"></div>
+  <div style="display:flex;justify-content:center;margin:14px 0 24px"><button class="btn btn-g" id="discover-load-more" onclick="loadMoreDiscover()" style="display:none">Mostrar más creaciones</button></div>
   <div class="section-hd" style="margin-top:8px"><div class="section-hd-accent" style="background:var(--acc3)"></div>Creadores<span class="section-sub">Usuarios activos</span></div>
   <div class="friends-grid" id="grid-creators"></div>
 </div></div>
@@ -652,6 +653,7 @@ input,select,textarea{font-family:var(--font);}
         <div style="font-size:10px;color:var(--text2)" id="msg-hd-sub">↑ Elegí una conversación</div>
       </div>
       <div style="font-size:10px;color:var(--text2);margin-left:8px" id="msg-hd-status"></div>
+      <button class="mic-btn" id="chat-e2ee-status" onclick="unlockChatEncryption()" title="Desbloquear chat cifrado">🔒</button>
       <div style="margin-left:auto;display:flex;gap:7px">
         <button class="mic-btn" id="call-audio-btn" onclick="startCallFromMsg('audio')" title="Llamada de voz">📞</button>
         <button class="mic-btn" id="call-video-btn" onclick="startCallFromMsg('video')" title="Videollamada">📹</button>
@@ -668,6 +670,14 @@ input,select,textarea{font-family:var(--font);}
         <button class="send-btn" onclick="sendMsg()">➤</button>
       </div>
     </div>
+  </div>
+</div>
+<div class="mo-overlay" id="mo-chat-key">
+  <div class="mo-box" style="max-width:420px">
+    <h3>🔐 Desbloquear chat E2EE</h3>
+    <p style="color:var(--text2);font-size:12px;line-height:1.6">Ingresá la contraseña de tu cuenta para abrir tu clave privada en este dispositivo. Crix guarda solamente la clave privada cifrada.</p>
+    <input class="inp" id="chat-key-password" type="password" autocomplete="current-password" placeholder="Contraseña de tu cuenta" onkeydown="if(event.key==='Enter')submitChatKeyPassword()">
+    <div class="mo-btns"><button class="btn btn-g" onclick="cancelChatKeyPassword()">Cancelar</button><button class="btn btn-p" onclick="submitChatKeyPassword()">Desbloquear</button></div>
   </div>
 </div>
 <!-- ═══ GAME ═══ -->
@@ -852,7 +862,120 @@ function setMaps(m)  {
   });
 }
 function getConvs()  { return DB.get('convs')  || {}; }
+function getConvs() {
+  const raw = DB.get('convs') || {};
+  const encrypted = {};
+  let changed = false;
+  Object.entries(raw).forEach(([id, messages]) => {
+    const safe = (Array.isArray(messages) ? messages : []).filter(message => message?.e2ee?.v === 1);
+    if (safe.length !== (Array.isArray(messages) ? messages.length : 0)) changed = true;
+    if (safe.length) encrypted[id] = safe;
+  });
+  if (changed) DB.set('convs', encrypted);
+  return encrypted;
+}
 function setConvs(c) { DB.set('convs', c); BC.postMessage({ type: 'msg_update' }); }
+let CHAT_PRIVATE_KEY = null, CHAT_PUBLIC_KEY = null, CHAT_KEY_TASK = null, CHAT_KEY_RESOLVE = null;
+const CHAT_PUBLIC_KEYS = new Map();
+const CHAT_KDF_ITERATIONS = 310000;
+const CHAT_ENCODER = new TextEncoder();
+function chatBytesToB64(bytes) { let binary=''; const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); for(let i=0;i<data.length;i+=0x8000)binary+=String.fromCharCode(...data.subarray(i,i+0x8000)); return btoa(binary); }
+function chatB64ToBytes(value) { const binary=atob(value); const bytes=new Uint8Array(binary.length); for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i); return bytes; }
+function setChatKeyStatus(ready) { const el=document.getElementById('chat-e2ee-status'); if(el){el.textContent=ready?'🔐':'🔒';el.title=ready?'Chat E2EE desbloqueado':'Desbloquear chat cifrado';} }
+function requestChatKeyPassword() { return new Promise(resolve=>{ CHAT_KEY_RESOLVE=resolve; const input=document.getElementById('chat-key-password'); if(input)input.value=''; openModal('mo-chat-key'); setTimeout(()=>input?.focus(),50); }); }
+function submitChatKeyPassword() { const value=document.getElementById('chat-key-password')?.value||''; if(!value)return; closeModal('mo-chat-key'); if(CHAT_KEY_RESOLVE){const resolve=CHAT_KEY_RESOLVE;CHAT_KEY_RESOLVE=null;resolve(value);} }
+function cancelChatKeyPassword() { closeModal('mo-chat-key'); if(CHAT_KEY_RESOLVE){const resolve=CHAT_KEY_RESOLVE;CHAT_KEY_RESOLVE=null;resolve(null);} }
+async function deriveChatVaultKey(password,salt,iterations=CHAT_KDF_ITERATIONS) {
+  const material=await crypto.subtle.importKey('raw',CHAT_ENCODER.encode(password),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt,iterations},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function importChatPrivateKey(jwk) { return crypto.subtle.importKey('jwk',jwk,{name:'ECDH',namedCurve:'P-256'},false,['deriveBits']); }
+async function initializeChatEncryption(password='') {
+  if(CHAT_PRIVATE_KEY)return true;
+  if(CHAT_KEY_TASK)return CHAT_KEY_TASK;
+  CHAT_KEY_TASK=(async()=>{
+    if(!ME||!crypto?.subtle){setChatKeyStatus(false);return false;}
+    let pass=password;
+    const readVault=async()=>apiRequest('/api/e2ee/keys/'+encodeURIComponent(ME.id));
+    let result=await readVault();
+    if(!result.publicKey||!result.vault){
+      if(!pass)pass=await requestChatKeyPassword();
+      if(!pass)return false;
+      const pair=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);
+      const publicJwk=await crypto.subtle.exportKey('jwk',pair.publicKey);
+      const privateJwk=await crypto.subtle.exportKey('jwk',pair.privateKey);
+      const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+      const wrappingKey=await deriveChatVaultKey(pass,salt);
+      const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv},wrappingKey,CHAT_ENCODER.encode(JSON.stringify(privateJwk)));
+      const vault={v:1,salt:chatBytesToB64(salt),iv:chatBytesToB64(iv),ciphertext:chatBytesToB64(ciphertext),iterations:CHAT_KDF_ITERATIONS};
+      try { result=await apiRequest('/api/e2ee/keys',{method:'POST',body:{publicKey:publicJwk,vault}}); result.vault=vault; }
+      catch(err) { if(err.status!==409)throw err; result=await readVault(); }
+      if(!result.publicKey||!result.vault)throw new Error('No se pudieron recuperar las claves de esta cuenta.');
+      if(result.vault!==vault) {
+        const key=await deriveChatVaultKey(pass,chatB64ToBytes(result.vault.salt),result.vault.iterations);
+        const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:chatB64ToBytes(result.vault.iv)},key,chatB64ToBytes(result.vault.ciphertext));
+        CHAT_PRIVATE_KEY=await importChatPrivateKey(JSON.parse(new TextDecoder().decode(plain)));
+      } else CHAT_PRIVATE_KEY=await importChatPrivateKey(privateJwk);
+      CHAT_PUBLIC_KEY=result.publicKey;
+    } else {
+      if(!pass)pass=await requestChatKeyPassword();
+      if(!pass)return false;
+      const key=await deriveChatVaultKey(pass,chatB64ToBytes(result.vault.salt),result.vault.iterations);
+      const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:chatB64ToBytes(result.vault.iv)},key,chatB64ToBytes(result.vault.ciphertext));
+      CHAT_PRIVATE_KEY=await importChatPrivateKey(JSON.parse(new TextDecoder().decode(plain)));
+      CHAT_PUBLIC_KEY=result.publicKey;
+    }
+    CHAT_PUBLIC_KEYS.set(ME.id,CHAT_PUBLIC_KEY); setChatKeyStatus(true); return true;
+  })().catch(err=>{CHAT_PRIVATE_KEY=null;CHAT_PUBLIC_KEY=null;setChatKeyStatus(false);showToast(err.name==='OperationError'?'Contraseña incorrecta. No se pudo desbloquear el chat.':err.message||'No se pudo preparar el chat cifrado.');return false;})
+    .finally(()=>{CHAT_KEY_TASK=null;});
+  return CHAT_KEY_TASK;
+}
+async function unlockChatEncryption() { return initializeChatEncryption(''); }
+async function getChatPublicKey(userId) {
+  if(CHAT_PUBLIC_KEYS.has(userId))return CHAT_PUBLIC_KEYS.get(userId);
+  const result=await apiRequest('/api/e2ee/keys/'+encodeURIComponent(userId));
+  if(result.publicKey){
+    const fingerprint=await chatKeyFingerprint(result.publicKey),pins=DB.get('chat_key_pins')||{},known=pins[userId];
+    if(known&&known!==fingerprint)throw new Error('La huella de la clave de '+(getUsers()[userId]?.username||'esta cuenta')+' cambió. Verificala antes de continuar.');
+    if(!known){pins[userId]=fingerprint;DB.set('chat_key_pins',pins);}
+    CHAT_PUBLIC_KEYS.set(userId,result.publicKey);
+  }
+  return result.publicKey;
+}
+async function chatKeyFingerprint(publicKey) {
+  const stable=JSON.stringify({kty:publicKey.kty,crv:publicKey.crv,x:publicKey.x,y:publicKey.y});
+  const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',CHAT_ENCODER.encode(stable)));
+  return Array.from(digest.slice(0,8),byte=>byte.toString(16).padStart(2,'0')).join('').match(/.{1,4}/g).join(' ');
+}
+async function deriveChatMessageKey(peerPublicKey,salt) {
+  const publicKey=await crypto.subtle.importKey('jwk',peerPublicKey,{name:'ECDH',namedCurve:'P-256'},false,[]);
+  const shared=await crypto.subtle.deriveBits({name:'ECDH',public:publicKey},CHAT_PRIVATE_KEY,256);
+  const base=await crypto.subtle.importKey('raw',shared,'HKDF',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'HKDF',hash:'SHA-256',salt,info:CHAT_ENCODER.encode('crix-chat-e2ee-v1')},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function encryptChatMessage(convIdValue,payload,recipientId) {
+  if(!await initializeChatEncryption())throw new Error('Desbloqueá el chat cifrado para enviar mensajes.');
+  const [peerPublicKey,selfPublicKey]=await Promise.all([getChatPublicKey(recipientId),getChatPublicKey(ME.id)]);
+  if(!peerPublicKey)throw new Error('La otra cuenta debe iniciar sesión una vez para activar el chat cifrado.');
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  const id=crypto.randomUUID();
+  const associated=CHAT_ENCODER.encode(`${convIdValue}:${id}:${ME.id}`);
+  const plaintext=CHAT_ENCODER.encode(JSON.stringify(payload));
+  const encryptFor=async(pub)=>{const key=await deriveChatMessageKey(pub,salt);const iv=crypto.getRandomValues(new Uint8Array(12));const data=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:associated},key,plaintext);return {iv:chatBytesToB64(iv),ciphertext:chatBytesToB64(data)};};
+  const [peer,self]=await Promise.all([encryptFor(peerPublicKey),encryptFor(selfPublicKey)]);
+  return {id,from:ME.id,t:Date.now(),e2ee:{v:1,salt:chatBytesToB64(salt),peer,self}};
+}
+async function decryptChatMessage(convIdValue,message) {
+  if(!message?.e2ee||!await initializeChatEncryption())return null;
+  const recipient=message.from===ME.id?'self':'peer';
+  const senderPublicKey=message.from===ME.id?await getChatPublicKey(ME.id):await getChatPublicKey(message.from);
+  if(!senderPublicKey)return null;
+  const wrapped=message.e2ee[recipient]; if(!wrapped)return null;
+  const key=await deriveChatMessageKey(senderPublicKey,chatB64ToBytes(message.e2ee.salt));
+  const associated=CHAT_ENCODER.encode(`${convIdValue}:${message.id}:${message.from}`);
+  const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:chatB64ToBytes(wrapped.iv),additionalData:associated},key,chatB64ToBytes(wrapped.ciphertext));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
 function nextId(type) { const k = 'ctr_' + type; let n = DB.get(k) || 1000; n++; DB.set(k, n); return String(n); }
 const AV_COLORS = ['#5b8def','#8b5cf6','#ec4899','#22d3a6','#f59e0b','#ef4444','#f97316','#38bdf8','#a78bfa'];
 function randColor() { return AV_COLORS[Math.floor(Math.random() * AV_COLORS.length)]; }
@@ -876,6 +999,7 @@ async function doLogin() {
   try {
     const result = await apiRequest('/api/login', { method:'POST', body:{ username, pw:password }, token:'' });
     loginAs(result.user, result.token);
+    loginAs(result.user, result.token, null, password);
   } catch (err) {
     if (err.payload?.err !== 'Usuario no encontrado') { authErr(err.message); return; }
     const legacy = Object.values(getUsers()).find(x => x.username.toLowerCase() === username.toLowerCase());
@@ -883,6 +1007,7 @@ async function doLogin() {
     try {
       const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color }, token:'' });
       loginAs(result.user, result.token, legacy.id);
+      loginAs(result.user, result.token, legacy.id, password);
     } catch (migrationError) { authErr(migrationError.message); }
   }
 }
@@ -898,9 +1023,11 @@ async function doRegister() {
   try {
     const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor() }, token:'' });
     loginAs(result.user, result.token);
+    loginAs(result.user, result.token, null, password);
   } catch (err) { authErr(err.message); }
 }
 function loginAs(user, token, legacyId) {
+function loginAs(user, token, legacyId, password) {
   const users = getUsers();
   const legacy = legacyId ? users[legacyId] : null;
   const profile = { ...user };
@@ -923,6 +1050,7 @@ function loginAs(user, token, legacyId) {
   DB.set('users', users); DB.set('session', profile.id); DB.set('token', token);
   ME = profile; bootApp();
   if (socket) { socket.auth = { token }; socket.disconnect().connect(); }
+  if (password) initializeChatEncryption(password);
   syncCloudData();
 }
 function trySession() { const sid = DB.get('session'); if (!DB.get('token') || !sid) return false; const u = getUsers()[sid]; if (u) { ME = u; return true; } return false; }
@@ -1213,6 +1341,23 @@ function exitIframe() {
 let discCurrentFilter = 'all';
 function renderDiscover(filter) { if (filter) discCurrentFilter = filter; const allMaps = Object.values(getMaps()); let filtered = allMaps; if (discCurrentFilter === 'popular') filtered = [...allMaps].sort((a,b)=>(b.plays||0)-(a.plays||0)); else if (discCurrentFilter === 'new') filtered = [...allMaps].sort((a,b)=>new Date(b.created)-new Date(a.created)); else if (!['all'].includes(discCurrentFilter)) filtered = allMaps.filter(m => m.genre === discCurrentFilter); renderGrid('grid-discover', filtered.slice(0, 20), 'hot'); const users = getUsers(); const active = Object.values(users).filter(u => u.id !== ME.id).slice(0, 12); const el = document.getElementById('grid-creators'); if (el) { if (!active.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px">Aún no hay más usuarios.</div>'; return; } el.innerHTML = active.map(u => `<div class="friend-card" onclick="renderProfile('${u.id}');goTab('profile','${u.id}')"><div class="friend-av" style="background:${profileAvatarSrc(u)?'transparent':(u.color||'#5b8def')}">${avatarInnerHtml(u)}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join(''); } }
 function discFilter(f, el) { document.querySelectorAll('#s-discover .filter-btn').forEach(b => b.classList.remove('active')); if (el) el.classList.add('active'); renderDiscover(f); }
+let discCurrentFilter = 'all', discPage = 1;
+function renderDiscover(filter) {
+  if(filter){discCurrentFilter=filter;discPage=1;}
+  const allMaps=Object.values(getMaps());let filtered=allMaps;
+  if(discCurrentFilter==='popular')filtered=[...allMaps].sort((a,b)=>(b.plays||0)-(a.plays||0));
+  else if(discCurrentFilter==='new')filtered=[...allMaps].sort((a,b)=>new Date(b.created)-new Date(a.created));
+  else if(discCurrentFilter!=='all')filtered=allMaps.filter(map=>map.genre===discCurrentFilter);
+  const pageSize=24;renderGrid('grid-discover',filtered.slice(0,discPage*pageSize),'hot');
+  const more=document.getElementById('discover-load-more');if(more)more.style.display=filtered.length>discPage*pageSize?'':'none';
+  const users=getUsers(),active=Object.values(users).filter(user=>user.id!==ME.id&&!user.banned);
+  const el=document.getElementById('grid-creators');if(el){
+    if(!active.length){el.innerHTML='<div style="color:var(--text3);font-size:12px">Todavía no hay otros creadores.</div>';return;}
+    el.innerHTML=active.map(user=>`<div class="friend-card" onclick="renderProfile('${user.id}');goTab('profile','${user.id}')"><div class="friend-av" style="background:${profileAvatarSrc(user)?'transparent':(user.color||'#5b8def')}">${avatarInnerHtml(user)}</div><div style="font-size:12px;font-weight:700">${esc(user.username)}</div><div style="font-size:9px;color:var(--text3)">#${user.id}</div></div>`).join('');
+  }
+}
+function loadMoreDiscover(){discPage++;renderDiscover();}
+function discFilter(f, el) { document.querySelectorAll('#s-discover .filter-btn').forEach(button=>button.classList.remove('active'));if(el)el.classList.add('active');renderDiscover(f); }
 let searchQuery = ''; let searchTab = 'games';
 function doSearch(q) { q = (q || '').trim(); if (!q) return; searchQuery = q; document.getElementById('search-query-lbl').textContent = q; goTab('search'); runSearch(); }
 function runSearch() { const q = searchQuery.toLowerCase(); const allMaps = Object.values(getMaps()); const allUsers = Object.values(getUsers()); const gResults = allMaps.filter(m => m.name.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q)); const uResults = allUsers.filter(u => u.username.toLowerCase().includes(q)); renderGrid('search-games-results', gResults, 'hot'); const uEl = document.getElementById('search-users-results'); uEl.innerHTML = uResults.length ? uResults.map(u => `<div class="friend-card" onclick="goTab('profile','${u.id}')"><div class="friend-av" style="background:${profileAvatarSrc(u)?'transparent':(u.color||'#5b8def')}">${avatarInnerHtml(u)}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join('') : '<div style="color:var(--text3);font-size:12px">Sin resultados.</div>'; }
@@ -1312,6 +1457,7 @@ function logout() {
   if (!confirm('\u00bfCerrar sesi\u00f3n?')) return;
   apiRequest('/api/logout', { method:'POST' }).catch(() => {});
   if (socket) { socket.auth = {}; socket.disconnect(); }
+  CHAT_PRIVATE_KEY = null; CHAT_PUBLIC_KEY = null; CHAT_PUBLIC_KEYS.clear(); setChatKeyStatus(false);
   DB.del('session'); DB.del('token'); ME = null; CLOUD_READY = false;
   document.getElementById('nav').style.display = 'none';
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -1407,6 +1553,54 @@ function renderConv(cid, userId) {
   const statusEl = document.getElementById('msg-hd-status');
   if (statusEl) {
     statusEl.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + (isOnline?'var(--green)':'var(--text3)') + ';margin-right:4px"></span>' + (isOnline?'En línea':'Desconectado');
+function openConvWith(userId) { if (!ME || !getUsers()[userId]) { showToast('Usuario no disponible'); return; } goTab('msg'); const cid = convId(ME.id, userId); activeConvId = cid; loadConvList(); renderConv(cid, userId); }
+function loadConvList() {
+  const users=getUsers(), convs=getConvs(), el=document.getElementById('msg-list');
+  if(!el)return;
+  const people=Object.values(users).filter(user=>user?.id&&user.id!==ME.id&&!user.banned);
+  people.sort((a,b)=>{
+    const am=(convs[convId(ME.id,a.id)]||[]).slice(-1)[0]?.t||0;
+    const bm=(convs[convId(ME.id,b.id)]||[]).slice(-1)[0]?.t||0;
+    return bm-am||String(a.username).localeCompare(String(b.username));
+  });
+  if(!people.length){el.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px">Todavía no hay otras cuentas públicas en Crix.</div>';checkNotifs();return;}
+  el.innerHTML=people.map(user=>{
+    const cid=convId(ME.id,user.id),msgs=convs[cid]||[],last=msgs[msgs.length-1];
+    const unread=msgs.filter(message=>message.from!==ME.id&&!message.read).length;
+    return `<div class="msg-conv ${activeConvId===cid?'active':''}" onclick="openConvWith('${user.id}')"><div class="conv-av" style="background:${user.color||'#5b8def'}">${esc((user.username||'?')[0].toUpperCase())}</div><div class="conv-info"><div class="conv-name">${esc(user.username||'Usuario')}</div><div class="conv-last">${last?'🔒 Mensaje cifrado':'Iniciar chat E2EE'}</div>${unread?`<div class="unread-badge">${unread}</div>`:''}</div></div>`;
+  }).join(''); checkNotifs();
+}
+function htmlAttr(value) { return String(value||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function renderConv(cid,userId) {
+  const users=getUsers(),other=users[userId]||{username:userId,color:'#5b8def',id:userId};
+  document.getElementById('msg-hd-av').textContent=(other.username||'?')[0].toUpperCase();
+  document.getElementById('msg-hd-av').style.background=other.color||'#5b8def';
+  document.getElementById('msg-hd-name').textContent=other.username||userId;
+  document.getElementById('msg-hd-sub').textContent='#'+other.id+' · 🔐 E2EE';
+  const isOnline=other.onlineAt&&(Date.now()-other.onlineAt<120000),statusEl=document.getElementById('msg-hd-status');
+  if(statusEl)statusEl.innerHTML='<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'+(isOnline?'var(--green)':'var(--text3)')+';margin-right:4px"></span>'+(isOnline?'En línea':'Desconectado');
+  window._activeChatUserId=userId;window._activeConvId=cid;
+  try{const peerKey=await getChatPublicKey(userId);if(peerKey&&window._activeConvId===cid)document.getElementById('msg-hd-sub').textContent='#'+other.id+' · E2EE · '+await chatKeyFingerprint(peerKey);}catch(err){showToast(err.message);}
+  try {
+    const remote=await apiRequest('/api/convs/'+encodeURIComponent(ME.id)+'/'+encodeURIComponent(cid));
+    const convs=getConvs();
+    const items=remote.messages||[];const merged=new Map([...(convs[cid]||[]),...items].filter(m=>m?.e2ee?.v===1).map(m=>[m.id,m]));convs[cid]=Array.from(merged.values()).sort((a,b)=>(a.t||0)-(b.t||0));
+    setConvs(convs);
+  } catch(err) { console.warn('[E2EE] No se pudo sincronizar el historial:',err.message); }
+  if(window._activeConvId!==cid)return;
+  const convs=getConvs(),msgs=convs[cid]||[];let output='';
+  for(const message of msgs){
+    const isMe=message.from===ME.id,cls=isMe?'me':'other';
+    if(!isMe)message.read=true;
+    let content;
+    try{content=await decryptChatMessage(cid,message);}catch{content=null;}
+    let body='';
+    if(!content)body=`<div class="mb ${cls}">🔒 Mensaje cifrado. Desbloqueá tu clave o verificá que la cuenta emisora conserve sus claves.</div>`;
+    else if(content.type==='audio')body=`<div class="mb ${cls}" style="padding:8px 12px;display:flex;align-items:center;gap:8px">🎤<audio controls src="${htmlAttr(content.audio||content.data)}" style="height:26px;max-width:170px"></audio></div>`;
+    else if(content.type==='file')body=`<div class="mb ${cls}">📎 <a href="${htmlAttr(content.data)}" download="${htmlAttr(content.filename)}" style="color:var(--acc)">${esc(content.filename||'Archivo')}</a></div>`;
+    else if(content.type==='image')body=`<div class="mb ${cls}" style="padding:4px"><img src="${htmlAttr(content.data)}" alt="Imagen cifrada" style="max-width:210px;border-radius:8px;display:block"></div>`;
+    else body=`<div class="mb ${cls}">${esc(content.text||'')}</div>`;
+    output+=`<div class="mb-wrap ${cls}">${body}<div class="mb-time">${new Date(message.t||Date.now()).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div></div>`;
   }
   // Guardar userId activo para llamadas
   window._activeChatUserId = userId;
@@ -1416,6 +1610,24 @@ function msgKeydown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefaul
 function autoResize(t) { t.style.height = ''; t.style.height = Math.min(t.scrollHeight, 110) + 'px'; }
 function pushMsg(cid, msg) { const convs = getConvs(); convs[cid] = convs[cid] || []; convs[cid].push(msg); setConvs(convs); const otherId = cid.split('_').find(p => p !== ME.id); renderConv(cid, otherId); loadConvList(); }
 function sendFile(e) { if (!activeConvId) return; const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { const isImg = file.type.startsWith('image/'); pushMsg(activeConvId, { type:isImg?'image':'file', data:ev.target.result, filename:file.name, from:ME.id, time:timeStr(), read:false }); }; reader.readAsDataURL(file); e.target.value = ''; }
+  convs[cid]=msgs;setConvs(convs);
+  const el=document.getElementById('msg-messages');el.innerHTML=output;el.scrollTop=el.scrollHeight;loadConvList();
+}
+async function sendMsg() { if(!activeConvId)return;const inp=document.getElementById('msg-text'),text=inp.value.trim();if(!text)return;try{await pushMsg(activeConvId,{type:'text',text});inp.value='';inp.style.height='';}catch(err){showToast(err.message);} }
+function msgKeydown(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();} }
+function autoResize(t) { t.style.height='';t.style.height=Math.min(t.scrollHeight,110)+'px'; }
+async function pushMsg(cid,msg) {
+  const recipientId=cid.split('_').find(id=>id!==ME.id);if(!recipientId)throw new Error('Conversación inválida');
+  const encrypted=await encryptChatMessage(cid,msg,recipientId);
+  await apiRequest('/api/convs/'+encodeURIComponent(cid),{method:'POST',body:{msg:encrypted}});
+  const convs=getConvs();convs[cid]=convs[cid]||[];if(!convs[cid].some(item=>item.id===encrypted.id))convs[cid].push(encrypted);setConvs(convs);
+  await renderConv(cid,recipientId);loadConvList();
+}
+function sendFile(e) {
+  if(!activeConvId)return;const file=e.target.files[0];if(!file)return;e.target.value='';
+  if(file.size>10*1024*1024){showToast('El adjunto supera el límite de 10 MB.');return;}
+  const reader=new FileReader();reader.onload=async event=>{const isImg=file.type.startsWith('image/');try{await pushMsg(activeConvId,{type:isImg?'image':'file',data:event.target.result,filename:file.name,mimeType:file.type});}catch(err){showToast(err.message);}};reader.readAsDataURL(file);
+}
 function filterConvs(q) { document.querySelectorAll('.msg-conv').forEach(el => { const name = el.querySelector('.conv-name').textContent.toLowerCase(); el.style.display = name.includes(q.toLowerCase()) ? '' : 'none'; }); }
 let mediaRec = null, audioChunks = [];
 function toggleRecord() { const btn = document.getElementById('rec-btn'); if (mediaRec && mediaRec.state === 'recording') { mediaRec.stop(); btn.classList.remove('rec'); btn.textContent = '🎤'; } else { navigator.mediaDevices.getUserMedia({audio:true}).then(stream => { audioChunks = []; mediaRec = new MediaRecorder(stream); mediaRec.ondataavailable = e => audioChunks.push(e.data); mediaRec.onstop = () => { const blob = new Blob(audioChunks, {type:'audio/webm'}); const r = new FileReader(); r.onload = ev => { if (activeConvId) pushMsg(activeConvId, {type:'audio',data:ev.target.result,from:ME.id,time:timeStr(),read:false}); }; r.readAsDataURL(blob); stream.getTracks().forEach(t => t.stop()); }; mediaRec.start(); btn.classList.add('rec'); btn.textContent = '⏹️'; }).catch(() => showToast('⚠️ Sin acceso al micrófono')); } }
@@ -1581,6 +1793,8 @@ function openLightingProps() {
     '<div class="prop-row"><div class="prop-lbl">Contraste</div><input class="prop-inp" type="number" value="'+L.colorContrast+'" step="0.05" min="-1" max="1" onchange="stLighting.colorContrast=parseFloat(this.value);applyLighting()"></div>'+
     '<div class="prop-row"><div class="prop-lbl">Saturación</div><input class="prop-inp" type="number" value="'+L.colorSaturation+'" step="0.05" min="0" max="2" onchange="stLighting.colorSaturation=parseFloat(this.value);applyLighting()"></div>';
   socket.on('msg_incoming', function({ convId, msg }) {
+  socket.on('new_private_msg', function({ convId, msg }) {
+    if(!msg?.e2ee||msg.e2ee.v!==1)return;
     const convs = getConvs();
     convs[convId] = convs[convId] || [];
     if (!convs[convId].find(function(m){return m.id===msg.id;})) {
@@ -1594,6 +1808,8 @@ function openLightingProps() {
       const sender = users[msg.from] || { username: '?' };
       showToast('\u{1F4AC} ' + sender.username + ': ' + (msg.text||'[audio]').substring(0,40));
       sendBrowserNotif('Mensaje de ' + sender.username, msg.text || '[Mensaje de voz]');
+      showToast('\u{1F4AC} Nuevo mensaje cifrado de ' + sender.username);
+      sendBrowserNotif('Mensaje cifrado de ' + sender.username, 'Abrí Crix para descifrarlo.');
       checkNotifs();
     }
   });
@@ -2369,6 +2585,7 @@ function sendVoiceMessage(convId, audioData, duration) {
   const msg = {
     id: 'm' + Date.now(),
     from: ME.id,
+    id: crypto.randomUUID(),
     type: 'audio',
     audio: audioData,
     duration: duration,
@@ -2377,6 +2594,7 @@ function sendVoiceMessage(convId, audioData, duration) {
   pushMsg(convId, msg);
   renderConv(convId);
   if (socket) socket.emit('msg', { convId, msg });
+  pushMsg(convId, msg).catch(err=>showToast(err.message));
 }
 // ════════════════════════════════════════════════════════════════
 // LLAMADAS Y VIDEOLLAMADAS (WebRTC simplificado con señalización)
