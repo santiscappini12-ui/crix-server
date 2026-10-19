@@ -26,9 +26,11 @@ button{font-family:var(--font);cursor:pointer;}
 input,select,textarea{font-family:var(--font);}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:#2a3045;border-radius:2px;}
+
 /* ═══ SCREENS ═══ */
 .screen{position:fixed;inset:0;display:none;z-index:10;flex-direction:column;}
 .screen.active{display:flex;}
+
 /* ═══ AUTH ═══ */
 #s-auth{background:radial-gradient(ellipse 80% 80% at 40% 60%,#0f1535 0%,#080a0f 65%);align-items:center;justify-content:center;}
 .auth-wrap{width:min(400px,92vw);display:flex;flex-direction:column;gap:20px;}
@@ -50,6 +52,7 @@ input,select,textarea{font-family:var(--font);}
 .btn-green{background:rgba(34,211,166,.15);color:var(--green);border:1px solid rgba(34,211,166,.3);}
 .err-box{background:#1a0808;border:1px solid rgba(239,68,68,.4);color:var(--red);padding:9px 13px;border-radius:8px;font-size:13px;margin-bottom:12px;display:none;}
 .link-btn{background:none;border:none;color:var(--acc);font-weight:600;font-size:13px;cursor:pointer;text-decoration:underline;}
+
 /* ═══ NAV ═══ */
 #nav{background:rgba(8,10,15,.95);border-bottom:1px solid var(--border);display:none;align-items:center;padding:0 16px;height:50px;gap:6px;position:fixed;top:0;left:0;right:0;z-index:200;flex-shrink:0;backdrop-filter:blur(20px);}
 .nav-logo{font-family:var(--display);font-size:22px;font-weight:800;letter-spacing:-1.5px;background:linear-gradient(135deg,#5b8def,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-right:8px;flex-shrink:0;}
@@ -66,9 +69,11 @@ input,select,textarea{font-family:var(--font);}
 .nav-av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;cursor:pointer;flex-shrink:0;border:2px solid var(--border);}
 .notif-wrap{position:relative;cursor:pointer;}
 .notif-dot{width:7px;height:7px;border-radius:50%;background:var(--red);position:absolute;top:-1px;right:-1px;display:none;border:1.5px solid var(--bg);}
+
 /* ═══ PAGE SHELL ═══ */
 .page{flex:1;overflow-y:auto;padding-top:50px;}
 .page-inner{max-width:1200px;margin:0 auto;padding:20px 16px;}
+
 /* ═══ HOME ═══ */
 .section-hd{font-family:var(--display);font-size:15px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px;letter-spacing:-.5px;}
 .section-hd-accent{width:3px;height:16px;border-radius:2px;background:var(--acc);}
@@ -99,6 +104,7 @@ input,select,textarea{font-family:var(--font);}
 .game-act-btn:hover{background:var(--acc);}
 .upload-zone{border:2px dashed var(--border);border-radius:12px;padding:28px;text-align:center;cursor:pointer;color:var(--text3);font-size:13px;transition:all .2s;margin-bottom:12px;}
 .upload-zone:hover{border-color:var(--acc);color:var(--text2);background:rgba(91,141,239,.04);}
+
 /* ═══ SEARCH RESULTS ═══ */
 #s-search{background:var(--bg);}
 .search-hd{padding:20px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
@@ -106,6 +112,7 @@ input,select,textarea{font-family:var(--font);}
 .filter-btn{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text2);white-space:nowrap;}
 .filter-btn.active{background:var(--acc);color:#fff;border-color:transparent;}
 .search-results{flex:1;overflow-y:auto;padding:16px;}
+
 /* ═══ PROFILE ═══ */
 .pf-banner{background:linear-gradient(135deg,#0d1525,#0a0d18);border:1px solid var(--border);border-radius:16px;padding:24px;display:flex;gap:20px;align-items:flex-start;margin-bottom:20px;}
 .pf-av{border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;font-family:var(--display);}
@@ -124,6 +131,7 @@ input,select,textarea{font-family:var(--font);}
 .friend-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s;}
 .friend-card:hover{border-color:var(--acc);}
 .friend-av{width:44px;height:44px;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;overflow:hidden;}
+
 /* ═══ STUDIO ═══ */
 #s-studio{flex-direction:column;}
 #hub-menubar{min-height:42px;padding:5px 10px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0;}
@@ -178,6 +186,7 @@ input,select,textarea{font-family:var(--font);}
 .tgl-k{width:11px;height:11px;border-radius:50%;background:#fff;position:absolute;top:2px;left:2px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3);}
 .tgl.on .tgl-k{left:17px;}
 #stu-status{padding:4px 12px;font-size:9px;color:var(--text3);border-top:1px solid var(--border);background:var(--bg3);font-family:var(--mono);}
+
 /* ═══ CODE EDITOR ═══ */
 #code-overlay{position:fixed;inset:0;z-index:500;background:var(--bg);display:none;flex-direction:column;}
 #code-overlay.open{display:flex;}
@@ -194,6 +203,7 @@ input,select,textarea{font-family:var(--font);}
 .code-out-err{color:var(--red);}
 .code-out-warn{color:var(--yellow);}
 .code-out-sys{color:var(--text3);}
+
 /* ═══ MESSAGES ═══ */
 #s-msg{flex-direction:row;}
 #msg-sidebar{width:270px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:50px;flex-shrink:0;}
@@ -224,6 +234,7 @@ input,select,textarea{font-family:var(--font);}
 .mic-btn.rec{background:var(--red);color:#fff;border-color:transparent;animation:pulse .8s infinite;}
 @keyframes pulse{0%,100%{transform:scale(1);}50%{transform:scale(1.08);}}
 .send-btn{width:35px;height:35px;border-radius:50%;background:var(--acc);color:#fff;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;flex-shrink:0;}
+
 /* ═══ GAME ═══ */
 #s-game{background:#000;}
 #game-wrap{position:fixed;inset:0;}
@@ -242,6 +253,7 @@ input,select,textarea{font-family:var(--font);}
 #joy-knob{position:absolute;top:50%;left:50%;width:38px;height:38px;background:radial-gradient(circle,#5b8def,#2a5acc);border-radius:50%;border:2px solid #7aabff;transform:translate(-50%,-50%);pointer-events:none;}
 #jump-btn{position:absolute;bottom:38px;right:28px;width:66px;height:66px;background:rgba(91,141,239,.2);border-radius:50%;pointer-events:auto;touch-action:none;display:flex;justify-content:center;align-items:center;color:white;font-weight:800;font-size:11px;border:2px solid rgba(91,141,239,.45);}
 #g-back-btn{position:fixed;top:10px;right:10px;z-index:80;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.1);color:white;padding:6px 13px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:11px;font-weight:700;}
+
 /* ═══ MODAL ═══ */
 .mo-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:600;display:none;align-items:center;justify-content:center;padding:16px;}
 .mo-overlay.open{display:flex;}
@@ -249,6 +261,7 @@ input,select,textarea{font-family:var(--font);}
 .mo-box h3{font-family:var(--display);font-size:18px;font-weight:800;}
 .mo-btns{display:flex;gap:8px;}
 .mo-btns .btn{flex:1;}
+
 /* ═══ NPC GRID ═══ */
 .npc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
 .npc-card{background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:12px;text-align:center;cursor:pointer;transition:all .15s;}
@@ -256,6 +269,7 @@ input,select,textarea{font-family:var(--font);}
 .npc-icon{font-size:28px;margin-bottom:5px;}
 .npc-name{font-size:11px;font-weight:700;}
 .npc-type{font-size:9px;color:var(--text2);margin-top:2px;}
+
 /* ═══ CALL OVERLAY ═══ */
 #call-overlay{position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:800;display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;}
 #call-overlay.open{display:flex;}
@@ -263,10 +277,13 @@ input,select,textarea{font-family:var(--font);}
 .call-btns{display:flex;gap:14px;}
 .call-btn{width:54px;height:54px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;transition:all .15s;}
 .call-btn:hover{transform:scale(1.08);}
+
 /* ═══ TOAST ═══ */
 #toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(8,10,15,.95);border:1px solid var(--acc);color:var(--text);padding:8px 18px;border-radius:20px;font-size:12px;z-index:9999;display:none;white-space:nowrap;pointer-events:none;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,.5);}
+
 /* ═══ SCROLLBAR ═══ */
 .thin-scroll::-webkit-scrollbar{width:3px;}
+
 /* ═══ TOOLBOX ═══ */
 .toolbox-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;max-height:400px;overflow-y:auto;}
 .toolbox-item{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center;cursor:pointer;transition:all .15s;}
@@ -274,11 +291,14 @@ input,select,textarea{font-family:var(--font);}
 .toolbox-icon{font-size:22px;margin-bottom:4px;}
 .toolbox-name{font-size:10px;font-weight:600;}
 .toolbox-cat{font-size:9px;color:var(--text3);}
+
 /* ═══ TAGS ═══ */
 .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;letter-spacing:.5px;}
 .tag-blue{background:rgba(91,141,239,.15);color:#5b8def;border:1px solid rgba(91,141,239,.25);}
 .tag-purple{background:rgba(139,92,246,.15);color:#a78bfa;border:1px solid rgba(139,92,246,.25);}
 .tag-green{background:rgba(34,211,166,.15);color:#22d3a6;border:1px solid rgba(34,211,166,.25);}
+
+
 /* === VIDEOS === */
 .video-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:20px;}
 .video-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:pointer;transition:all .2s;}
@@ -305,6 +325,7 @@ input,select,textarea{font-family:var(--font);}
 </style>
 </head>
 <body>
+
 <!-- ═══ AUTH ═══ -->
 <div id="s-auth" class="screen active">
 <div class="auth-wrap">
@@ -315,15 +336,19 @@ input,select,textarea{font-family:var(--font);}
       .cls-1 {
         fill: #fff;
       }
+
       .cls-2 {
         stroke: #18002e;
       }
+
       .cls-2, .cls-3 {
         stroke-miterlimit: 10;
       }
+
       .cls-2, .cls-4 {
         fill: #1b1464;
       }
+
       .cls-3 {
         fill: #18002e;
         stroke: #000;
@@ -382,6 +407,7 @@ input,select,textarea{font-family:var(--font);}
   </div>
 </div>
 </div>
+
 <!-- ═══ NAV ═══ -->
 <div id="nav">
   <div class="nav-logo" style="background:none;-webkit-text-fill-color:unset;padding:0"><?xml version="1.0" encoding="UTF-8"?>
@@ -391,15 +417,19 @@ input,select,textarea{font-family:var(--font);}
       .cls-1 {
         fill: #fff;
       }
+
       .cls-2 {
         stroke: #18002e;
       }
+
       .cls-2, .cls-3 {
         stroke-miterlimit: 10;
       }
+
       .cls-2, .cls-4 {
         fill: #1b1464;
       }
+
       .cls-3 {
         fill: #18002e;
         stroke: #000;
@@ -423,7 +453,6 @@ input,select,textarea{font-family:var(--font);}
     <button class="nav-tab" onclick="goTab('discover')">🔭 Descubrir</button>
     <button class="nav-tab" onclick="goTab('videos')">🎬 Videos</button>
     <button class="nav-tab" onclick="goTab('forums')">💬 Foros</button>
-    <button class="nav-tab" onclick="goTab('studio')">🔧 Studio</button>
     <button class="nav-tab" onclick="goTab('studio')">🧰 Crix Hub</button>
     <button class="nav-tab" onclick="goTab('msg')">💬 Chat</button>
     <button class="nav-tab" onclick="goTab('profile',ME&&ME.id)">👤 Perfil</button>
@@ -439,6 +468,7 @@ input,select,textarea{font-family:var(--font);}
     <div class="nav-av" id="nav-av" onclick="goTab('profile',ME&&ME.id)"></div>
   </div>
 </div>
+
 <!-- ═══ HOME ═══ -->
 <div id="s-home" class="screen">
 <div class="page"><div class="page-inner">
@@ -459,11 +489,13 @@ input,select,textarea{font-family:var(--font);}
   <div class="games-grid" id="grid-mine"></div>
 </div></div>
 </div>
+
 <!-- ═══ IFRAME GAME (para juegos HTML importados) ═══ -->
 <div id="s-iframe" class="screen" style="background:#000">
   <button id="iframe-back-btn" style="position:fixed;top:10px;right:10px;z-index:9999;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.15);color:white;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:12px;font-weight:700" onclick="exitIframe()">← Salir</button>
   <iframe id="game-iframe" style="width:100%;height:100%;border:none" sandbox="allow-scripts allow-forms allow-modals"></iframe>
 </div>
+
 <div class="mo-overlay" id="mo-app-editor">
   <div class="mo-box" style="width:min(900px,96vw);max-height:92vh;display:flex;flex-direction:column">
     <h3>📱 Editor de app</h3>
@@ -473,6 +505,7 @@ input,select,textarea{font-family:var(--font);}
     <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-app-editor')">Cancelar</button><button class="btn btn-p" onclick="saveAppSource()">💾 Guardar y publicar</button></div>
   </div>
 </div>
+
 <!-- ═══ DISCOVER ═══ -->
 <div id="s-discover" class="screen">
 <div class="page"><div class="page-inner">
@@ -491,6 +524,7 @@ input,select,textarea{font-family:var(--font);}
   <div class="friends-grid" id="grid-creators"></div>
 </div></div>
 </div>
+
 <!-- ═══ SEARCH ═══ -->
 <div id="s-search" class="screen">
 <div class="page"><div class="page-inner">
@@ -506,11 +540,13 @@ input,select,textarea{font-family:var(--font);}
   <div id="search-users-results" class="friends-grid" style="display:none"></div>
 </div></div>
 </div>
+
 <!-- ═══ PROFILE ═══ -->
 <div id="s-profile" class="screen">
 <div class="page"><div class="page-inner" id="profile-inner">
 </div></div>
 </div>
+
 <!-- ═══ STUDIO ═══ -->
 <div id="s-videos" class="screen">
 <div class="page"><div class="page-inner">
@@ -526,6 +562,7 @@ input,select,textarea{font-family:var(--font);}
   <div class="video-grid" id="video-grid"></div>
 </div></div>
 </div>
+
 <div id="s-forums" class="screen">
 <div class="page"><div class="page-inner">
   <div class="section-hd"><div class="section-hd-accent" style="background:var(--acc3)"></div>Foros Crix</div>
@@ -551,6 +588,7 @@ input,select,textarea{font-family:var(--font);}
   <div id="post-list" class="post-list"></div>
 </div></div>
 </div>
+
 <div class="mo-overlay" id="mo-upload-video">
 <div class="mo-box">
   <h3>🎬 Subir Video</h3>
@@ -562,6 +600,7 @@ input,select,textarea{font-family:var(--font);}
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-upload-video')">Cancelar</button><button class="btn btn-p" onclick="confirmUploadVideo()">📤 Publicar</button></div>
 </div>
 </div>
+
 <div id="s-studio" class="screen">
 <div id="hub-menubar">
   <div class="hub-brand">🧰 CRIX HUB</div>
@@ -587,7 +626,6 @@ input,select,textarea{font-family:var(--font);}
     <button class="st-btn" onclick="stuAdd('Wedge')">◥ Cuña</button>
     <button class="st-btn" onclick="stuAdd('TrussPart')">⊞ Truss</button>
     <button class="st-btn" onclick="stuAddSpawn()">⚑ Spawn</button>
-    <button class="st-btn" onclick="openNpcPanel()">🤖 NPC</button>
     <button class="st-btn" onclick="openNpcPanel()">🤖 Humanoide</button>
     <button class="st-btn" onclick="openToolbox()">🧰 Toolbox</button>
     <button class="st-btn" onclick="document.getElementById('hub-model-file').click()">🧩 Importar OBJ</button>
@@ -605,14 +643,11 @@ input,select,textarea{font-family:var(--font);}
     <button class="st-btn" onclick="stuDuplicate()">⎘ Dupl.</button>
     <button class="st-btn red" onclick="stuDelete()">✕ Borrar</button>
     <div class="st-sep"></div>
-    <button class="st-btn green" onclick="stuSave()">💾 Guardar</button>
-    <button class="st-btn yellow" onclick="stuTest()">▶ Probar</button>
     <button class="st-btn purple" onclick="openPublish()">🚀 Publicar</button>
   </div>
 </div>
 <div id="studio-main">
   <div id="stu-sidebar">
-    <div class="panel-hd">EXPLORER</div>
     <div class="panel-hd">EXPLORER · ESCENA</div>
     <input class="inp hub-explorer-search" id="hub-explorer-search" placeholder="Filtrar objetos y scripts…" oninput="refreshExplorer()">
     <div class="explorer" id="explorer"></div>
@@ -620,7 +655,6 @@ input,select,textarea{font-family:var(--font);}
   </div>
   <div id="stu-canvas-wrap"></div>
   <div id="props-panel">
-    <div class="panel-hd">PROPIEDADES</div>
     <div class="panel-hd">PROPIEDADES · INSPECTOR</div>
     <div id="props-body">
       <div style="padding:20px 12px;color:var(--text3);font-size:11px;text-align:center;line-height:1.6">
@@ -630,6 +664,7 @@ input,select,textarea{font-family:var(--font);}
   </div>
 </div>
 </div>
+
 <!-- ═══ MESSAGES ═══ -->
 <div id="s-msg" class="screen">
   <div id="msg-sidebar">
@@ -672,6 +707,7 @@ input,select,textarea{font-family:var(--font);}
     </div>
   </div>
 </div>
+
 <div class="mo-overlay" id="mo-chat-key">
   <div class="mo-box" style="max-width:420px">
     <h3>🔐 Desbloquear chat E2EE</h3>
@@ -680,6 +716,7 @@ input,select,textarea{font-family:var(--font);}
     <div class="mo-btns"><button class="btn btn-g" onclick="cancelChatKeyPassword()">Cancelar</button><button class="btn btn-p" onclick="submitChatKeyPassword()">Desbloquear</button></div>
   </div>
 </div>
+
 <!-- ═══ GAME ═══ -->
 <div id="s-game" class="screen">
   <div id="game-wrap"></div>
@@ -700,6 +737,7 @@ input,select,textarea{font-family:var(--font);}
     <div id="jump-btn">SALTAR</div>
   </div>
 </div>
+
 <!-- ═══ CODE EDITOR ═══ -->
 <div id="code-overlay">
 <div id="code-hd">
@@ -721,15 +759,16 @@ input,select,textarea{font-family:var(--font);}
 </div>
 <div id="code-output"><span class="code-out-sys">-- Output del script (CrixScript v2)</span></div>
 </div>
+
 <!-- ═══ NPC MODAL ═══ -->
 <div class="mo-overlay" id="mo-npc">
 <div class="mo-box">
-  <h3>🤖 NPCs</h3>
   <h3>🤖 Humanoides</h3>
   <div class="npc-grid" id="npc-grid"></div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-npc')">Cerrar</button></div>
 </div>
 </div>
+
 <!-- ═══ TOOLBOX MODAL ═══ -->
 <div class="mo-overlay" id="mo-toolbox">
 <div class="mo-box" style="width:min(600px,95vw)">
@@ -740,6 +779,7 @@ input,select,textarea{font-family:var(--font);}
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-toolbox')">Cerrar</button></div>
 </div>
 </div>
+
 <!-- ═══ PUBLISH MODAL ═══ -->
 <div class="mo-overlay" id="mo-publish">
 <div class="mo-box">
@@ -792,6 +832,7 @@ input,select,textarea{font-family:var(--font);}
   </div>
 </div>
 </div>
+
 <!-- ═══ CALL OVERLAY ═══ -->
 <div id="call-overlay">
   <div class="call-av-big" id="call-av"></div>
@@ -807,7 +848,9 @@ input,select,textarea{font-family:var(--font);}
     <button class="call-btn" style="background:var(--red)" onclick="endCall()">📵</button>
   </div>
 </div>
+
 <div id="toast"></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -861,7 +904,6 @@ function setMaps(m)  {
       apiRequest('/api/maps/' + encodeURIComponent(id), { method:'DELETE' }).catch(() => {});
   });
 }
-function getConvs()  { return DB.get('convs')  || {}; }
 function getConvs() {
   const raw = DB.get('convs') || {};
   const encrypted = {};
@@ -998,7 +1040,6 @@ async function doLogin() {
   if (!username || !password) { authErr('Completá los campos.'); return; }
   try {
     const result = await apiRequest('/api/login', { method:'POST', body:{ username, pw:password }, token:'' });
-    loginAs(result.user, result.token);
     loginAs(result.user, result.token, null, password);
   } catch (err) {
     if (err.payload?.err !== 'Usuario no encontrado') { authErr(err.message); return; }
@@ -1006,7 +1047,6 @@ async function doLogin() {
     if (!legacy || legacy.pw !== btoa(unescape(encodeURIComponent(password)))) { authErr('Usuario no encontrado o contraseña incorrecta.'); return; }
     try {
       const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color }, token:'' });
-      loginAs(result.user, result.token, legacy.id);
       loginAs(result.user, result.token, legacy.id, password);
     } catch (migrationError) { authErr(migrationError.message); }
   }
@@ -1022,11 +1062,9 @@ async function doRegister() {
   if (!/^[a-zA-Z0-9_]+$/.test(username)) { authErr('Solo letras, números y guión bajo.'); return; }
   try {
     const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor() }, token:'' });
-    loginAs(result.user, result.token);
     loginAs(result.user, result.token, null, password);
   } catch (err) { authErr(err.message); }
 }
-function loginAs(user, token, legacyId) {
 function loginAs(user, token, legacyId, password) {
   const users = getUsers();
   const legacy = legacyId ? users[legacyId] : null;
@@ -1115,6 +1153,7 @@ async function refreshCloudContent() {
     if (document.getElementById('s-discover')?.classList.contains('active')) renderDiscover();
     if (document.getElementById('s-videos')?.classList.contains('active')) renderVideos();
     if (document.getElementById('s-forums')?.classList.contains('active')) renderForums();
+    if (document.getElementById('s-profile')?.classList.contains('active')) renderProfile(viewingUserId || ME.id);
   } catch (err) { console.warn('[CLOUD] No se pudo actualizar el contenido:', err.message); }
 }
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
@@ -1338,9 +1377,6 @@ function exitIframe() {
   document.getElementById('s-home').classList.add('active');
   document.getElementById('nav').style.display = 'flex';
 }
-let discCurrentFilter = 'all';
-function renderDiscover(filter) { if (filter) discCurrentFilter = filter; const allMaps = Object.values(getMaps()); let filtered = allMaps; if (discCurrentFilter === 'popular') filtered = [...allMaps].sort((a,b)=>(b.plays||0)-(a.plays||0)); else if (discCurrentFilter === 'new') filtered = [...allMaps].sort((a,b)=>new Date(b.created)-new Date(a.created)); else if (!['all'].includes(discCurrentFilter)) filtered = allMaps.filter(m => m.genre === discCurrentFilter); renderGrid('grid-discover', filtered.slice(0, 20), 'hot'); const users = getUsers(); const active = Object.values(users).filter(u => u.id !== ME.id).slice(0, 12); const el = document.getElementById('grid-creators'); if (el) { if (!active.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px">Aún no hay más usuarios.</div>'; return; } el.innerHTML = active.map(u => `<div class="friend-card" onclick="renderProfile('${u.id}');goTab('profile','${u.id}')"><div class="friend-av" style="background:${profileAvatarSrc(u)?'transparent':(u.color||'#5b8def')}">${avatarInnerHtml(u)}</div><div style="font-size:12px;font-weight:700">${esc(u.username)}</div><div style="font-size:9px;color:var(--text3)">#${u.id}</div></div>`).join(''); } }
-function discFilter(f, el) { document.querySelectorAll('#s-discover .filter-btn').forEach(b => b.classList.remove('active')); if (el) el.classList.add('active'); renderDiscover(f); }
 let discCurrentFilter = 'all', discPage = 1;
 function renderDiscover(filter) {
   if(filter){discCurrentFilter=filter;discPage=1;}
@@ -1397,6 +1433,7 @@ function renderProfile(uid) {
     '<div class="pf-name">'+(isBanned&&!isMe?'<span style="color:var(--red)">🚫 </span>':'')+esc(u.username)+'</div>'+
     '<div class="pf-handle">#'+u.id+'</div>'+
     '<div class="pf-join">Miembro desde '+dateStr(u.created)+'</div>'+
+    (u.currentGameId && u.currentInstanceId ? '<div class="pf-bio">🎮 Jugando ahora: '+esc(u.currentGameName||'un juego')+' · '+(u.currentInstancePlayers||1)+' en esta instancia</div>' : '')+
     (u.bio ? '<div class="pf-bio">'+esc(u.bio)+'</div>' : '')+
     '<div class="pf-stats">'+
     '<div><div class="pstat-v">'+myMaps.length+'</div><div class="pstat-l">Juegos</div></div>'+
@@ -1409,6 +1446,7 @@ function renderProfile(uid) {
       : (!isFriend
           ? '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(\''+u.id+'\')">+ Agregar amigo</button>'
           : '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje</button>')+
+        (isFriend && u.currentGameId && u.currentInstanceId ? '<button class="btn btn-p" style="font-size:12px" onclick="joinFriendGame(\''+u.id+'\')">▶ Unirme a su partida</button>' : '')+
         adminBanBtn)+
     '</div></div></div>'+
     (isMe ? '<input id="profile-avatar-file" type="file" accept="image/*" style="display:none" onchange="uploadProfileAvatar(event)">' : '')+
@@ -1425,6 +1463,26 @@ function renderProfile(uid) {
     '<div id="pf-followers-tab" class="friends-grid" style="display:none"></div>'+
     '<div id="pf-following-tab" class="friends-grid" style="display:none"></div>'+
     (isMe ? '<div id="pf-liked-tab" class="games-grid" style="display:none"></div>' : ''); pfTab('games'); }
+async function joinFriendGame(userId) {
+  if (!(ME.friends||[]).includes(userId)) { showToast('Solo podés unirte a la partida de un amigo.'); return; }
+  await refreshCloudContent();
+  const friend = getUsers()[userId];
+  if (!friend?.currentGameId || !friend?.currentInstanceId) { showToast('Tu amigo ya no está en esa partida.'); return; }
+  const map = getMaps()[friend.currentGameId];
+  if (!map) { showToast('No tenés acceso a ese juego o ya no está disponible.'); return; }
+  playMap(friend.currentGameId, friend.currentInstanceId);
+}
+async function browseGameInstances(mapId) {
+  try {
+    const { instances=[] } = await apiRequest('/api/maps/'+encodeURIComponent(mapId)+'/instances');
+    if (!instances.length) { showToast('No hay instancias activas de este juego todavía.'); return; }
+    const options = instances.map((instance,index)=>`${index+1}. ${instance.playerCount} jugador${instance.playerCount===1?'':'es'} · ${instance.players.map(player=>player.username).join(', ')}`).join('\n');
+    const choice = Number(prompt('Elegí una instancia activa:\n'+options, '1'));
+    if (!Number.isInteger(choice) || choice<1 || choice>instances.length) return;
+    closeModal('mo-game-page');
+    playMap(mapId, instances[choice-1].id);
+  } catch (err) { showToast(err.message || 'No se pudieron cargar las instancias.'); }
+}
 function pfTab(tab, el) { ['games','friends','liked'].forEach(t => { const e1 = document.getElementById('pf-'+t+'-tab'); const e2 = document.getElementById('pftab-'+t); if (e1) e1.style.display = 'none'; if (e2) e2.classList.remove('active'); }); const tEl = document.getElementById('pf-'+tab+'-tab'); const hEl = el || document.getElementById('pftab-'+tab); if (tEl) tEl.style.display = 'grid'; if (hEl) hEl.classList.add('active'); const users = getUsers(); const u = users[viewingUserId] || ME; if (tab === 'games') { const mine = Object.values(getMaps()).filter(m => m.authorId === u.id); renderGrid('pf-games-tab', mine, u.id === ME.id ? 'mine' : ''); } else if (tab === 'friends') { const frds = (u.friends||[]).map(fid => users[fid]).filter(Boolean); const el2 = document.getElementById('pf-friends-tab'); if (!frds.length) { el2.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin amigos todavía.</div>'; return; } el2.innerHTML = frds.map(f => `<div class="friend-card" onclick="goTab('profile','${f.id}')"><div class="friend-av" style="background:${profileAvatarSrc(f)?'transparent':(f.color||'#5b8def')}">${avatarInnerHtml(f)}</div><div style="font-size:12px;font-weight:700">${esc(f.username)}</div><div style="font-size:9px;color:var(--text3)">#${f.id}</div><button class="btn btn-g" style="font-size:10px;padding:3px 8px;margin-top:6px" onclick="event.stopPropagation();openConvWith('${f.id}')">💬</button></div>`).join(''); } else if (tab === 'liked') { const liked = Object.values(getMaps()).filter(m => (ME.liked||[]).includes(m.id)); renderGrid('pf-liked-tab', liked, ''); }
   else if (tab === 'followers') {
     const el2=document.getElementById('pf-followers-tab'); if(!el2)return;
@@ -1539,20 +1597,6 @@ function makeAdmin(uid) {
 }
 let activeConvId = null;
 function convId(a, b) { return [a, b].sort().join('_'); }
-function openConvWith(userId) { goTab('msg'); const cid = convId(ME.id, userId); activeConvId = cid; loadConvList(); renderConv(cid, userId); }
-function loadConvList() { const users = getUsers(); const frds = (ME.friends||[]).map(fid => users[fid]).filter(Boolean); const el = document.getElementById('msg-list'); if (!frds.length) { el.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Sin amigos. Agregá desde Perfil.</div>'; checkNotifs(); return; } const convs = getConvs(); el.innerHTML = frds.map(f => { const cid = convId(ME.id, f.id); const msgs = convs[cid] || []; const last = msgs[msgs.length - 1]; const unread = msgs.filter(m => m.from !== ME.id && !m.read).length; const lastTxt = last ? (last.type === 'audio' ? '🎤 Audio' : last.type === 'file' ? '📎 Archivo' : last.type === 'image' ? '🖼 Imagen' : last.text) : 'Sin mensajes'; return `<div class="msg-conv ${activeConvId===cid?'active':''}" onclick="openConvWith('${f.id}')"><div class="conv-av" style="background:${f.color}">${f.username[0].toUpperCase()}</div><div class="conv-info"><div class="conv-name">${esc(f.username)}</div><div class="conv-last">${esc(lastTxt)}</div>${unread ? `<div class="unread-badge">${unread}</div>` : ''}</div></div>`; }).join(''); checkNotifs(); }
-function renderConv(cid, userId) {
-  const users = getUsers();
-  const other = users[userId] || { username: userId, color: '#5b8def', id: userId };
-  document.getElementById('msg-hd-av').textContent = other.username[0].toUpperCase();
-  document.getElementById('msg-hd-av').style.background = other.color;
-  document.getElementById('msg-hd-name').textContent = other.username;
-  document.getElementById('msg-hd-sub').textContent = '#' + other.id;
-  // Estado online
-  const isOnline = other.onlineAt && (Date.now() - other.onlineAt < 120000);
-  const statusEl = document.getElementById('msg-hd-status');
-  if (statusEl) {
-    statusEl.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + (isOnline?'var(--green)':'var(--text3)') + ';margin-right:4px"></span>' + (isOnline?'En línea':'Desconectado');
 function openConvWith(userId) { if (!ME || !getUsers()[userId]) { showToast('Usuario no disponible'); return; } goTab('msg'); const cid = convId(ME.id, userId); activeConvId = cid; loadConvList(); renderConv(cid, userId); }
 function loadConvList() {
   const users=getUsers(), convs=getConvs(), el=document.getElementById('msg-list');
@@ -1602,14 +1646,6 @@ async function renderConv(cid,userId) {
     else body=`<div class="mb ${cls}">${esc(content.text||'')}</div>`;
     output+=`<div class="mb-wrap ${cls}">${body}<div class="mb-time">${new Date(message.t||Date.now()).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div></div>`;
   }
-  // Guardar userId activo para llamadas
-  window._activeChatUserId = userId;
-  window._activeConvId = cid; const convs = getConvs(); const msgs = convs[cid] || []; msgs.forEach(m => { if (m.from !== ME.id) m.read = true; }); convs[cid] = msgs; setConvs(convs); const el = document.getElementById('msg-messages'); el.innerHTML = msgs.map(m => { const isMe = m.from === ME.id; const cls = isMe ? 'me' : 'other'; let body = ''; if (m.type === 'text') body = `<div class="mb ${cls}">${esc(m.text)}</div>`; if (m.type === 'audio') body = `<div class="mb ${cls}" style="padding:8px 12px;display:flex;align-items:center;gap:8px">🎤<audio controls src="${m.data}" style="height:26px;max-width:170px"></audio></div>`; if (m.type === 'file') body = `<div class="mb ${cls}">📎 <a href="${m.data}" download="${m.filename}" style="color:var(--acc)">${esc(m.filename)}</a></div>`; if (m.type === 'image') body = `<div class="mb ${cls}" style="padding:4px"><img src="${m.data}" style="max-width:210px;border-radius:8px;display:block"></div>`; return `<div class="mb-wrap ${cls}">${body}<div class="mb-time">${m.time||''}</div></div>`; }).join(''); el.scrollTop = el.scrollHeight; }
-function sendMsg() { if (!activeConvId) return; const inp = document.getElementById('msg-text'); const text = inp.value.trim(); if (!text) return; pushMsg(activeConvId, { type:'text', text, from:ME.id, time:timeStr(), read:false }); inp.value = ''; inp.style.height = ''; }
-function msgKeydown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } }
-function autoResize(t) { t.style.height = ''; t.style.height = Math.min(t.scrollHeight, 110) + 'px'; }
-function pushMsg(cid, msg) { const convs = getConvs(); convs[cid] = convs[cid] || []; convs[cid].push(msg); setConvs(convs); const otherId = cid.split('_').find(p => p !== ME.id); renderConv(cid, otherId); loadConvList(); }
-function sendFile(e) { if (!activeConvId) return; const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { const isImg = file.type.startsWith('image/'); pushMsg(activeConvId, { type:isImg?'image':'file', data:ev.target.result, filename:file.name, from:ME.id, time:timeStr(), read:false }); }; reader.readAsDataURL(file); e.target.value = ''; }
   convs[cid]=msgs;setConvs(convs);
   const el=document.getElementById('msg-messages');el.innerHTML=output;el.scrollTop=el.scrollHeight;loadConvList();
 }
@@ -1637,15 +1673,9 @@ let _muted = false, _camOff = false;
 function toggleMute() { _muted = !_muted; if (callStream) callStream.getAudioTracks().forEach(t => t.enabled = !_muted); document.getElementById('mute-btn').textContent = _muted ? '🔇' : '🎤'; }
 function toggleCam() { _camOff = !_camOff; if (callStream) callStream.getVideoTracks().forEach(t => t.enabled = !_camOff); document.getElementById('cam-btn').textContent = _camOff ? '📷' : '📹'; }
 function endCall() { if (callStream) { callStream.getTracks().forEach(t => t.stop()); callStream = null; } document.getElementById('call-overlay').classList.remove('open'); _muted = false; _camOff = false; }
-let stScene, stCamera, stRenderer; let stParts = [], stScripts = []; let selPart = null, selOutline = null, gizmoArrows = []; let stTool = 'sel'; let stMapId = null, stInited = false; let stCamTheta = Math.PI/4, stCamPhi = 0.4, stCamDist = 35, stCamTarget = new THREE.Vector3(); let stDrag = false, stLX = 0, stLY = 0; let gizmoDragging = false, gizmoAxis = null, gizmoStart = new THREE.Vector3();
 let stScene, stCamera, stRenderer; let stParts = [], stScripts = []; let selPart = null, selOutline = null, gizmoArrows = []; let stTool = 'sel'; let stMapId = null, stInited = false, stPlaytesting = false; let stCamTheta = Math.PI/4, stCamPhi = 0.4, stCamDist = 35, stCamTarget = new THREE.Vector3(); let stDrag = false, stLX = 0, stLY = 0; let gizmoDragging = false, gizmoAxis = null, gizmoStart = new THREE.Vector3(), gizmoLastAngle = 0, gizmoStartRotation = new THREE.Vector3(), gizmoRotationDelta = 0; let stSnap = 1, stUndoStack = [], stRedoStack = [], stHistoryMapId = null, stHistoryApplying = false;
 function initStudio() { if (!stInited) { stInited = true; _setupStRenderer(); _setupStInput(); _stLoop(); } loadMyMap(); }
 function _setupStRenderer() { stScene = new THREE.Scene(); stScene.background = new THREE.Color(0x0d1020); stScene.fog = new THREE.FogExp2(0x0d1020, 0.007); const wrap = document.getElementById('stu-canvas-wrap'); stCamera = new THREE.PerspectiveCamera(60, wrap.clientWidth/wrap.clientHeight, 0.1, 1000); stRenderer = new THREE.WebGLRenderer({antialias:true}); stRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); stRenderer.shadowMap.enabled = true; wrap.appendChild(stRenderer.domElement); stScene.add(new THREE.AmbientLight(0xffffff, 0.55)); const sun = new THREE.DirectionalLight(0xffffff, 0.85); sun.position.set(40,60,30); sun.castShadow = true; stScene.add(sun); const grid = new THREE.GridHelper(200, 50, 0x1a2035, 0x111828); stScene.add(grid); new ResizeObserver(() => { stCamera.aspect = wrap.clientWidth/wrap.clientHeight; stCamera.updateProjectionMatrix(); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); }).observe(wrap); }
-function _setupStInput() { const el = stRenderer.domElement; el.addEventListener('mousedown', e => { if (e.button === 1 || e.button === 2) { stDrag = true; stLX = e.clientX; stLY = e.clientY; } if (e.button === 0) onStClick(e); }); window.addEventListener('mouseup', () => { stDrag = false; gizmoDragging = false; }); window.addEventListener('mousemove', e => { if (gizmoDragging && selPart) onGizmoDrag(e); if (stDrag) { stCamTheta -= (e.clientX - stLX) * 0.01; stCamPhi = Math.max(0.05, Math.min(Math.PI/2.1, stCamPhi + (e.clientY - stLY) * 0.01)); stLX = e.clientX; stLY = e.clientY; } }); el.addEventListener('wheel', e => { stCamDist = Math.max(3, Math.min(200, stCamDist + e.deltaY * 0.07)); e.preventDefault(); }, {passive:false}); el.addEventListener('contextmenu', e => e.preventDefault()); let panDrag = false, px = 0, py = 0; el.addEventListener('mousedown', e => { if (e.shiftKey) { panDrag = true; px = e.clientX; py = e.clientY; } }); window.addEventListener('mouseup', () => panDrag = false); window.addEventListener('mousemove', e => { if (!panDrag) return; const r = new THREE.Vector3(); stCamera.getWorldDirection(r); const up = new THREE.Vector3(0,1,0); r.cross(up).normalize(); stCamTarget.addScaledVector(r, -(e.clientX-px)*0.05); stCamTarget.y += (e.clientY-py)*0.05; px = e.clientX; py = e.clientY; }); }
-function onStClick(e) { if (gizmoDragging) return; const wrap = document.getElementById('stu-canvas-wrap'); const rect = wrap.getBoundingClientRect(); const mouse = new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1); const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, stCamera); if (gizmoArrows.length) { const ghits = ray.intersectObjects(gizmoArrows, false); if (ghits.length) { gizmoDragging = true; gizmoAxis = ghits[0].object.userData.axis; gizmoStart.copy(ghits[0].point); return; } } const meshes = stParts.map(p => p.mesh).filter(Boolean); const hits = ray.intersectObjects(meshes, false); if (hits.length) selectPart(stParts.find(p => p.mesh === hits[0].object)); else deselect(); }
-function onGizmoDrag(e) { if (!selPart || !gizmoAxis) return; const wrap = document.getElementById('stu-canvas-wrap'); const rect = wrap.getBoundingClientRect(); const mouse = new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1); const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, stCamera); const pN = gizmoAxis === 'y' ? new THREE.Vector3(0,0,1) : new THREE.Vector3(0,1,0); const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(pN, selPart.mesh.position); const hitPt = new THREE.Vector3(); ray.ray.intersectPlane(plane, hitPt); if (!hitPt.length()) return; const delta = hitPt.clone().sub(gizmoStart); if (gizmoAxis === 'x') { selPart.data.x += delta.x; selPart.mesh.position.x = selPart.data.x; } if (gizmoAxis === 'y') { selPart.data.y += delta.y; selPart.mesh.position.y = selPart.data.y; } if (gizmoAxis === 'z') { selPart.data.z += delta.z; selPart.mesh.position.z = selPart.data.z; } gizmoStart.copy(hitPt); updateGizmoPos(); renderProps(selPart); }
-function _stLoop() { requestAnimationFrame(_stLoop); if (!stRenderer) return; const cx = stCamTarget.x + stCamDist*Math.sin(stCamTheta)*Math.cos(stCamPhi); const cy = stCamTarget.y + stCamDist*Math.sin(stCamPhi); const cz = stCamTarget.z + stCamDist*Math.cos(stCamTheta)*Math.cos(stCamPhi); stCamera.position.set(cx, cy, cz); stCamera.lookAt(stCamTarget); if (selOutline && selPart) selOutline.position.copy(selPart.mesh.position); stRenderer.render(stScene, stCamera); }
-function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = nextId('map'); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; stScripts = m.scripts || [];
 function _setupStInput() { const el = stRenderer.domElement; el.addEventListener('mousedown', e => { if (e.button === 1 || e.button === 2) { stDrag = true; stLX = e.clientX; stLY = e.clientY; } if (e.button === 0) onStClick(e); }); window.addEventListener('mouseup', () => { stDrag = false; gizmoDragging = false; if (selPart) { updateGizmoPos(); renderProps(selPart); } }); window.addEventListener('mousemove', e => { if (gizmoDragging && selPart) onGizmoDrag(e); if (stDrag) { stCamTheta -= (e.clientX - stLX) * 0.01; stCamPhi = Math.max(0.05, Math.min(Math.PI/2.1, stCamPhi + (e.clientY - stLY) * 0.01)); stLX = e.clientX; stLY = e.clientY; } }); el.addEventListener('wheel', e => { stCamDist = Math.max(3, Math.min(200, stCamDist + e.deltaY * 0.07)); e.preventDefault(); }, {passive:false}); el.addEventListener('contextmenu', e => e.preventDefault()); let panDrag = false, px = 0, py = 0; el.addEventListener('mousedown', e => { if (e.shiftKey) { panDrag = true; px = e.clientX; py = e.clientY; } }); window.addEventListener('mouseup', () => panDrag = false); window.addEventListener('mousemove', e => { if (!panDrag) return; const r = new THREE.Vector3(); stCamera.getWorldDirection(r); const up = new THREE.Vector3(0,1,0); r.cross(up).normalize(); stCamTarget.addScaledVector(r, -(e.clientX-px)*0.05); stCamTarget.y += (e.clientY-py)*0.05; px = e.clientX; py = e.clientY; }); document.addEventListener('keydown', studioShortcuts); }
 function onStClick(e) { if (gizmoDragging) return; const wrap=document.getElementById('stu-canvas-wrap'), rect=wrap.getBoundingClientRect(), mouse=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1), ray=new THREE.Raycaster(); ray.setFromCamera(mouse,stCamera); if(gizmoArrows.length){const ghits=ray.intersectObjects(gizmoArrows,false);if(ghits.length){recordStudioHistory();gizmoDragging=true;gizmoAxis=ghits[0].object.userData.axis;gizmoStart.copy(ghits[0].point);gizmoStartRotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0);gizmoRotationDelta=0;gizmoLastAngle=rotationPointerAngle(gizmoAxis,gizmoStart,selPart.mesh.position);return;}} const meshes=stParts.map(p=>p.mesh).filter(Boolean),hits=ray.intersectObjects(meshes,true); if(hits.length){const root=hits[0].object.userData.studioRoot||hits[0].object;selectPart(stParts.find(p=>p.mesh===root||p.mesh===hits[0].object));}else deselect(); }
 function rotationPointerAngle(axis, point, center) { const v=point.clone().sub(center); return axis==='x'?Math.atan2(v.y,v.z):axis==='y'?Math.atan2(v.x,v.z):Math.atan2(v.y,v.x); }
@@ -1670,12 +1700,6 @@ function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).fin
   setTimeout(applyLighting, 100);
 }
 function clearSt() { stParts.forEach(p => p.mesh && stScene.remove(p.mesh)); stParts = []; if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; }
-function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,2,1,0,3,2, 3,5,2,3,4,5, 0,4,3, 1,5,2,0,4,1, 1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color||'#888888'), transparent: Number(d.transparent||0) > 0, opacity: 1 - Number(d.transparent||0), wireframe: d.type === 'TrussPart' }); if (d.material === 'Neon') { mat.emissive = new THREE.Color(d.color||'#00ff88'); mat.emissiveIntensity = 0.7; } if (d.material === 'Metal') { mat.shininess = 120; mat.specular = new THREE.Color(0x888888); } if (d.material === 'Glass') { mat.transparent = true; mat.opacity = Math.max(0.2, 1-Number(d.transparent||0.5)); mat.shininess = 200; } const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); mesh.castShadow = true; mesh.receiveShadow = true; return mesh; }
-function addPartMesh(d) { const mesh = makeMesh(d); stScene.add(mesh); const entry = {data:d, mesh}; stParts.push(entry); return entry; }
-function stuAdd(type) { const scriptTypes = ['Script','LocalScript','ModuleScript']; if (scriptTypes.includes(type)) { const id = 'scr_' + Date.now(); const defaults = { Script:'-- Script del servidor\nprint("Hola desde CrixScript!")', LocalScript:'-- LocalScript\nprint("Hola desde LocalScript!")', ModuleScript:'-- Módulo\nlocal M = {}\n\nfunction M.hola()\n  print("Módulo cargado!")\nend\n\nreturn M' }; stScripts.push({ id, name: type + '_' + stScripts.length, type, code: defaults[type], parent:'ServerScriptService' }); refreshExplorer(); openCodeEditor(id); return; } if (type === 'Spawn') { stuAddSpawn(); return; } const colorMap = { Block:'#5b8def', Sphere:'#ec4899', Cylinder:'#22d3a6', Wedge:'#f59e0b', TrussPart:'#8b5cf6' }; const id = 'p' + Date.now(); const d = { id, type, name: type + '_' + stParts.length, x: stCamTarget.x + (Math.random()-.5)*4, y: stCamTarget.y + 3, z: stCamTarget.z + (Math.random()-.5)*4, sx:4, sy:4, sz:4, rx:0, ry:0, rz:0, color: colorMap[type]||'#888888', anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic' }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); updateStStatus(); }
-function stuAddSpawn() { const ex = stParts.find(p => p.data.type === 'Spawn'); if (ex) { showToast('Ya hay un SpawnLocation'); selectPart(ex); return; } const d = { id:'spawn'+Date.now(), type:'Spawn', name:'SpawnLocation', x:0, y:0.2, z:0, sx:4, sy:0.4, sz:4, rx:0,ry:0,rz:0, color:'#00ff88', anchored:true, canCollide:false, transparent:0.5, material:'Neon' }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); }
-function stuDelete() { if (!selPart) { showToast('Seleccioná algo primero'); return; } stScene.remove(selPart.mesh); stParts = stParts.filter(p => p !== selPart); deselect(); refreshExplorer(); updateStStatus(); }
-function stuDuplicate() { if (!selPart) { showToast('Seleccioná algo primero'); return; } const d = {...selPart.data, id:'p'+Date.now(), x:selPart.data.x+2, z:selPart.data.z+2}; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); }
 function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,2,1,0,3,2, 3,5,2,3,4,5, 0,4,3, 1,5,2,0,4,1, 1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color||'#888888'), transparent: Number(d.transparent||0) > 0, opacity: 1 - Number(d.transparent||0), wireframe: d.type === 'TrussPart' }); if (d.material === 'Neon') { mat.emissive = new THREE.Color(d.color||'#00ff88'); mat.emissiveIntensity = 0.7; } if (d.material === 'Metal') { mat.shininess = 120; mat.specular = new THREE.Color(0x888888); } if (d.material === 'Glass') { mat.transparent = true; mat.opacity = Math.max(0.2, 1-Number(d.transparent||0.5)); mat.shininess = 200; } const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); mesh.castShadow = true; mesh.receiveShadow = true; return mesh; }
 function makeHumanoidRig(d) { const root=new THREE.Group(),bodyMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.color||'#cc6644')}),skinMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.skinColor||'#f0bf98')});root.position.set(d.x||0,d.y||0,d.z||0);root.rotation.set(d.rx||0,d.ry||0,d.rz||0);root.scale.set(d.sx||1,(d.sy||2.6)/2.6,d.sz||1);const addBox=(size,material,position,parent=root)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.position.set(...position);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;};addBox([0.92,1.15,0.48],bodyMat,[0,1.32,0]);const head=new THREE.Mesh(new THREE.SphereGeometry(0.37,16,12),skinMat);head.position.set(0,2.2,0);head.castShadow=true;root.add(head);const armL=new THREE.Group(),armR=new THREE.Group(),legL=new THREE.Group(),legR=new THREE.Group();armL.position.set(-0.58,1.78,0);armR.position.set(0.58,1.78,0);legL.position.set(-0.24,0.78,0);legR.position.set(0.24,0.78,0);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armL);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armR);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legL);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legR);root.add(armL,armR,legL,legR);root.userData.rig={armL,armR,legL,legR};root.traverse(child=>child.userData.studioRoot=root);return root; }
 function addPartMesh(d) { const mesh=d.isNPC?makeHumanoidRig(d):makeMesh(d); stScene.add(mesh); const entry = {data:d, mesh}; stParts.push(entry); return entry; }
@@ -1685,22 +1709,12 @@ function stuAddSpawn() { const ex=stParts.find(p=>p.data.type==='Spawn');if(ex){
 function stuDelete() { if(!selPart){showToast('Seleccioná algo primero');return;}recordStudioHistory();stScene.remove(selPart.mesh);stParts=stParts.filter(p=>p!==selPart);deselect();refreshExplorer();updateStStatus();}
 function stuDuplicate() { if(!selPart){showToast('Seleccioná algo primero');return;}recordStudioHistory();const d={...selPart.data,id:'p'+Date.now(),x:selPart.data.x+2,z:selPart.data.z+2};const entry=addPartMesh(d);refreshExplorer();selectPart(entry);}
 function setTool(t) { stTool = t; ['sel','mov','rot','scl'].forEach(x => { const el = document.getElementById('tool-'+x); if (el) el.classList.toggle('active', x===t); }); if (selPart) buildGizmo(selPart); }
-function buildGizmo(entry) { clearGizmo(); if (stTool === 'sel') return; const pos = entry.mesh.position.clone(); [{axis:'x',color:0xff3333},{axis:'y',color:0x22ff22},{axis:'z',color:0x3366ff}].forEach(a => { let geo; if (stTool === 'scl') geo = new THREE.BoxGeometry(0.4,0.4,0.4); else if (stTool === 'rot') geo = new THREE.TorusGeometry(a.axis==='y'?2:1.7, 0.07, 6, 28, Math.PI*2); else geo = new THREE.ConeGeometry(0.22, 1.3, 8); const dirs = {x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)}; const mat = new THREE.MeshBasicMaterial({color:a.color,depthTest:false}); const m = new THREE.Mesh(geo, mat); m.position.copy(pos).add(dirs[a.axis].clone().multiplyScalar(stTool==='rot'?0:3)); if (stTool === 'mov') m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dirs[a.axis]); m.userData.axis = a.axis; m.renderOrder = 999; stScene.add(m); gizmoArrows.push(m); }); }
 function buildGizmo(entry) { clearGizmo();if(stTool==='sel')return;const pos=entry.mesh.position.clone();[{axis:'x',color:0xff3333},{axis:'y',color:0x22ff22},{axis:'z',color:0x3366ff}].forEach(a=>{let geo;if(stTool==='scl')geo=new THREE.BoxGeometry(0.4,0.4,0.4);else if(stTool==='rot')geo=new THREE.TorusGeometry(a.axis==='y'?2:1.7,0.07,6,28,Math.PI*2);else geo=new THREE.ConeGeometry(0.22,1.3,8);const dirs={x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)},mat=new THREE.MeshBasicMaterial({color:a.color,depthTest:false}),m=new THREE.Mesh(geo,mat);m.position.copy(pos).add(dirs[a.axis].clone().multiplyScalar(stTool==='rot'?0:3));if(stTool==='mov')m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dirs[a.axis]);if(stTool==='rot'){if(a.axis==='x')m.rotation.y=Math.PI/2;if(a.axis==='y')m.rotation.x=Math.PI/2;}m.userData.axis=a.axis;m.renderOrder=999;stScene.add(m);gizmoArrows.push(m);});}
 function clearGizmo() { gizmoArrows.forEach(m => stScene.remove(m)); gizmoArrows = []; }
-function updateGizmoPos() { if (!selPart) return; const pos = selPart.mesh.position; const dirs = {x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)}; gizmoArrows.forEach(m => m.position.copy(pos).add(dirs[m.userData.axis].clone().multiplyScalar(3))); }
-function selectPart(entry) { if (!entry) return; deselect(); selPart = entry; try { const og = entry.mesh.geometry.clone(); const om = new THREE.MeshBasicMaterial({color:0x5b8def,wireframe:true,depthTest:false}); selOutline = new THREE.Mesh(og, om); selOutline.position.copy(entry.mesh.position); selOutline.rotation.copy(entry.mesh.rotation); selOutline.scale.copy(entry.mesh.scale).multiplyScalar(1.02); selOutline.renderOrder = 998; stScene.add(selOutline); } catch {} buildGizmo(entry); renderProps(entry); refreshExplorer(); }
 function updateGizmoPos() { if(!selPart)return;const pos=selPart.mesh.position,dirs={x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)};gizmoArrows.forEach(m=>m.position.copy(pos).add(dirs[m.userData.axis].clone().multiplyScalar(stTool==='rot'?0:3))); }
 function updateSelectionOutline() { if(!selOutline||!selPart)return;if(selOutline.isBoxHelper){selOutline.update();return;}selOutline.position.copy(selPart.mesh.position);selOutline.rotation.copy(selPart.mesh.rotation);selOutline.scale.copy(selPart.mesh.scale).multiplyScalar(1.02); }
 function selectPart(entry) { if (!entry) return; deselect(); selPart = entry; try { if(entry.mesh.isMesh){const og=entry.mesh.geometry.clone(),om=new THREE.MeshBasicMaterial({color:0x5b8def,wireframe:true,depthTest:false});selOutline=new THREE.Mesh(og,om);selOutline.renderOrder=998;}else selOutline=new THREE.BoxHelper(entry.mesh,0x5b8def);stScene.add(selOutline);updateSelectionOutline(); } catch {} buildGizmo(entry); renderProps(entry); refreshExplorer(); }
 function deselect() { if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; document.getElementById('props-body').innerHTML = '<div style="padding:20px 12px;color:var(--text3);font-size:11px;text-align:center;line-height:1.6">Seleccioná un objeto<br>para editar sus propiedades</div>'; refreshExplorer(); }
-function renderProps(entry) { const d = entry.data; const MATERIALS = ['SmoothPlastic','Brick','Wood','Metal','Neon','Glass','Grass','Sand','Concrete','Ice','Rock','DiamondPlate']; document.getElementById('props-body').innerHTML = `<div class="prop-row"><div class="prop-lbl">Nombre</div><input class="prop-inp" value="${esc(d.name||'')}" onchange="sp('name',this.value)"></div><div class="prop-row"><div class="prop-lbl">Posición (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${(d.x||0).toFixed(2)}" step="0.5" onchange="spn('x',this.value)"><input class="prop-inp" type="number" value="${(d.y||0).toFixed(2)}" step="0.5" onchange="spn('y',this.value)"><input class="prop-inp" type="number" value="${(d.z||0).toFixed(2)}" step="0.5" onchange="spn('z',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Tamaño (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${d.sx||4}" step="0.5" min="0.05" onchange="spSize('sx',this.value)"><input class="prop-inp" type="number" value="${d.sy||4}" step="0.5" min="0.05" onchange="spSize('sy',this.value)"><input class="prop-inp" type="number" value="${d.sz||4}" step="0.5" min="0.05" onchange="spSize('sz',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Color</div><input type="color" value="${d.color||'#888888'}" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer" onchange="sp('color',this.value);rebuildMesh()"></div><div class="prop-row"><div class="prop-lbl">Material</div><select class="prop-inp" onchange="sp('material',this.value);rebuildMesh()">${MATERIALS.map(o=>`<option ${d.material===o?'selected':''}>${o}</option>`).join('')}</select></div><div class="prop-row"><div class="prop-lbl">Transparencia</div><input class="prop-inp" type="number" value="${d.transparent||0}" step="0.05" min="0" max="1" onchange="spn('transparent',this.value);rebuildMesh()"></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('anchored')"><div class="tgl ${d.anchored?'on':''}" id="tgl-anchored"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Anchored</span></div></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('canCollide')"><div class="tgl ${d.canCollide?'on':''}" id="tgl-canCollide"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">CanCollide</span></div></div><div style="padding:8px;display:flex;gap:4px"><button class="st-btn" style="flex:1" onclick="stuDuplicate()">⎘ Dupl.</button><button class="st-btn red" style="flex:1" onclick="stuDelete()">✕ Borrar</button></div>`; }
-function sp(k,v){ if(selPart) selPart.data[k]=v; }
-function spn(k,v){ if(!selPart) return; selPart.data[k]=parseFloat(v)||0; selPart.mesh.position.set(selPart.data.x,selPart.data.y,selPart.data.z); if(selOutline)selOutline.position.copy(selPart.mesh.position); updateGizmoPos(); }
-function spRot(k,v){ if(!selPart) return; selPart.data[k]=parseFloat(v)||0; selPart.mesh.rotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0); if(selOutline)selOutline.rotation.copy(selPart.mesh.rotation); }
-function spSize(k,v){ if(!selPart) return; selPart.data[k]=Math.max(0.1,parseFloat(v)||1); rebuildMesh(); }
-function toggleProp(k){ if(!selPart) return; selPart.data[k]=!selPart.data[k]; const t=document.getElementById('tgl-'+k); if(t)t.classList.toggle('on',selPart.data[k]); }
-function rebuildMesh(){ if(!selPart) return; stScene.remove(selPart.mesh); if(selOutline){stScene.remove(selOutline);selOutline=null;} selPart.mesh=makeMesh(selPart.data); stScene.add(selPart.mesh); clearGizmo(); selectPart(selPart); }
 function renderProps(entry) { const d=entry.data,materials=['SmoothPlastic','Brick','Wood','Metal','Neon','Glass','Grass','Sand','Concrete','Ice','Rock','DiamondPlate'],degrees=key=>((Number(d[key])||0)*180/Math.PI).toFixed(1),step=stSnap||0.5; document.getElementById('props-body').innerHTML=`<div class="prop-row"><div class="prop-lbl">Nombre</div><input class="prop-inp" value="${esc(d.name||'')}" maxlength="80" onchange="sp('name',this.value);refreshExplorer()"></div><div class="prop-row"><div class="prop-lbl">Posición · studs (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${Number(d.x||0).toFixed(2)}" step="${step}" onchange="spn('x',this.value)"><input class="prop-inp" type="number" value="${Number(d.y||0).toFixed(2)}" step="${step}" onchange="spn('y',this.value)"><input class="prop-inp" type="number" value="${Number(d.z||0).toFixed(2)}" step="${step}" onchange="spn('z',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Rotación · grados (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${degrees('rx')}" step="15" onchange="spRot('rx',this.value)"><input class="prop-inp" type="number" value="${degrees('ry')}" step="15" onchange="spRot('ry',this.value)"><input class="prop-inp" type="number" value="${degrees('rz')}" step="15" onchange="spRot('rz',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Tamaño (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${d.sx||4}" step="${step}" min="0.1" onchange="spSize('sx',this.value)"><input class="prop-inp" type="number" value="${d.sy||4}" step="${step}" min="0.1" onchange="spSize('sy',this.value)"><input class="prop-inp" type="number" value="${d.sz||4}" step="${step}" min="0.1" onchange="spSize('sz',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Color</div><input type="color" value="${d.color||'#888888'}" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer" onchange="recordStudioHistory();sp('color',this.value);rebuildMesh()"></div><div class="prop-row"><div class="prop-lbl">Material</div><select class="prop-inp" onchange="recordStudioHistory();sp('material',this.value);rebuildMesh()">${materials.map(o=>`<option ${d.material===o?'selected':''}>${o}</option>`).join('')}</select></div><div class="prop-row"><div class="prop-lbl">Transparencia</div><input class="prop-inp" type="number" value="${d.transparent||0}" step="0.05" min="0" max="1" onchange="recordStudioHistory();sp('transparent',this.value);rebuildMesh()"></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('anchored')"><div class="tgl ${d.anchored?'on':''}" id="tgl-anchored"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Anchored</span></div></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('canCollide')"><div class="tgl ${d.canCollide?'on':''}" id="tgl-canCollide"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">CanCollide</span></div></div><div style="padding:8px;display:flex;gap:4px"><button class="st-btn" style="flex:1" onclick="stuDuplicate()">⎘ Duplicar</button><button class="st-btn red" style="flex:1" onclick="stuDelete()">✕ Borrar</button></div>`; }
 function sp(k,v){if(!selPart)return;recordStudioHistory();selPart.data[k]=String(v).slice(0,80);}
 function spn(k,v){if(!selPart)return;recordStudioHistory();selPart.data[k]=parseFloat(v)||0;selPart.mesh.position.set(selPart.data.x,selPart.data.y,selPart.data.z);updateSelectionOutline();updateGizmoPos();}
@@ -1724,8 +1738,6 @@ function refreshExplorer() {
   const el = document.getElementById('explorer'); let html2 = '';
   const query=(document.getElementById('hub-explorer-search')?.value||'').trim().toLowerCase();
   FOLDERS.forEach(f => {
-    const scripts = stScripts.filter(s => s.parent === f.id);
-    const parts = f.id === 'Workspace' ? stParts : [];
     const scripts = stScripts.filter(s => s.parent === f.id && (!query || (s.name+' '+s.type).toLowerCase().includes(query)));
     const parts = f.id === 'Workspace' ? stParts.filter(p => !query || (p.data.name+' '+p.data.type).toLowerCase().includes(query)) : [];
     const count = parts.length + scripts.length;
@@ -1745,7 +1757,6 @@ function refreshExplorer() {
     }
     html2 += '</div><div class="exp-children">';
     if (f.id === 'Workspace') {
-      html2 += stParts.map((p,i) =>
       html2 += stParts.map((p,i) => ({p,i})).filter(({p}) => !query || (p.data.name+' '+p.data.type).toLowerCase().includes(query)).map(({p,i}) =>
         '<div class="exp-item '+(selPart===p?'sel':'')+'" onclick="selectPart(stParts['+i+'])">'+
         '<span style="font-size:10px">'+typeIcon(p.data.type)+'</span>'+
@@ -1792,7 +1803,7 @@ function openLightingProps() {
     '<div class="prop-row"><div class="prop-lbl">Brillo</div><input class="prop-inp" type="number" value="'+L.colorBrightness+'" step="0.05" min="-1" max="2" onchange="stLighting.colorBrightness=parseFloat(this.value);applyLighting()"></div>'+
     '<div class="prop-row"><div class="prop-lbl">Contraste</div><input class="prop-inp" type="number" value="'+L.colorContrast+'" step="0.05" min="-1" max="1" onchange="stLighting.colorContrast=parseFloat(this.value);applyLighting()"></div>'+
     '<div class="prop-row"><div class="prop-lbl">Saturación</div><input class="prop-inp" type="number" value="'+L.colorSaturation+'" step="0.05" min="0" max="2" onchange="stLighting.colorSaturation=parseFloat(this.value);applyLighting()"></div>';
-  socket.on('msg_incoming', function({ convId, msg }) {
+
   socket.on('new_private_msg', function({ convId, msg }) {
     if(!msg?.e2ee||msg.e2ee.v!==1)return;
     const convs = getConvs();
@@ -1806,8 +1817,6 @@ function openLightingProps() {
     } else {
       const users = getUsers();
       const sender = users[msg.from] || { username: '?' };
-      showToast('\u{1F4AC} ' + sender.username + ': ' + (msg.text||'[audio]').substring(0,40));
-      sendBrowserNotif('Mensaje de ' + sender.username, msg.text || '[Mensaje de voz]');
       showToast('\u{1F4AC} Nuevo mensaje cifrado de ' + sender.username);
       sendBrowserNotif('Mensaje cifrado de ' + sender.username, 'Abrí Crix para descifrarlo.');
       checkNotifs();
@@ -1821,14 +1830,12 @@ function applyLighting() {
   stScene.background = new THREE.Color(stLighting.fogColor || '#0d1020');
   if (stMapId) { const maps=getMaps(); if(maps[stMapId]){maps[stMapId].lighting=JSON.parse(JSON.stringify(stLighting));setMaps(maps);} }
 }
+
 function toggleFolder(el) { el.classList.toggle('open'); }
-function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖'}[t]||'📦'; }
 function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖',ImportedMesh:'🧩'}[t]||'📦'; }
 function updateStStatus() { document.getElementById('stu-status').textContent = `${stParts.length} partes · ${stScripts.length} scripts · #${stMapId||'?'}`; }
-function delScript(id) { stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
 function delScript(id) { if(!stScripts.some(s=>s.id===id))return;recordStudioHistory();stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
 function stuSave() { if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); setMaps(maps); showToast('💾 Guardado'); }
-function stuTest() { stuSave(); if (stMapId) playMap(stMapId); }
 function stuTest() { stuSave(); if(stMapId){stPlaytesting=true;const back=document.getElementById('g-back-btn');if(back)back.textContent='⏹ Volver a Crix Hub';playMap(stMapId);} }
 let pubThumbData = null;
 function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; openModal('mo-publish'); }
@@ -1850,7 +1857,6 @@ function confirmPublish() {
 }
 const NPC_LIB = [{id:'dummy',name:'Dummy',icon:'🪆',type:'Humanoid',color:'#cc6644',hp:100},{id:'zombie',name:'Zombie',icon:'🧟',type:'Enemy',color:'#3d6e3d',hp:50},{id:'robot',name:'Robot',icon:'🤖',type:'NPC',color:'#4466aa',hp:200},{id:'merchant',name:'Comerciante',icon:'🧙',type:'Friendly',color:'#cc9933',hp:100},{id:'guard',name:'Guardia',icon:'💂',type:'Friendly',color:'#334488',hp:150},{id:'cat',name:'Gato',icon:'🐱',type:'Passive',color:'#aaaaaa',hp:30}];
 function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
-function spawnNpc(npcId) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; const d = { id:'npc'+Date.now(), type:'NPC', name:npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:2.6, sz:1, rx:0, ry:0, rz:0, color:npc.color, anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(`🤖 ${npc.name} agregado`); }
 function spawnNpc(npcId) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; recordStudioHistory();const d = { id:'npc'+Date.now(), type:'NPC', name:npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:2.6, sz:1, rx:0, ry:0, rz:0, color:npc.color, skinColor:'#f0bf98', anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(`🤖 Humanoide ${npc.name} agregado`); }
 const TOOLBOX_ITEMS = [{name:'Castillo',icon:'🏰',cat:'Edificios',type:'Block',color:'#888888',sx:8,sy:12,sz:8},{name:'Árbol',icon:'🌲',cat:'Naturaleza',type:'Cylinder',color:'#228b22',sx:2,sy:8,sz:2},{name:'Roca',icon:'🪨',cat:'Naturaleza',type:'Block',color:'#666655',sx:3,sy:2,sz:3},{name:'Puerta',icon:'🚪',cat:'Edificios',type:'Block',color:'#8B4513',sx:2,sy:4,sz:0.3},{name:'Escalera',icon:'🪜',cat:'Edificios',type:'Wedge',color:'#aaaaaa',sx:2,sy:4,sz:6},{name:'Poste de luz',icon:'💡',cat:'Decoración',type:'Cylinder',color:'#f7c948',sx:0.3,sy:8,sz:0.3},{name:'Barril',icon:'🛢️',cat:'Decoración',type:'Cylinder',color:'#8B4513',sx:1.5,sy:2,sz:1.5},{name:'Fuente',icon:'⛲',cat:'Decoración',type:'Cylinder',color:'#aaaacc',sx:4,sy:0.5,sz:4},{name:'Pared',icon:'🧱',cat:'Edificios',type:'Block',color:'#cc8866',sx:8,sy:4,sz:0.5},{name:'Plataforma Neon',icon:'✨',cat:'Especial',type:'Block',color:'#00ffff',sx:6,sy:0.3,sz:6,material:'Neon'},{name:'Esfera Cristal',icon:'💎',cat:'Especial',type:'Sphere',color:'#88ccff',sx:3,sy:3,sz:3,material:'Glass'},{name:'Columna',icon:'🏛️',cat:'Edificios',type:'Cylinder',color:'#e8e0d0',sx:1.2,sy:8,sz:1.2}];
 let toolboxFilter = 'all';
@@ -1858,10 +1864,8 @@ function openToolbox() { const cats = ['all', ...new Set(TOOLBOX_ITEMS.map(i => 
 function setToolboxCat(cat, el) { toolboxFilter = cat; document.querySelectorAll('#toolbox-cats .filter-btn').forEach(b => b.classList.remove('active')); if (el) el.classList.add('active'); renderToolboxGrid(); }
 function filterToolbox(q) { renderToolboxGrid(q); }
 function renderToolboxGrid(q = '') { let items = TOOLBOX_ITEMS; if (toolboxFilter !== 'all') items = items.filter(i => i.cat === toolboxFilter); if (q) items = items.filter(i => i.name.toLowerCase().includes(q.toLowerCase())); document.getElementById('toolbox-grid').innerHTML = items.map(item => `<div class="toolbox-item" onclick="insertToolboxItem(${JSON.stringify(item).replace(/"/g,'&quot;')})"><div class="toolbox-icon">${item.icon}</div><div class="toolbox-name">${item.name}</div><div class="toolbox-cat">${item.cat}</div></div>`).join(''); }
-function insertToolboxItem(item) { const d = { id: 'p'+Date.now(), type: item.type||'Block', name: item.name, x: stCamTarget.x+(Math.random()-.5)*6, y: stCamTarget.y+2, z: stCamTarget.z+(Math.random()-.5)*6, sx: item.sx||4, sy: item.sy||4, sz: item.sz||4, rx:0, ry:0, rz:0, color: item.color||'#888888', material: item.material||'SmoothPlastic', anchored:true, canCollide:true, transparent:0 }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); showToast(`✅ ${item.name} insertado`); }
 function insertToolboxItem(item) { recordStudioHistory();const d = { id: 'p'+Date.now(), type: item.type||'Block', name: item.name, x: stCamTarget.x+(Math.random()-.5)*6, y: stCamTarget.y+2, z: stCamTarget.z+(Math.random()-.5)*6, sx: item.sx||4, sy: item.sy||4, sz: item.sz||4, rx:0, ry:0, rz:0, color: item.color||'#888888', material: item.material||'SmoothPlastic', anchored:true, canCollide:true, transparent:0 }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); showToast(`✅ ${item.name} insertado`); }
 let activeScriptId = null;
-function openCodeEditor(scriptId) { if (!scriptId && stScripts.length > 0) scriptId = stScripts[0].id; if (!scriptId) { stuAdd('Script'); return; } activeScriptId = scriptId; document.getElementById('code-overlay').classList.add('open'); renderCodeUI(); loadScript(scriptId); }
 function openCodeEditor(scriptId) { if (!scriptId && stScripts.length > 0) scriptId = stScripts[0].id; if (!scriptId) { stuAdd('Script'); return; } recordStudioHistory();activeScriptId = scriptId; document.getElementById('code-overlay').classList.add('open'); renderCodeUI(); loadScript(scriptId); }
 function closeCodeEditor() { saveActiveScript(); document.getElementById('code-overlay').classList.remove('open'); }
 function renderCodeUI() { document.getElementById('code-tabs-bar').innerHTML = stScripts.map(s => `<div class="code-tab ${s.id===activeScriptId?'active':''}" onclick="switchScript('${s.id}')">${s.type==='Script'?'📜':s.type==='LocalScript'?'📋':'📦'} ${esc(s.name)}</div>`).join(''); const byParent = {}; stScripts.forEach(s => { byParent[s.parent] = byParent[s.parent]||[]; byParent[s.parent].push(s); }); let treeHtml = '<div style="padding:6px 8px;font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase">Scripts</div>'; FOLDERS.forEach(f => { const scripts = byParent[f.id]||[]; if (!scripts.length) return; treeHtml += `<div style="padding:4px 8px;font-size:9px;color:var(--text3)">${f.icon} ${f.label}</div>`; scripts.forEach(s => { treeHtml += `<div style="padding:4px 8px 4px 16px;font-size:11px;cursor:pointer;${activeScriptId===s.id?'color:var(--acc);background:var(--bg3)':''}" onclick="switchScript('${s.id}')">${s.type==='Script'?'📜':s.type==='LocalScript'?'📋':'📦'} ${esc(s.name)}</div>`; }); }); document.getElementById('code-tree').innerHTML = treeHtml; }
@@ -1974,10 +1978,8 @@ function playMap(mapId) {
   document.getElementById('g-map-name').textContent = m.name;
 }
 function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); gRenderer.shadowMap.enabled = true; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
-function _loadMap(m) { const toRemove = []; gScene.traverse(o => { if (o !== gScene) toRemove.push(o); }); toRemove.forEach(o => gScene.remove(o)); gColliders = []; gNPCs = []; gPlayer = null; gScene.add(new THREE.AmbientLight(0xffeedd, 0.55)); const sun = new THREE.DirectionalLight(0xffffff, 0.88); sun.position.set(40,70,30); sun.castShadow = true; sun.shadow.mapSize.set(1024,1024); gScene.add(sun); let spawn = {x:0, y:3, z:0}; (m.parts||[]).forEach(d => { if (d.type === 'Spawn') { spawn = {x: d.x, y: d.y + (d.sy||0.4)/2, z: d.z}; return; } let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sz)/2, 16, 12); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 16); else geo = new THREE.BoxGeometry(sx, sy, sz); const mat = new THREE.MeshPhongMaterial({ color:new THREE.Color(d.color||'#888'), transparent:Number(d.transparent||0)>0, opacity:1-Number(d.transparent||0) }); if (d.material === 'Neon') { mat.emissive = new THREE.Color(d.color||'#00ff88'); mat.emissiveIntensity = 0.6; } const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0,d.y||0,d.z||0); mesh.rotation.set(d.rx||0,d.ry||0,d.rz||0); mesh.castShadow = true; mesh.receiveShadow = true; gScene.add(mesh); if (d.isNPC) { gNPCs.push({mesh,data:d}); return; } if (d.canCollide !== false) { const box = new THREE.Box3().setFromObject(mesh); gColliders.push({mesh,box}); } }); _spawnPlayer(spawn); gCamTheta = 0; gCamPhi = 0.45; gChatMsgs = []; document.getElementById('g-chat-msgs').innerHTML = ''; addGMsg(`Bienvenido a ${m.name}`, 'sys'); }
 function _loadMap(m) { const toRemove = []; gScene.traverse(o => { if (o !== gScene) toRemove.push(o); }); toRemove.forEach(o => gScene.remove(o)); gColliders = []; gNPCs = []; gPlayer = null; gScene.add(new THREE.AmbientLight(0xffeedd, 0.55)); const sun = new THREE.DirectionalLight(0xffffff, 0.88); sun.position.set(40,70,30); sun.castShadow = true; sun.shadow.mapSize.set(1024,1024); gScene.add(sun); let spawn = {x:0, y:3, z:0}; (m.parts||[]).forEach(d => { if (d.type === 'Spawn') { spawn = {x: d.x, y: d.y + (d.sy||0.4)/2, z: d.z}; return; } if(d.isNPC){const model=makeHumanoidRig(d);gScene.add(model);gNPCs.push({mesh:model,data:d});if(d.canCollide!==false)gColliders.push({mesh:model,box:new THREE.Box3().setFromObject(model)});return;} if(d.type==='ImportedMesh'&&d.meshData){const model=makeMesh(d);gScene.add(model);if(d.canCollide!==false)gColliders.push({mesh:model,box:new THREE.Box3().setFromObject(model)});return;} let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sz)/2, 16, 12); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 16); else geo = new THREE.BoxGeometry(sx, sy, sz); const mat = new THREE.MeshPhongMaterial({ color:new THREE.Color(d.color||'#888'), transparent:Number(d.transparent||0)>0, opacity:1-Number(d.transparent||0) }); if (d.material === 'Neon') { mat.emissive = new THREE.Color(d.color||'#00ff88'); mat.emissiveIntensity = 0.6; } const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0,d.y||0,d.z||0); mesh.rotation.set(d.rx||0,d.ry||0,d.rz||0); mesh.castShadow = true; mesh.receiveShadow = true; gScene.add(mesh); if (d.isNPC) { gNPCs.push({mesh,data:d}); return; } if (d.canCollide !== false) { const box = new THREE.Box3().setFromObject(mesh); gColliders.push({mesh,box}); } }); _spawnPlayer(spawn); gCamTheta = 0; gCamPhi = 0.45; gChatMsgs = []; document.getElementById('g-chat-msgs').innerHTML = ''; addGMsg(`Bienvenido a ${m.name}`, 'sys'); }
 function _spawnPlayer(pos) { const g = new THREE.Group(); const c = new THREE.Color(ME.color||'#5b8def'); const bMat = new THREE.MeshPhongMaterial({color:c}); const sMat = new THREE.MeshPhongMaterial({color:0xffdbac}); const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45,1.10,0.45),bMat); lL.position.set(-0.27, 0.55, 0); const lR = lL.clone(); lR.position.set( 0.27, 0.55, 0); const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55),bMat); torso.position.set(0, 1.70, 0); const head = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.70,0.70),sMat); head.position.set(0, 2.75, 0); const eyeM = new THREE.MeshPhongMaterial({color:0x111111}); const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeM); eL.position.set(-0.17, 2.78, 0.36); const eR = eL.clone(); eR.position.set( 0.17, 2.78, 0.36); const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40,1.10,0.40),bMat); aL.position.set(-0.72, 1.70, 0); const aR = aL.clone(); aR.position.set( 0.72, 1.70, 0); g.add(lL,lR,torso,head,eL,eR,aL,aR); g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = {aL,aR,lL,lR}; gVelY = 0; gOnGround = false; gTargetRY = 0; }
-function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; gAnimT += 0.016; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } _prevPos.copy(gPlayer.position); const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; if (moving) { const dir = new THREE.Vector3(mx,0,mz).normalize().applyAxisAngle(new THREE.Vector3(0,1,0), gCamTheta); gPlayer.position.x += dir.x * G_SPD; gPlayer.position.z += dir.z * G_SPD; gTargetRY = Math.atan2(dir.x, dir.z); } let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * 0.2; gVelY -= G_GRAV; gPlayer.position.y += gVelY; gOnGround = false; for (const col of gColliders) { col.box.setFromObject(col.mesh); const feet = gPlayer.position.y; const head = feet + AV_H; const pBox = new THREE.Box3( new THREE.Vector3(gPlayer.position.x - AV_HW, feet, gPlayer.position.z - AV_HD), new THREE.Vector3(gPlayer.position.x + AV_HW, head, gPlayer.position.z + AV_HD) ); if (!pBox.intersectsBox(col.box)) continue; const overY = Math.min(head, col.box.max.y) - Math.max(feet, col.box.min.y); const overX = Math.min(gPlayer.position.x+AV_HW, col.box.max.x) - Math.max(gPlayer.position.x-AV_HW, col.box.min.x); const overZ = Math.min(gPlayer.position.z+AV_HD, col.box.max.z) - Math.max(gPlayer.position.z-AV_HD, col.box.min.z); if (overY <= overX && overY <= overZ) { if (gVelY <= 0 && feet < col.box.max.y && head > col.box.max.y) { gPlayer.position.y = col.box.max.y; gVelY = 0; gOnGround = true; } else if (gVelY > 0 && head > col.box.min.y && feet < col.box.min.y) { gPlayer.position.y = col.box.min.y - AV_H; gVelY = 0; } } else { gPlayer.position.x = _prevPos.x; gPlayer.position.z = _prevPos.z; } } if (gPlayer.position.y < -60) { gPlayer.position.set(0, 4, 0); gVelY = 0; addGMsg('💀 Caíste al vacío', 'sys'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y = t; }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); gRenderer.render(gScene, gCamera); }
 function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; gAnimT += 0.016; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } _prevPos.copy(gPlayer.position); const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; if (moving) { const dir = new THREE.Vector3(mx,0,mz).normalize().applyAxisAngle(new THREE.Vector3(0,1,0), gCamTheta); gPlayer.position.x += dir.x * G_SPD; gPlayer.position.z += dir.z * G_SPD; gTargetRY = Math.atan2(dir.x, dir.z); } let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * 0.2; gVelY -= G_GRAV; gPlayer.position.y += gVelY; gOnGround = false; for (const col of gColliders) { col.box.setFromObject(col.mesh); const feet = gPlayer.position.y; const head = feet + AV_H; const pBox = new THREE.Box3( new THREE.Vector3(gPlayer.position.x - AV_HW, feet, gPlayer.position.z - AV_HD), new THREE.Vector3(gPlayer.position.x + AV_HW, head, gPlayer.position.z + AV_HD) ); if (!pBox.intersectsBox(col.box)) continue; const overY = Math.min(head, col.box.max.y) - Math.max(feet, col.box.min.y); const overX = Math.min(gPlayer.position.x+AV_HW, col.box.max.x) - Math.max(gPlayer.position.x-AV_HW, col.box.min.x); const overZ = Math.min(gPlayer.position.z+AV_HD, col.box.max.z) - Math.max(gPlayer.position.z-AV_HD, col.box.min.z); if (overY <= overX && overY <= overZ) { if (gVelY <= 0 && feet < col.box.max.y && head > col.box.max.y) { gPlayer.position.y = col.box.max.y; gVelY = 0; gOnGround = true; } else if (gVelY > 0 && head > col.box.min.y && feet < col.box.min.y) { gPlayer.position.y = col.box.min.y - AV_H; gVelY = 0; } } else { gPlayer.position.x = _prevPos.x; gPlayer.position.z = _prevPos.z; } } if (gPlayer.position.y < -60) { gPlayer.position.set(0, 4, 0); gVelY = 0; addGMsg('💀 Caíste al vacío', 'sys'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y=t;const rig=npc.mesh.userData.rig;if(rig){const swing=Math.sin(t*3)*0.45;rig.armL.rotation.x=swing;rig.armR.rotation.x=-swing;rig.legL.rotation.x=-swing;rig.legR.rotation.x=swing;} }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); gRenderer.render(gScene, gCamera); }
 function _setupGameInput() { window.addEventListener('keydown', e => { if (document.activeElement === document.getElementById('g-chat-inp')) return; gKeys[e.code] = true; if (e.code === 'Space') { e.preventDefault(); _tryJump(); } if (e.code === 'Escape') exitGame(); }); window.addEventListener('keyup', e => delete gKeys[e.code]); let cDrag = false, cx2=0, cy2=0; window.addEventListener('mousedown', e => { if (e.button===2 && document.getElementById('s-game').classList.contains('active')) { cDrag=true; cx2=e.clientX; cy2=e.clientY; } }); window.addEventListener('mouseup', e => { if (e.button===2) cDrag=false; }); window.addEventListener('mousemove', e => { if (!cDrag) return; gCamTheta -= (e.clientX-cx2)*0.01; gCamPhi = Math.max(0.08, Math.min(Math.PI/2.1, gCamPhi+(e.clientY-cy2)*0.01)); cx2=e.clientX; cy2=e.clientY; }); window.addEventListener('wheel', e => { if (document.getElementById('s-game').classList.contains('active')) gCamDist = Math.max(5,Math.min(60,gCamDist+e.deltaY*0.05)); }, {passive:true}); window.oncontextmenu = e => { if (document.getElementById('s-game').classList.contains('active')) e.preventDefault(); }; }
 function _tryJump() { if (gOnGround) { gVelY = G_JUMP; gOnGround = false; } }
@@ -1985,14 +1987,26 @@ function _setupMob() { const base = document.getElementById('joy-base'); const k
 let gChatMsgs = [];
 function addGMsg(text, cls='chat') { const el = document.getElementById('g-chat-msgs'); gChatMsgs.push({text,cls}); if (gChatMsgs.length > 50) gChatMsgs.shift(); el.innerHTML = gChatMsgs.map(m=>`<div class="g-msg ${m.cls}">${esc(m.text)}</div>`).join(''); el.scrollTop = el.scrollHeight; }
 function gChatKey(e) { if (e.key === 'Enter') { const t = e.target.value.trim(); if (t) { addGMsg(ME.username+': '+t,'me'); netSendChat(t); e.target.value=''; } e.target.blur(); } }
-function exitGame() { gKeys = {}; netLeaveGame(); document.getElementById('s-game').classList.remove('active'); document.getElementById('s-home').classList.add('active'); document.getElementById('nav').style.display = 'flex'; document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0)); renderHome(); }
 function exitGame() { gKeys = {}; netLeaveGame(); document.getElementById('s-game').classList.remove('active'); document.getElementById('nav').style.display = 'flex'; if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
-let socket = null, netConnected = false, netCurrentMapId = null, netTick = 0;
+let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
 const NET_RATE = 3;
 let remotePlayers = {};
 function netConnect() { const serverUrl = window.location.origin; try { socket = io(serverUrl, { auth:{ token:DB.get('token') }, transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 1500, reconnectionAttempts: 10 }); } catch(e) { console.warn('[NET] Socket.IO no disponible — modo offline'); return; } socket.on('connect', () => { netConnected = true; updateNetPill('🟢', socket.id?.substring(0,6)); if (ME) socket.emit('user_online', { userId:ME.id }); if (netCurrentMapId) netJoinGame(netCurrentMapId); }); socket.on('disconnect', () => { netConnected = false; updateNetPill('🔴', 'Offline'); clearRemotePlayers(); }); socket.on('connect_error', () => { netConnected = false; updateNetPill('🟡', 'Sin servidor'); }); socket.on('room_state', ({ players, chat, mapId }) => { clearRemotePlayers(); players.forEach(p => spawnRemote(p)); if (chat?.length) chat.forEach(msg => addGMsg(`${msg.username}: ${msg.text}`, 'chat')); updateNetPill('🟢', `${players.length + 1} jugadores`); }); socket.on('join_ack', ({ playerCount }) => { updateNetPill('🟢', `${playerCount} jugador${playerCount !== 1 ? 'es' : ''}`); addGMsg(`✅ Conectado (${playerCount} en sala)`, 'sys'); }); socket.on('player_joined', (playerData) => { spawnRemote(playerData); addGMsg(`→ ${playerData.username} entró`, 'sys'); updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('player_moved', ({ socketId, x, y, z, ry, anim, moving }) => { const rp = remotePlayers[socketId]; if (!rp) return; rp.targetPos.set(x, y, z); rp.targetRY = ry; rp.anim = anim; rp.moving = moving; }); socket.on('player_left', ({ socketId }) => { const rp = remotePlayers[socketId]; if (rp) { if (gScene) gScene.remove(rp.group); addGMsg(`← ${rp.data.username} salió`, 'sys'); delete remotePlayers[socketId]; } updateNetPill('🟢', `${Object.keys(remotePlayers).length + 1} jugadores`); }); socket.on('game_chat', ({ socketId, username, text }) => { if (socketId === socket.id) return; addGMsg(`${username}: ${text}`, 'chat'); }); socket.on('pong_res', (ts) => { const ping = Date.now() - ts; const pill = document.getElementById('g-net-pill'); if (pill) pill.textContent = `🟢 ${Object.keys(remotePlayers).length + 1}p · ${ping}ms`; }); }
-function netJoinGame(mapId) { if (!socket || !netConnected || !ME) return; netCurrentMapId = mapId; socket.emit('join_game', { mapId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def' }); }
-function netLeaveGame() { if (!socket || !netConnected) return; socket.emit('leave_game'); clearRemotePlayers(); netCurrentMapId = null; const pill = document.getElementById('g-net-pill'); if (pill) pill.style.display = 'none'; }
+const _netConnectWithJoinErrors = netConnect;
+netConnect = function() {
+  _netConnectWithJoinErrors();
+  if (socket) socket.on('join_error', ({message}) => {
+    netCurrentMapId = null; netCurrentInstanceId = null;
+    clearRemotePlayers();
+    showToast(message || 'No se pudo entrar a esta instancia.');
+  });
+  if (socket) socket.on('online_update', () => {
+    clearTimeout(window._crixPresenceRefreshTimer);
+    window._crixPresenceRefreshTimer = setTimeout(() => refreshCloudContent(), 800);
+  });
+};
+function netJoinGame(mapId, instanceId = netCurrentInstanceId) { netCurrentMapId = mapId; netCurrentInstanceId = instanceId; if (!socket || !netConnected || !ME || !instanceId) return; socket.emit('join_game', { mapId, instanceId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def' }); }
+function netLeaveGame() { if (socket && netConnected) socket.emit('leave_game'); clearRemotePlayers(); netCurrentMapId = null; netCurrentInstanceId = null; const pill = document.getElementById('g-net-pill'); if (pill) pill.style.display = 'none'; }
 function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
 function netSendChat(text) { if (!socket || !netConnected) return false; socket.emit('game_chat', { text }); return true; }
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
@@ -2004,7 +2018,17 @@ function netUpdateRemotes() { const LERP = 0.18; for (const rp of Object.values(
 let _netPatchApplied = false;
 function _patchGameLoopWithNet() { if (_netPatchApplied) return; _netPatchApplied = true; (function netFrame() { requestAnimationFrame(netFrame); if (!gPlayer || !gRenderer) return; netSendMove(); netUpdateRemotes(); })(); }
 const _origPlayMap = window.playMap;
-window.playMap = function(mapId) { _origPlayMap(mapId); setTimeout(() => { netJoinGame(mapId); _patchGameLoopWithNet(); }, 200); };
+window.playMap = async function(mapId, instanceId = null) {
+  let targetInstanceId = instanceId;
+  if (!targetInstanceId && ME && !stPlaytesting) {
+    try {
+      const result = await apiRequest('/api/maps/'+encodeURIComponent(mapId)+'/instances', { method:'POST', body:{} });
+      targetInstanceId = result.instance.id;
+    } catch (err) { console.warn('[NET] No se pudo reservar una instancia:', err.message); }
+  }
+  _origPlayMap(mapId);
+  setTimeout(() => { if (targetInstanceId) netJoinGame(mapId, targetInstanceId); _patchGameLoopWithNet(); }, 200);
+};
 ensureDefaultMaps();
 if (DB.get('token') && trySession()) restoreSession();
 else { DB.del('session'); document.getElementById('s-auth').classList.add('active'); }
@@ -2023,23 +2047,27 @@ function toggleLike(mapId, btn) {
     if (btn) { btn.innerHTML = (result.liked?'❤️ ':'🤍 ') + result.likes; btn.className = 'btn ' + (result.liked?'btn-red':'btn-g'); }
   }).catch(err => showToast(err.message));
 }
+
 // ══════════════════════════════════════════════════
 // SISTEMA DE VIDEOS
 // ══════════════════════════════════════════════════
 let _vidFilter = 'all';
 let _activeVideoId = null;
 let _uvFileData = null;
+
 function getVideos() { const v = DB.get('crix_videos'); return Array.isArray(v) ? v : []; }
 function saveVideos(arr) {
   const light = arr.map(video => video.data && video.data.length > 1500000 ? { ...video, data:null } : video);
   DB.set('crix_videos', light);
 }
+
 function vidFilter(f, el) {
   _vidFilter = f;
   document.querySelectorAll('#s-videos .filter-btn').forEach(b => b.classList.remove('active'));
   if (el) el.classList.add('active');
   renderVideos();
 }
+
 function renderVideos() {
   const el = document.getElementById('video-grid'); if (!el) return;
   let vids = getVideos();
@@ -2068,6 +2096,7 @@ function renderVideos() {
       '</div></div>';
   }).join('');
 }
+
 async function openVideoPlayer(vid) {
   const vids = getVideos();
   const v = vids.find(x => x.id === vid); if (!v) return;
@@ -2081,6 +2110,7 @@ async function openVideoPlayer(vid) {
   goTab('home'); // reset screens
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+
   // Crear pantalla de player inline
   let pp = document.getElementById('s-video-player-dynamic');
   if (!pp) {
@@ -2119,6 +2149,7 @@ async function openVideoPlayer(vid) {
   pp.classList.add('active');
   renderVideoComments(v);
 }
+
 function toggleVideoLike(vid) {
   const vids = getVideos(); const v = vids.find(x => x.id === vid); if (!v) return;
   v.likes = v.likes || [];
@@ -2134,6 +2165,7 @@ function toggleVideoLike(vid) {
   const btn = document.getElementById('vp-like-btn');
   if (btn) { btn.className = 'btn ' + (liked?'btn-red':'btn-g'); btn.textContent = '❤️ ' + v.likes.length; }
 }
+
 function renderVideoComments(v) {
   const el = document.getElementById('vp-comments'); if (!el) return;
   const comments = (v.comments || []).slice().reverse();
@@ -2145,6 +2177,7 @@ function renderVideoComments(v) {
     '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.time||'') + '</div></div></div>'
   ).join('') : '<div style="color:var(--text3);font-size:13px;padding:12px 0">Sin comentarios todavía.</div>';
 }
+
 async function submitVideoComment() {
   const inp = document.getElementById('vp-comment-inp');
   const text = (inp?.value||'').trim(); if (!text || !_activeVideoId) return;
@@ -2155,6 +2188,7 @@ async function submitVideoComment() {
     v.comments.push(result.comment); saveVideos(vids); inp.value = ''; renderVideoComments(v);
   } catch (err) { showToast(err.message); }
 }
+
 async function deleteVideo(vid) {
   if (!confirm('¿Borrar este video?')) return;
   try { await apiRequest('/api/videos/' + encodeURIComponent(vid), { method:'DELETE' }); }
@@ -2165,6 +2199,7 @@ async function deleteVideo(vid) {
   else renderVideos();
   showToast('Video eliminado');
 }
+
 function openUploadVideo() {
   _uvFileData = null;
   document.getElementById('uv-title').value = '';
@@ -2173,6 +2208,7 @@ function openUploadVideo() {
   document.getElementById('uv-preview').style.display = 'none';
   openModal('mo-upload-video');
 }
+
 function previewVideoUpload(e) {
   const file = e.target.files[0]; if (!file) return;
   if (file.size > 30 * 1024 * 1024) { showToast('El video debe ser menor a 30 MB'); return; }
@@ -2183,6 +2219,7 @@ function previewVideoUpload(e) {
   reader.onload = ev => { _uvFileData = ev.target.result; };
   reader.readAsDataURL(file);
 }
+
 async function confirmUploadVideo() {
   const title = document.getElementById('uv-title').value.trim();
   if (!title) { showToast('Poné un título'); return; }
@@ -2205,19 +2242,24 @@ async function confirmUploadVideo() {
   showToast('¡Video publicado!');
   openVideoPlayer(v.id);
 }
+
 function initVideos() { renderVideos(); }
+
 // ══════════════════════════════════════════════════
 // SISTEMA DE FOROS
 // ══════════════════════════════════════════════════
 let _forumFilter = 'all';
 let _postAttachment = null;
+
 function getPosts() { const p = DB.get('crix_posts'); return Array.isArray(p) ? p : []; }
 function savePosts(arr) { DB.set('crix_posts', arr); }
+
 function updateCharCount(ta) {
   const rem = 280 - (ta.value||'').length;
   const el = document.getElementById('char-count');
   if (el) { el.textContent = rem; el.style.color = rem < 20 ? 'var(--red)' : 'var(--text3)'; }
 }
+
 function attachPostImage(e) {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
@@ -2228,6 +2270,7 @@ function attachPostImage(e) {
   };
   reader.readAsDataURL(file); e.target.value = '';
 }
+
 async function submitPost() {
   const ta = document.getElementById('compose-text');
   const text = (ta?.value||'').trim();
@@ -2250,12 +2293,14 @@ async function submitPost() {
   showToast('¡Post publicado!');
   renderForums();
 }
+
 function forumFilter(f, el) {
   _forumFilter = f;
   document.querySelectorAll('#s-forums .filter-btn').forEach(b => b.classList.remove('active'));
   if (el) el.classList.add('active');
   renderForums();
 }
+
 function renderForums() {
   const el = document.getElementById('post-list'); if (!el) return;
   let posts = getPosts();
@@ -2305,6 +2350,7 @@ function renderForums() {
       '</div></div>';
   }).join('');
 }
+
 function likePost(pid) {
   const posts = getPosts(); const p = posts.find(x => x.id === pid); if (!p) return;
   p.likes = p.likes || [];
@@ -2320,6 +2366,7 @@ function likePost(pid) {
   const btn = document.getElementById('like-'+pid);
   if (btn) { btn.style.color = liked?'var(--red)':'var(--text2)'; btn.innerHTML = (liked?'❤️':'🤍')+' '+p.likes.length; }
 }
+
 function openReply(pid) {
   const inp = document.getElementById('reply-inp-'+pid);
   const btn = document.getElementById('reply-btn-'+pid);
@@ -2329,6 +2376,7 @@ function openReply(pid) {
   if (btn) btn.style.display = visible ? 'none' : 'block';
   if (!visible) inp.focus();
 }
+
 async function submitReply(pid) {
   const inp = document.getElementById('reply-inp-'+pid);
   const text = (inp?.value||'').trim(); if (!text) return;
@@ -2341,6 +2389,7 @@ async function submitReply(pid) {
   savePosts(posts); if (inp) inp.value = '';
   showToast('Respuesta enviada!'); renderForums();
 }
+
 async function deletePost(pid) {
   if (!confirm('¿Borrar este post?')) return;
   try { await apiRequest('/api/posts/' + encodeURIComponent(pid), { method:'DELETE' }); }
@@ -2349,20 +2398,25 @@ async function deletePost(pid) {
   savePosts(posts); renderForums();
   showToast('Post eliminado');
 }
+
 function timeAgo(iso) {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff/60000), h = Math.floor(diff/3600000), d = Math.floor(diff/86400000);
   if (d > 0) return d+'d'; if (h > 0) return h+'h'; if (m > 0) return m+'m'; return 'ahora';
 }
+
 function initForums() {
   const av = document.getElementById('forums-my-av');
   if (av) { av.innerHTML = avatarInnerHtml(ME); av.style.background = profileAvatarSrc(ME) ? 'transparent' : ME.color; av.style.overflow = 'hidden'; }
   renderForums();
 }
+
+
 function openGamePage(mapId) {
   const maps = getMaps();
   const m = maps[mapId];
   if (!m) { showToast('Juego no encontrado'); return; }
+
   // Thumb
   const thumbEl = document.getElementById('gp-thumb');
   if (m.thumb) {
@@ -2371,18 +2425,22 @@ function openGamePage(mapId) {
     const icons = ['🎮','🏰','🚀','⚔️','🏄','🎯','🧩','🌋'];
     thumbEl.textContent = icons[Math.abs(mapId.split('').reduce((a,c)=>a+c.charCodeAt(0),0)) % icons.length];
   }
+
   // Info
   document.getElementById('gp-name').textContent = m.name;
   const authorEl = document.getElementById('gp-author');
   authorEl.textContent = 'por ' + m.authorName;
   authorEl.onclick = () => { closeModal('mo-game-page'); goTab('profile', m.authorId); };
+
   document.getElementById('gp-desc').textContent = m.desc || 'Sin descripción.';
+
   // Stats
   document.getElementById('gp-stats').innerHTML =
     '<span>👁 '+(m.plays||0)+' jugadas</span>'+
     '<span>❤️ '+(m.likes||0)+'</span>'+
     '<span>🕒 '+dateStr(m.created)+'</span>'+
     '<span>🎮 '+({adventure:'Aventura',building:'Construcción',roleplay:'Rol',shooter:'Shooter',parkour:'Parkour',puzzle:'Puzzle',other:'Otro'}[m.genre]||m.genre||'Otro')+'</span>';
+
   // Privacy badge
   const privBadge = document.getElementById('gp-privacy-badge');
   const privMap = {public:['🌍 Público','var(--green)'],friends:['👥 Amigos','var(--yellow)'],assigned:['🔒 Asignado','var(--acc2)'],private:['🔐 Privado','var(--red)']};
@@ -2390,30 +2448,36 @@ function openGamePage(mapId) {
   privBadge.textContent = privLabel;
   privBadge.style.color = privColor;
   privBadge.style.background = privColor.replace(')', ',.15)').replace('var(','rgba(').replace('--green','34,211,166').replace('--yellow','245,158,11').replace('--acc2','139,92,246').replace('--red','239,68,68');
+
   // Botones
   const isOwner = m.authorId === ME.id;
   const canPlay = canPlayMap(m);
   const liked = (ME.liked||[]).includes(mapId);
   document.getElementById('gp-actions').innerHTML =
     '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\')">← Volver</button>'+
-    (canPlay ? '<button class="btn btn-p" onclick="closeModal(\'mo-game-page\');playMap(\''+mapId+'\')">▶ Jugar</button>' :
+    (canPlay ? '<button class="btn btn-p" onclick="closeModal(\'mo-game-page\');playMap(\''+mapId+'\')">▶ Jugar</button><button class="btn btn-g" onclick="browseGameInstances(\''+mapId+'\')">🌐 Instancias activas</button>' :
                '<button class="btn btn-g" style="opacity:.5;cursor:not-allowed">🔒 Sin acceso</button>')+
     '<button class="btn btn-g" id="gp-like-btn" onclick="toggleLike(\''+mapId+'\',this)">'+
     (liked?'❤️':'🤍')+' '+(m.likes||0)+'</button>'+
     (isOwner ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editMap(\''+mapId+'\')">✏️ Editar</button>' : '')+
     (isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');deleteMap(\''+mapId+'\')">🗑️ Borrar</button>' : '')+
     (isAdmin() && !isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');banUser(\''+m.authorId+'\')">🚫 Banear autor</button>' : '');
+
   openModal('mo-game-page');
 }
+
+
 function startCallFromMsg(type) {
   if (!window._activeChatUserId) { showToast('Abrí una conversación primero'); return; }
   startCall(window._activeChatUserId, type);
 }
+
 function startVoiceMsgFromUI() {
   const cid = window._activeConvId;
   if (!cid) { showToast('Abrí una conversación primero'); return; }
   startVoiceMsg(cid);
 }
+
 function checkNotifs() {
   const reqs = ME.friendRequests || [];
   const convs = getConvs();
@@ -2426,9 +2490,12 @@ function checkNotifs() {
   if (badge) { badge.textContent = total || ''; badge.style.display = total ? '' : 'none'; }
   renderFriendRequests();
 }
+
+
 // ════════════════════════════════════════════════════════════════
 // SISTEMA DE SOLICITUDES DE AMISTAD
 // ════════════════════════════════════════════════════════════════
+
 function sendFriendRequest(uid) {
   const users = getUsers();
   const target = users[uid];
@@ -2441,6 +2508,7 @@ function sendFriendRequest(uid) {
     .then(() => { showToast('✅ Solicitud de amistad enviada a ' + target.username); refreshCloudContent(); })
     .catch(err => showToast(err.message));
 }
+
 async function acceptFriendRequest(fromId) {
   try {
     await apiRequest('/api/friend-accept', { method:'POST', body:{ fromId } });
@@ -2450,6 +2518,7 @@ async function acceptFriendRequest(fromId) {
     renderFriendRequests();
   } catch (err) { showToast(err.message); }
 }
+
 async function rejectFriendRequest(fromId) {
   try {
     await apiRequest('/api/friend-reject', { method:'POST', body:{ fromId } });
@@ -2457,11 +2526,13 @@ async function rejectFriendRequest(fromId) {
     renderFriendRequests();
   } catch (err) { showToast(err.message); }
 }
+
 function renderFriendRequests() {
   const reqs = ME.friendRequests || [];
   const badge = document.getElementById('friend-req-badge');
   if (badge) badge.textContent = reqs.length || '';
   badge && (badge.style.display = reqs.length ? '' : 'none');
+
   const container = document.getElementById('friend-requests-list');
   if (!container) return;
   if (!reqs.length) {
@@ -2480,19 +2551,23 @@ function renderFriendRequests() {
       '</div>';
   }).join('');
 }
+
 // ════════════════════════════════════════════════════════════════
 // SISTEMA DE MENSAJES MEJORADO (tipo Discord)
 // ════════════════════════════════════════════════════════════════
+
 function openConvWithFull(uid) {
   const users = getUsers();
   const u = users[uid];
   if (!u) { showToast('Usuario no disponible'); return; }
   openConvWith(uid);
 }
+
 // Override addFriend para usar solicitudes
 function addFriend(uid) {
   sendFriendRequest(uid);
 }
+
 function addFriendByName() {
   const inp = document.getElementById('add-friend-inp');
   const name = (inp?.value || '').trim();
@@ -2503,15 +2578,19 @@ function addFriendByName() {
   sendFriendRequest(target.id);
   if (inp) inp.value = '';
 }
+
 // Buscar usuario por nombre aunque esté desconectado
 function findUserProfile(name) {
   const users = getUsers();
   return Object.values(users).find(u => u.username && u.username.toLowerCase() === name.toLowerCase());
 }
+
 // ════════════════════════════════════════════════════════════════
 // SISTEMA DE NOTIFICACIONES DEL NAVEGADOR
 // ════════════════════════════════════════════════════════════════
+
 let _notifPermission = false;
+
 function initBrowserNotifs() {
   if (!('Notification' in window)) return;
   if (Notification.permission === 'granted') { _notifPermission = true; return; }
@@ -2521,6 +2600,7 @@ function initBrowserNotifs() {
     });
   }
 }
+
 function sendBrowserNotif(title, body, icon) {
   if (!_notifPermission || document.visibilityState === 'visible') return;
   try {
@@ -2533,14 +2613,17 @@ function sendBrowserNotif(title, body, icon) {
     setTimeout(() => n.close(), 5000);
   } catch(e) {}
 }
+
 // ════════════════════════════════════════════════════════════════
 // MENSAJES DE AUDIO (grabación de voz)
 // ════════════════════════════════════════════════════════════════
+
 let _mediaRec = null;
 let _audioChunks = [];
 let _isRecording = false;
 let _recTimer = null;
 let _recSeconds = 0;
+
 async function startVoiceMsg(convId) {
   if (_isRecording) { stopVoiceMsg(convId); return; }
   try {
@@ -2578,38 +2661,40 @@ async function startVoiceMsg(convId) {
     showToast('No se pudo acceder al micrófono');
   }
 }
+
 function stopVoiceMsg(convId) {
   if (_mediaRec && _isRecording) _mediaRec.stop();
 }
+
 function sendVoiceMessage(convId, audioData, duration) {
   const msg = {
-    id: 'm' + Date.now(),
-    from: ME.id,
     id: crypto.randomUUID(),
     type: 'audio',
     audio: audioData,
     duration: duration,
     t: Date.now()
   };
-  pushMsg(convId, msg);
-  renderConv(convId);
-  if (socket) socket.emit('msg', { convId, msg });
   pushMsg(convId, msg).catch(err=>showToast(err.message));
 }
+
 // ════════════════════════════════════════════════════════════════
 // LLAMADAS Y VIDEOLLAMADAS (WebRTC simplificado con señalización)
 // ════════════════════════════════════════════════════════════════
+
 let _callState = null; // { type:'audio'|'video', peerId, stream, peerConn }
+
 function startCall(peerId, type) {
   const users = getUsers();
   const peer = users[peerId];
   if (!peer) return;
   if (_callState) { showToast('Ya hay una llamada activa'); return; }
+
   // Mostrar UI de llamada
   showCallUI(peerId, type, 'calling');
   // Señalizar por socket
   if (socket) socket.emit('call_invite', { to: peerId, from: ME.id, fromName: ME.username, type });
 }
+
 function showCallUI(peerId, type, status) {
   const users = getUsers();
   const peer = users[peerId] || { username: peerId, color: '#5b8def' };
@@ -2621,6 +2706,7 @@ function showCallUI(peerId, type, status) {
     document.body.appendChild(callUI);
   }
   _callState = { peerId, type, status };
+
   const statusText = status === 'calling' ? 'Llamando...' : status === 'incoming' ? 'Llamada entrante' : 'En llamada';
   callUI.innerHTML =
     '<div style="font-size:14px;color:var(--text2);letter-spacing:2px;text-transform:uppercase">' + (type === 'video' ? '📹 Videollamada' : '📞 Llamada de voz') + '</div>' +
@@ -2635,6 +2721,7 @@ function showCallUI(peerId, type, status) {
     (status === 'active' ? '<button class="btn btn-g" id="mute-btn" style="width:50px;height:50px;border-radius:50%;font-size:18px" onclick="toggleMuteCall()">🎤</button>' : '') +
     '</div>';
 }
+
 function acceptCall() {
   if (!_callState) return;
   const el = document.getElementById('call-status');
@@ -2643,6 +2730,7 @@ function acceptCall() {
   _callState.status = 'active';
   showCallUI(_callState.peerId, _callState.type, 'active');
 }
+
 function endCall() {
   if (_callState && socket) socket.emit('call_end', { to: _callState.peerId, from: ME.id });
   _callState = null;
@@ -2651,6 +2739,7 @@ function endCall() {
   // Detener streams
   if (window._localStream) { window._localStream.getTracks().forEach(t => t.stop()); window._localStream = null; }
 }
+
 function toggleMuteCall() {
   if (!window._localStream) return;
   const audioTrack = window._localStream.getAudioTracks()[0];
@@ -2660,11 +2749,14 @@ function toggleMuteCall() {
     if (btn) btn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
   }
 }
+
 // ════════════════════════════════════════════════════════════════
 // SOCKET EVENTS PARA LLAMADAS Y SOLICITUDES
 // ════════════════════════════════════════════════════════════════
+
 function initCallSocketEvents() {
   if (!socket) return;
+
   socket.on('friend_request', ({ from, fromName }) => {
     refreshCloudContent().then(() => {
       renderFriendRequests();
@@ -2673,30 +2765,36 @@ function initCallSocketEvents() {
       checkNotifs();
     });
   });
+
   socket.on('friend_accepted', ({ from, fromName }) => {
     refreshCloudContent();
     showToast('🎉 ' + fromName + ' aceptó tu solicitud de amistad');
     sendBrowserNotif('Solicitud aceptada', fromName + ' ahora es tu amigo en Crix');
     renderProfile(ME.id);
   });
+
   socket.on('call_invite', ({ from, fromName, type }) => {
     _callState = { peerId: from, type, status: 'incoming' };
     showCallUI(from, type, 'incoming');
     sendBrowserNotif(fromName + ' te llama', type === 'video' ? '📹 Videollamada entrante' : '📞 Llamada de voz entrante');
   });
+
   socket.on('call_accept', ({ from }) => {
     if (_callState && _callState.peerId === from) {
       _callState.status = 'active';
       showCallUI(_callState.peerId, _callState.type, 'active');
     }
   });
+
   socket.on('call_end', ({ from }) => {
     if (_callState && _callState.peerId === from) endCall();
   });
 }
+
 // ════════════════════════════════════════════════════════════════
 // RENDERIZADO DE MENSAJES CON SOPORTE AUDIO
 // ════════════════════════════════════════════════════════════════
+
 function renderMsgBubble(msg, isMe) {
   const time = new Date(msg.t).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
   let content = '';
@@ -2720,12 +2818,15 @@ function renderMsgBubble(msg, isMe) {
     '<div style="font-size:9px;opacity:.6;text-align:' + (isMe?'right':'left') + ';margin-top:4px">' + time + '</div>' +
     '</div></div>';
 }
+
+
 netConnect();
 const _goTabCloud = goTab;
 goTab = function(tab, extra) { _goTabCloud(tab, extra); if (CLOUD_READY) refreshCloudContent(); };
 setInterval(() => { if (CLOUD_READY) refreshCloudContent(); }, 60000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch(err => console.warn('[PWA] No se pudo instalar el caché:', err.message));
 </script>
+
 <!-- GAME PAGE MODAL -->
 <div class="mo-overlay" id="mo-game-page">
 <div class="mo-box" style="max-width:520px">
