@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const path     = require('path');
 const fs       = require('fs');
 const https    = require('https');
+const crypto   = require('crypto');
 
 const app    = express();
 const server = http.createServer(app);
@@ -14,23 +15,33 @@ const io     = new Server(server, {
 app.use(express.json({ limit: '50mb' }));
 
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'crix_data.json');
+const DATA_FILE = path.resolve(process.env.CRIX_DATA_FILE || path.join(__dirname, 'crix_data.json'));
 
 // ══════════════════════════════════════════════
-// BASE DE DATOS — archivo JSON local
-// En Render gratuito el archivo dura mientras el
-// proceso vive (~15 min sin tráfico). Para que
-// sobreviva reinicios se usa un backup en memoria
-// y se guarda frecuentemente.
+// Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
+// a un disco persistente montado por el proveedor de alojamiento.
 // ══════════════════════════════════════════════
-let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], _v: 0 };
+let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, _v: 0 };
 
 function loadDB() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf8');
       const parsed = JSON.parse(raw);
-      DB = { users:{}, maps:{}, convs:{}, _v:0, ...parsed };
+      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...parsed };
+      DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
+      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {};
+      let rolesChanged = false;
+      const crixUser = Object.values(DB.users).find(user => user.username?.toLowerCase() === 'crix');
+      const crixAdminConfigured = !!(crixUser && process.env.CRIX_ADMIN_PASSWORD && verifyPassword(process.env.CRIX_ADMIN_PASSWORD, crixUser.pw));
+      for (const user of Object.values(DB.users)) {
+        if (user.username?.toLowerCase() === 'crix') {
+          if (!!user.isAdmin !== crixAdminConfigured) { user.isAdmin = crixAdminConfigured; rolesChanged = true; }
+        } else if (user.isAdmin && (!crixAdminConfigured || !crixUser || user.adminGrantedBy !== crixUser.id)) {
+          user.isAdmin = false; delete user.adminGrantedBy; rolesChanged = true;
+        }
+      }
+      if (rolesChanged) saveDB();
       console.log(`[DB] Cargado: ${Object.keys(DB.users).length} usuarios, ${Object.keys(DB.maps).length} mapas`);
     } else {
       console.log('[DB] Archivo nuevo — empezando vacío');
@@ -41,7 +52,10 @@ function loadDB() {
 function saveDB() {
   try {
     DB._v = (DB._v || 0) + 1;
-    fs.writeFileSync(DATA_FILE, JSON.stringify(DB), 'utf8');
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+    const tempFile = `${DATA_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(DB), 'utf8');
+    fs.renameSync(tempFile, DATA_FILE);
   } catch(e) { console.error('[DB] Error al guardar:', e.message); }
 }
 
@@ -64,34 +78,125 @@ function getRoom(mapId) {
 function roomPlayers(mapId) { return Object.values(getRoom(mapId).players); }
 function log(t,d) { console.log(`[${new Date().toLocaleTimeString()}] ${t}:`, d); }
 function safeUser(u) { if (!u) return null; const {pw:_,...s}=u; return s; }
+function publicUser(u) {
+  if (!u) return null;
+  const { pw:_, banned:__, adminGrantedBy:___, friendRequests:____, friendRequests_recv:_____, friendRequests_sent:______, ...profile } = u;
+  return profile;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+function verifyPassword(password, stored) {
+  if (typeof stored !== 'string') return false;
+  if (!stored.startsWith('scrypt$')) return stored === String(password); // Upgrade legacy server-side plaintext after login.
+  const [, salt, expected] = stored.split('$');
+  if (!salt || !expected) return false;
+  const actual = Buffer.from(hashPassword(password, salt).split('$')[2], 'hex');
+  const expectedBytes = Buffer.from(expected, 'hex');
+  return actual.length === expectedBytes.length && crypto.timingSafeEqual(actual, expectedBytes);
+}
+function tokenHash(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
+function issueSession(user) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  DB.sessions[tokenHash(token)] = { userId: user.id, expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 30 };
+  saveDB();
+  return token;
+}
+function readSession(req) {
+  const header = req.get('authorization') || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) return null;
+  const key = tokenHash(token);
+  const session = DB.sessions[key];
+  if (!session || session.expiresAt <= Date.now()) {
+    if (session) { delete DB.sessions[key]; saveDB(); }
+    return null;
+  }
+  const user = DB.users[session.userId];
+  if (!user || user.banned) return null;
+  return user;
+}
+function requireAuth(req, res, next) {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+  req.user = user;
+  next();
+}
+function requireAdmin(req, res, next) {
+  if (!req.user?.isAdmin) return res.status(403).json({ ok:false, err:'Se requieren permisos de administración' });
+  next();
+}
+function canReadMap(map, user) {
+  const privacy = map.privacy || 'public';
+  if (privacy === 'public') return true;
+  if (!user) return false;
+  if (map.authorId === user.id || user.isAdmin) return true;
+  if (privacy === 'friends') return (user.friends || []).includes(map.authorId);
+  if (privacy === 'assigned') return (map.assignedPlayers || []).includes(user.username);
+  return false;
+}
+function canReadVideo(video, user) {
+  if ((video.privacy || 'public') === 'public') return true;
+  return !!user && (video.authorId === user.id || user.isAdmin);
+}
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) { socket.data.user = null; return next(); }
+  const session = DB.sessions[tokenHash(token)];
+  const user = session && session.expiresAt > Date.now() ? DB.users[session.userId] : null;
+  if (!user || user.banned) return next(new Error('Sesión inválida'));
+  socket.data.user = user;
+  next();
+});
 
 // ══════════════════════════════════════════════
 // HTTP — archivos estáticos
 // ══════════════════════════════════════════════
+app.use((req, res, next) => {
+  let requestedPath;
+  try { requestedPath = path.resolve(__dirname, '.' + decodeURIComponent(req.path)); }
+  catch { return res.sendStatus(404); }
+  if (requestedPath === DATA_FILE || requestedPath.startsWith(DATA_FILE + '.')) return res.sendStatus(404);
+  next();
+});
 app.use(express.static(path.join(__dirname)));
 
 // ── REGISTER ──
 app.post('/api/register', (req, res) => {
   try {
-    const { username, pw, color, id } = req.body;
+    const { username, pw, color } = req.body;
     if (!username || !pw) return res.json({ ok:false, err:'Faltan campos' });
+    if (typeof username !== 'string' || typeof pw !== 'string')
+      return res.status(400).json({ ok:false, err:'Datos de acceso inválidos' });
+    if (username.length < 3 || username.length > 24 || !/^[a-zA-Z0-9_]+$/.test(username))
+      return res.status(400).json({ ok:false, err:'Nombre inválido' });
+    if (pw.length < 6 || pw.length > 128)
+      return res.status(400).json({ ok:false, err:'La contraseña debe tener entre 6 y 128 caracteres' });
     const dup = Object.values(DB.users).find(u =>
       u.username.toLowerCase() === username.toLowerCase()
     );
     if (dup) return res.json({ ok:false, err:'Ese nombre ya existe' });
-    const uid = id || `u${Date.now()}`;
+    const isCrix = username.toLowerCase() === 'crix';
+    const adminPassword = process.env.CRIX_ADMIN_PASSWORD;
+    if (isCrix && !adminPassword)
+      return res.status(503).json({ ok:false, err:'La cuenta Crix aún no está configurada por el administrador del servidor' });
+    if (isCrix && pw !== adminPassword)
+      return res.status(403).json({ ok:false, err:'La contraseña de administración no coincide' });
+    const uid = `u${crypto.randomUUID()}`;
     const user = {
-      id: uid, username, pw, color: color||'#5b8def',
+      id: uid, username, pw: hashPassword(pw), color: /^#[0-9a-f]{6}$/i.test(color || '') ? color : '#5b8def',
       created: new Date().toISOString(),
       friends:[], games:[], visits:0, bio:'',
       following:[], liked:[], isAdmin: false,
     };
-    // El primer usuario registrado es admin automáticamente si se llama Crix
-    if (username.toLowerCase() === 'crix') user.isAdmin = true;
+    if (isCrix) user.isAdmin = true;
     DB.users[uid] = user;
-    saveDB();
+    const token = issueSession(user);
     log('REGISTER', username);
-    res.json({ ok:true, user: safeUser(user) });
+    res.json({ ok:true, user: safeUser(user), token });
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
 
@@ -100,11 +205,17 @@ app.post('/api/login', (req, res) => {
   try {
     const { username, pw } = req.body;
     if (!username || !pw) return res.json({ ok:false, err:'Faltan campos' });
+    if (typeof username !== 'string' || typeof pw !== 'string' || pw.length > 128)
+      return res.status(400).json({ ok:false, err:'Datos de acceso inválidos' });
     const user = Object.values(DB.users).find(u =>
       u.username.toLowerCase() === username.toLowerCase()
     );
     if (!user) return res.json({ ok:false, err:'Usuario no encontrado' });
-    if (user.pw !== pw) return res.json({ ok:false, err:'Contraseña incorrecta' });
+    const isConfiguredCrix = user.username.toLowerCase() === 'crix' && process.env.CRIX_ADMIN_PASSWORD && pw === process.env.CRIX_ADMIN_PASSWORD;
+    if (!verifyPassword(pw, user.pw) && !isConfiguredCrix) return res.json({ ok:false, err:'Contraseña incorrecta' });
+    if (isConfiguredCrix) { user.pw = hashPassword(pw); user.isAdmin = true; }
+    else if (user.username.toLowerCase() === 'crix') user.isAdmin = false;
+    if (!String(user.pw).startsWith('scrypt$')) user.pw = hashPassword(pw);
     // Verificar ban
     if (user.banned) {
       const perm  = user.banned.permanent;
@@ -115,25 +226,41 @@ app.post('/api/login', (req, res) => {
       delete user.banned; saveDB();
     }
     log('LOGIN', username);
-    res.json({ ok:true, user: safeUser(user) });
+    res.json({ ok:true, user: safeUser(user), token: issueSession(user) });
   } catch(e) { res.json({ ok:false, err:e.message }); }
+});
+
+app.get('/api/session', requireAuth, (req, res) => res.json({ ok:true, user:safeUser(req.user) }));
+app.post('/api/logout', requireAuth, (req, res) => {
+  const token = (req.get('authorization') || '').slice(7);
+  delete DB.sessions[tokenHash(token)];
+  saveDB();
+  res.json({ ok:true });
 });
 
 // ── GET usuario ──
 app.get('/api/user/:id', (req, res) => {
   const u = DB.users[req.params.id];
   if (!u) return res.json({ ok:false, err:'No encontrado' });
-  res.json({ ok:true, user: safeUser(u) });
+  res.json({ ok:true, user: readSession(req)?.id === u.id ? safeUser(u) : publicUser(u) });
 });
 
 // ── UPDATE usuario ──
 app.post('/api/user/:id', (req, res) => {
   try {
+    const actor = readSession(req);
+    if (!actor) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+    if (actor.id !== req.params.id && !actor.isAdmin)
+      return res.status(403).json({ ok:false, err:'No podés editar esta cuenta' });
     const u = DB.users[req.params.id];
     if (!u) return res.json({ ok:false });
-    const allowed = ['bio','color','friends','games','visits','following',
-                     'liked','onlineAt','isAdmin','banned','avatar'];
+    const allowed = ['bio','color','games','visits','following','liked','onlineAt','avatar'];
+    if (actor.isAdmin) allowed.push('banned');
     allowed.forEach(k => { if (req.body[k] !== undefined) u[k] = req.body[k]; });
+    if (actor.isAdmin && req.body.isAdmin !== undefined) {
+      u.isAdmin = !!req.body.isAdmin;
+      if (u.isAdmin) u.adminGrantedBy = actor.id; else delete u.adminGrantedBy;
+    }
     DB.users[req.params.id] = u;
     saveDB();
     io.emit('user_updated', { userId: req.params.id });
@@ -143,12 +270,13 @@ app.post('/api/user/:id', (req, res) => {
 
 // ── GET todos los usuarios (sin pw) ──
 app.get('/api/users', (req, res) => {
+  const viewer = readSession(req);
   const out = {};
   for (const [id, u] of Object.entries(DB.users)) {
-    if (u.banned && u.banned.permanent) {
+    if (!viewer?.isAdmin && u.banned && u.banned.permanent) {
       out[id] = { id, username:'Banned User', color:'#333344', banned:true, created:u.created };
     } else {
-      out[id] = safeUser(u);
+      out[id] = viewer?.isAdmin ? safeUser(u) : publicUser(u);
     }
   }
   res.json({ ok:true, users: out });
@@ -156,15 +284,10 @@ app.get('/api/users', (req, res) => {
 
 // ── GET mapas ──
 app.get('/api/maps', (req, res) => {
-  const uid  = req.query.userId;
-  const uObj = uid ? DB.users[uid] : null;
+  const uObj = readSession(req);
   const out  = {};
   for (const [id, m] of Object.entries(DB.maps)) {
-    const priv = m.privacy || 'public';
-    if (priv === 'public')   { out[id]=m; continue; }
-    if (uid && m.authorId === uid) { out[id]=m; continue; }
-    if (uid && priv === 'friends' && uObj && (uObj.friends||[]).includes(m.authorId)) { out[id]=m; continue; }
-    if (uid && priv === 'assigned' && uObj && (m.assignedPlayers||[]).includes(uObj.username)) { out[id]=m; continue; }
+    if (canReadMap(m, uObj)) out[id]=m;
   }
   res.json({ ok:true, maps: out });
 });
@@ -172,9 +295,14 @@ app.get('/api/maps', (req, res) => {
 // ── SAVE mapa ──
 app.post('/api/maps', (req, res) => {
   try {
+    const user = readSession(req);
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para guardar juegos' });
     const m = req.body;
     if (!m || !m.id) return res.json({ ok:false });
-    DB.maps[m.id] = m;
+    const old = DB.maps[m.id];
+    if (old && old.authorId !== user.id && !user.isAdmin)
+      return res.status(403).json({ ok:false, err:'No podés editar este juego' });
+    DB.maps[m.id] = { ...m, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username };
     saveDB();
     io.emit('map_updated', { mapId: m.id });
     res.json({ ok:true });
@@ -183,15 +311,48 @@ app.post('/api/maps', (req, res) => {
 
 // ── DELETE mapa ──
 app.delete('/api/maps/:id', (req, res) => {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para borrar juegos' });
+  const existing = DB.maps[req.params.id];
+  if (!existing) return res.json({ ok:true });
+  if (existing.authorId !== user.id && !user.isAdmin)
+    return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
   delete DB.maps[req.params.id];
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
   res.json({ ok:true });
 });
 
+app.post('/api/maps/:id/like', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map || !canReadMap(map, req.user)) return res.status(404).json({ ok:false });
+  map.likedBy = map.likedBy || [];
+  const index = map.likedBy.indexOf(req.user.id);
+  const liked = index < 0;
+  if (liked) map.likedBy.push(req.user.id); else map.likedBy.splice(index, 1);
+  map.likes = map.likedBy.length;
+  req.user.liked = req.user.liked || [];
+  req.user.liked = liked ? [...new Set([...req.user.liked, map.id])] : req.user.liked.filter(id => id !== map.id);
+  saveDB();
+  io.emit('map_updated', { mapId:map.id });
+  res.json({ ok:true, liked, likes:map.likes });
+});
+
+app.post('/api/maps/:id/play', (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map || !canReadMap(map, readSession(req))) return res.status(404).json({ ok:false });
+  map.plays = (map.plays || 0) + 1;
+  saveDB();
+  io.emit('map_updated', { mapId:map.id });
+  res.json({ ok:true, plays:map.plays });
+});
+
 // ── GET conversaciones de un usuario ──
 app.get('/api/convs/:userId', (req, res) => {
   const uid = req.params.userId;
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+  if (user.id !== uid && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés leer estas conversaciones' });
   const out = {};
   for (const [cid, msgs] of Object.entries(DB.convs)) {
     if (cid.split('_').includes(uid)) out[cid] = msgs;
@@ -203,6 +364,11 @@ app.get('/api/convs/:userId', (req, res) => {
 app.post('/api/convs/:convId', (req, res) => {
   try {
     const { convId } = req.params;
+    const user = readSession(req);
+    const members = convId.split('_');
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+    if (members.length !== 2 || !members.includes(user.id))
+      return res.status(403).json({ ok:false, err:'No pertenecés a esta conversación' });
     const { msg } = req.body;
     if (!msg) return res.json({ ok:false });
     DB.convs[convId] = DB.convs[convId] || [];
@@ -222,10 +388,14 @@ app.post('/api/convs/:convId', (req, res) => {
 // ── SOLICITUDES DE AMISTAD ──
 app.post('/api/friend-request', (req, res) => {
   try {
-    const { fromId, toId } = req.body;
+    const user = readSession(req);
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+    const fromId = user.id;
+    const { toId } = req.body;
     if (!fromId || !toId || fromId === toId) return res.json({ok:false,err:'IDs inválidos'});
     const from = DB.users[fromId]; const to = DB.users[toId];
     if (!from || !to) return res.json({ok:false,err:'Usuario no encontrado'});
+    if ((from.friends || []).includes(toId)) return res.status(409).json({ok:false,err:'Ya son amigos'});
     // No duplicar solicitudes
     to.friendRequests_recv = to.friendRequests_recv || [];
     from.friendRequests_sent = from.friendRequests_sent || [];
@@ -234,17 +404,21 @@ app.post('/api/friend-request', (req, res) => {
     DB.users[fromId] = from; DB.users[toId] = to; saveDB();
     // Notificar en tiempo real si está online
     const toOnline = onlineUsers[toId];
-    if (toOnline) io.to(toOnline.socketId).emit('friend_request', { from: { id:from.id, username:from.username, color:from.color } });
+    if (toOnline) io.to(toOnline.socketId).emit('friend_request', { from:from.id, fromName:from.username });
     res.json({ok:true});
   } catch(e) { res.json({ok:false,err:e.message}); }
 });
 
 app.post('/api/friend-accept', (req, res) => {
   try {
-    const { fromId, toId } = req.body; // from=quien mandó, to=quien acepta
-    if (!fromId || !toId) return res.json({ok:false,err:'IDs inválidos'});
+    const user = readSession(req);
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+    const { fromId } = req.body; // from=quien mandó; el usuario autenticado acepta.
+    const toId = user.id;
+    if (!fromId) return res.json({ok:false,err:'IDs inválidos'});
     const from = DB.users[fromId]; const to = DB.users[toId];
     if (!from || !to) return res.json({ok:false,err:'Usuario no encontrado'});
+    if (!(to.friendRequests_recv || []).includes(fromId)) return res.status(403).json({ok:false,err:'No hay una solicitud pendiente'});
     // Agregar como amigos mutuamente
     from.friends = from.friends||[]; to.friends = to.friends||[];
     if (!from.friends.includes(toId)) from.friends.push(toId);
@@ -255,7 +429,7 @@ app.post('/api/friend-accept', (req, res) => {
     DB.users[fromId]=from; DB.users[toId]=to; saveDB();
     // Notificar a ambos
     const fromOnline = onlineUsers[fromId];
-    if (fromOnline) io.to(fromOnline.socketId).emit('friend_accepted', { by: { id:to.id, username:to.username, color:to.color } });
+    if (fromOnline) io.to(fromOnline.socketId).emit('friend_accepted', { from:to.id, fromName:to.username });
     io.emit('user_updated', {userId:fromId}); io.emit('user_updated', {userId:toId});
     res.json({ok:true});
   } catch(e) { res.json({ok:false,err:e.message}); }
@@ -263,7 +437,12 @@ app.post('/api/friend-accept', (req, res) => {
 
 app.post('/api/friend-reject', (req, res) => {
   try {
-    const { fromId, toId } = req.body;
+    const user = readSession(req);
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+    const { fromId } = req.body;
+    const toId = user.id;
+    if (!(DB.users[toId]?.friendRequests_recv || []).includes(fromId))
+      return res.status(403).json({ok:false,err:'No hay una solicitud pendiente'});
     const from = DB.users[fromId]; const to = DB.users[toId];
     if (from) { from.friendRequests_sent=(from.friendRequests_sent||[]).filter(id=>id!==toId); DB.users[fromId]=from; }
     if (to)   { to.friendRequests_recv=(to.friendRequests_recv||[]).filter(id=>id!==fromId);   DB.users[toId]=to;   }
@@ -274,7 +453,8 @@ app.post('/api/friend-reject', (req, res) => {
 
 // ── VIDEOS ──
 app.get('/api/videos', (req, res) => {
-  const vids = DB.videos || [];
+  const user = readSession(req);
+  const vids = (DB.videos || []).filter(v => canReadVideo(v, user));
   // No devolver los datos binarios en el listado (demasiado pesado)
   const safe = vids.map(v => ({ ...v, data: v.data ? '[data]' : null }));
   res.json({ ok: true, videos: safe });
@@ -282,64 +462,113 @@ app.get('/api/videos', (req, res) => {
 
 app.get('/api/videos/:id/data', (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
-  if (!v) return res.json({ ok: false });
+  if (!v || !canReadVideo(v, readSession(req))) return res.status(404).json({ ok: false });
   res.json({ ok: true, data: v.data, thumb: v.thumb });
 });
 
 app.post('/api/videos', (req, res) => {
   try {
+    const user = readSession(req);
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
     const v = req.body;
     if (!v || !v.id || !v.title) return res.json({ ok: false, err: 'Faltan campos' });
     DB.videos = DB.videos || [];
     // Reemplazar si ya existe
     const idx = DB.videos.findIndex(x => x.id === v.id);
-    if (idx >= 0) DB.videos[idx] = v; else DB.videos.push(v);
+    if (idx >= 0 && DB.videos[idx].authorId !== user.id && !user.isAdmin)
+      return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
+    const privacy = ['public','private'].includes(v.privacy) ? v.privacy : 'public';
+    const old = idx >= 0 ? DB.videos[idx] : null;
+    const saved = { ...(old || {}), ...v, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy };
+    if (old?.data && (!v.data || v.data === '[data]')) saved.data = old.data;
+    if (idx >= 0) DB.videos[idx] = saved; else DB.videos.push(saved);
     saveDB();
-    io.emit('video_new', { id: v.id, title: v.title, authorName: v.authorName, cat: v.cat, thumb: v.thumb, created: v.created });
+    if (saved.privacy === 'public')
+      io.emit('video_new', { id: saved.id, title: saved.title, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
     res.json({ ok: true });
   } catch(e) { res.json({ ok: false, err: e.message }); }
 });
 
 app.post('/api/videos/:id/like', (req, res) => {
-  const { userId } = req.body;
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
   const v = (DB.videos || []).find(x => x.id === req.params.id);
-  if (!v) return res.json({ ok: false });
+  if (!v || !canReadVideo(v, user)) return res.status(404).json({ ok: false });
   v.likes = v.likes || [];
-  const idx = v.likes.indexOf(userId);
-  if (idx === -1) v.likes.push(userId); else v.likes.splice(idx, 1);
+  const idx = v.likes.indexOf(user.id);
+  const liked = idx === -1;
+  if (liked) v.likes.push(user.id); else v.likes.splice(idx, 1);
   saveDB();
-  res.json({ ok: true, likes: v.likes.length });
+  res.json({ ok: true, liked, likes: v.likes.length });
+});
+
+app.post('/api/videos/:id/view', (req, res) => {
+  const video = (DB.videos || []).find(x => x.id === req.params.id);
+  if (!video || !canReadVideo(video, readSession(req))) return res.status(404).json({ ok:false });
+  video.views = (video.views || 0) + 1;
+  saveDB();
+  res.json({ ok:true, views:video.views });
 });
 
 app.post('/api/videos/:id/comment', (req, res) => {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
   const v = (DB.videos || []).find(x => x.id === req.params.id);
-  if (!v) return res.json({ ok: false });
+  if (!v || !canReadVideo(v, user)) return res.status(404).json({ ok: false });
   v.comments = v.comments || [];
-  v.comments.push(req.body.comment);
+  const text = String(req.body.comment?.text || req.body.comment || '').trim().slice(0, 1000);
+  if (!text) return res.status(400).json({ ok:false, err:'El comentario está vacío' });
+  const comment = { id:`c${crypto.randomUUID()}`, authorId:user.id, authorName:user.username, text, created:new Date().toISOString() };
+  v.comments.push(comment);
   saveDB();
-  res.json({ ok: true });
+  res.json({ ok: true, comment });
+});
+
+app.delete('/api/videos/:id', (req, res) => {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+  const video = (DB.videos || []).find(v => v.id === req.params.id);
+  if (!video) return res.json({ ok:true });
+  if (video.authorId !== user.id && !user.isAdmin)
+    return res.status(403).json({ ok:false, err:'No podés borrar este video' });
+  DB.videos = DB.videos.filter(v => v.id !== req.params.id);
+  saveDB();
+  if ((video.privacy || 'public') === 'public') io.emit('video_deleted', { id:req.params.id });
+  res.json({ ok:true });
 });
 
 // ── POSTS (Foros) ──
 app.get('/api/posts', (req, res) => {
-  const posts = (DB.posts || []).slice(-200); // últimos 200
+  const posts = (DB.posts || []).slice(0, 200); // últimas 200
   res.json({ ok: true, posts });
 });
 
 app.post('/api/posts', (req, res) => {
   try {
+    const user = readSession(req);
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
     const p = req.body;
     if (!p || !p.id) return res.json({ ok: false });
     DB.posts = DB.posts || [];
-    DB.posts.unshift(p);
+    const index = DB.posts.findIndex(existing => existing.id === p.id);
+    const previous = index >= 0 ? DB.posts[index] : null;
+    if (previous && previous.authorId !== user.id && !user.isAdmin)
+      return res.status(403).json({ ok:false, err:'No podés editar esta publicación' });
+    const savedPost = { ...(previous || {}), ...p, authorId:previous?.authorId || user.id, authorName:previous?.authorName || user.username, privacy:'public' };
+    if (index >= 0) DB.posts[index] = savedPost; else DB.posts.unshift(savedPost);
     if (DB.posts.length > 500) DB.posts = DB.posts.slice(0, 500);
     saveDB();
-    io.emit('new_post', { id: p.id, authorId: p.authorId, authorName: p.authorName, text: (p.text||'').substring(0,100) });
+    io.emit('new_post', { id: savedPost.id, authorId: savedPost.authorId, authorName: savedPost.authorName, text: (savedPost.text||'').substring(0,100) });
     res.json({ ok: true });
   } catch(e) { res.json({ ok: false, err: e.message }); }
 });
 
 app.delete('/api/posts/:id', (req, res) => {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+  const post = (DB.posts || []).find(p => p.id === req.params.id);
+  if (post && post.authorId !== user.id && !user.isAdmin)
+    return res.status(403).json({ ok:false, err:'No podés borrar esta publicación' });
   DB.posts = (DB.posts || []).filter(p => p.id !== req.params.id);
   saveDB();
   io.emit('post_deleted', { id: req.params.id });
@@ -347,23 +576,30 @@ app.delete('/api/posts/:id', (req, res) => {
 });
 
 app.post('/api/posts/:id/like', (req, res) => {
-  const { userId } = req.body;
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
   const p = (DB.posts || []).find(x => x.id === req.params.id);
   if (!p) return res.json({ ok: false });
   p.likes = p.likes || [];
-  const idx = p.likes.indexOf(userId);
-  if (idx === -1) p.likes.push(userId); else p.likes.splice(idx, 1);
+  const idx = p.likes.indexOf(user.id);
+  const liked = idx === -1;
+  if (liked) p.likes.push(user.id); else p.likes.splice(idx, 1);
   saveDB();
-  res.json({ ok: true, likes: p.likes.length });
+  res.json({ ok: true, liked, likes: p.likes.length });
 });
 
 app.post('/api/posts/:id/reply', (req, res) => {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
   const p = (DB.posts || []).find(x => x.id === req.params.id);
   if (!p) return res.json({ ok: false });
   p.replies = p.replies || [];
-  p.replies.push(req.body.reply);
+  const text = String(req.body.reply?.text || req.body.reply || '').trim().slice(0, 1000);
+  if (!text) return res.status(400).json({ ok:false, err:'La respuesta está vacía' });
+  const reply = { id:`r${crypto.randomUUID()}`, authorId:user.id, authorName:user.username, text, created:new Date().toISOString() };
+  p.replies.push(reply);
   saveDB();
-  res.json({ ok: true });
+  res.json({ ok: true, reply });
 });
 
 // ── STATUS ──
@@ -404,33 +640,35 @@ io.on('connection', socket => {
     const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
     if (target) target.emit('call_end', { from });
   });
-  socket.on('friend_request', ({ to, from, fromName }) => {
-    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
-    if (target) target.emit('friend_request', { from, fromName });
-  });
-  socket.on('friend_accepted', ({ to, from, fromName }) => {
-    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
-    if (target) target.emit('friend_accepted', { from, fromName });
-  });
+  // Las solicitudes y aceptaciones se persisten por API. Ignoramos eventos
+  // homónimos del cliente para impedir notificaciones con identidad falsificada.
   socket.on('msg', ({ convId, msg }) => {
+    const user = socket.data.user;
+    if (!user || !convId || !convId.split('_').includes(user.id)) return;
     // Reenviar al destinatario si está conectado
     const [uid1, uid2] = convId.split('_');
-    const targetId = uid1 === socket.userId ? uid2 : uid1;
+    const targetId = uid1 === user.id ? uid2 : uid1;
     const target = Object.values(io.sockets.sockets).find(s => s.userId === targetId);
     if (target) target.emit('msg_incoming', { convId, msg });
   });
   socket.on('user_online', ({ userId, username, color }) => {
-    if (!userId) return;
-    onlineUsers[userId] = { socketId: socket.id, username, color };
-    connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color };
+    const user = socket.data.user;
+    if (!user || user.id !== userId) return;
+    onlineUsers[user.id] = { socketId: socket.id, username:user.username, color:user.color };
+    connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId:user.id, username:user.username, color:user.color };
     // Persistir onlineAt en DB para que el cliente lo vea
-    if (DB.users[userId]) { DB.users[userId].onlineAt = Date.now(); }
-    io.emit('online_update', { userId, online:true });
+    DB.users[user.id].onlineAt = Date.now();
+    io.emit('online_update', { userId:user.id, online:true });
   });
 
   socket.on('join_game', data => {
-    const { mapId, userId, username, color } = data;
-    if (!mapId || !username) return;
+    const { mapId } = data;
+    const user = socket.data.user;
+    const storedMap = DB.maps[mapId];
+    if (!mapId || (storedMap && !canReadMap(storedMap, user))) return;
+    const userId = user?.id || socket.id;
+    const username = user?.username || String(data?.username || 'Invitado');
+    const color = user?.color || '#5b8def';
     const prev = connSockets[socket.id];
     if (prev?.mapId && prev.mapId !== mapId) leaveRoom(socket, prev.mapId);
     const room = getRoom(mapId);
@@ -482,7 +720,7 @@ io.on('connection', socket => {
 
   // Kick/ban en tiempo real
   socket.on('kick_user', ({ userId, banned }) => {
-    if (!userId) return;
+    if (!socket.data.user?.isAdmin || !userId) return;
     const target = onlineUsers[userId];
     if (target) {
       io.to(target.socketId).emit('you_are_banned', { banned });
@@ -496,7 +734,7 @@ io.on('connection', socket => {
   });
 
   socket.on('unban_user', ({ userId }) => {
-    if (!userId) return;
+    if (!socket.data.user?.isAdmin || !userId) return;
     if (DB.users[userId]) {
       delete DB.users[userId].banned;
       saveDB();
