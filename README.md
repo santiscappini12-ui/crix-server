@@ -4,6 +4,8 @@ Crix es una plataforma web social de juegos y creación con cuentas compartidas,
 
 ## Ejecutar localmente
 
+Se necesita Node.js 22 o 24. La instalación incluye `isolated-vm`, que compila un módulo nativo; en Windows puede requerir las herramientas de compilación de C++ de Visual Studio.
+
 ```bash
 npm install
 npm start
@@ -50,11 +52,34 @@ Crix no agrega filtros de moderación de contenido. La privacidad de las publica
 
 **Crix Hub** incluye una escena 3D con Explorer filtrable, inspector de propiedades, selección, movimiento, rotación, escala, ajuste a cuadrícula, historial de deshacer/rehacer, atajos, duplicación, guardado y prueba del juego con retorno directo al editor. También permite importar geometría `.obj` (hasta 2 MB y 60.000 vértices expandidos); la geometría se guarda dentro del proyecto. Los materiales y texturas externos del OBJ no se importan.
 
-Los NPC incluidos ahora se construyen como humanoides 3D con articulaciones básicas y animación procedural. Esto no equivale a un sistema completo de huesos, rigging ni editor de animación.
+El lenguaje con ejecución completa es **JavaScript**. En el modo **Probar** del editor, los scripts corren en un Web Worker local. En una partida publicada, los `Script` corren una sola vez por instancia en `script-runner.js`, un proceso aparte con un isolate de V8; los `LocalScript` siguen corriendo en cada navegador. `onStart(player, players)` inicia el script, `onUpdate(dt, player, players)` corre hasta 20 veces por segundo mientras hay jugadores y `onStop(player, players)` se llama al cerrar la instancia. Los cambios de mundo del servidor se validan, se replican a todos los jugadores de esa instancia y se envían como estado inicial a quienes entran más tarde. Partidas distintas mantienen estados distintos. `ModuleScript` se carga con `require("Nombre")` o `require("id")`; `task.wait(segundos)` y `task.delay(segundos, fn)` permiten programar trabajo dentro del ciclo del servidor.
 
-El editor de código permite **CrixScript** o **JavaScript**, con eventos `onStart`, `onUpdate` y `onStop`. `onStart` se ejecuta cuando empieza el juego; los otros eventos se ejecutan manualmente desde el editor. Los scripts se aíslan en un Web Worker y exponen una API de lectura básica para `workspace`.
+La API disponible incluye:
 
-Crix Hub amplía el editor propio de Crix; todavía no reemplaza Roblox Studio o Unity. No incluye todos sus motores de física, rigging, animación, formatos 3D ni intérpretes para otros lenguajes, binario o ensamblador.
+```js
+const id = game.createPart({
+  name: "Plataforma",
+  type: "Block", // Block, Sphere, Cylinder, Wedge o TrussPart
+  position: { x: 0, y: 8, z: 0 },
+  size: { x: 4, y: 1, z: 4 },
+  color: "#5b8def",
+  anchored: false,
+  canCollide: true
+});
+
+game.updatePart(id, { anchored: true, canCollide: false });
+game.destroyPart(id);
+const player = game.getPlayer();
+const players = game.getPlayers();
+const parts = workspace.getChildren();
+const ground = workspace.findFirstChild("Suelo");
+```
+
+Las piezas con `anchored: false` reciben gravedad del servidor; las piezas con `canCollide: false` atraviesan el escenario y el jugador. Las posiciones de piezas se sincronizan con los demás jugadores. La física actual resuelve gravedad y colisiones verticales sencillas; todavía no es un sistema físico completo. El proceso limita cada instancia a 8 `Script`, 500 piezas, 16 MB de memoria de isolate como referencia, 25 ms por evento y 20 instancias con scripts activas por proceso. Cada callback tiene presupuesto de CPU para que un bucle infinito no congele el servidor web.
+
+**Límites actuales:** JavaScript es el lenguaje con soporte completo. CrixScript conserva una conversión básica de sintaxis tipo Lua; no es un intérprete completo. Los `Script` sí se ejecutan en el servidor y replican el mundo de su instancia; `LocalScript` es local. `ServerScriptService` y `LocalScriptService` distinguen el tipo de ejecución, aunque la jerarquía de servicios todavía es básica. `isolated-vm` limita memoria y tiempo, pero ejecutar código público requiere mantener Node y el módulo nativo actualizados; para alojar scripts de personas desconocidas a gran escala conviene correr `script-runner.js` en un contenedor sin privilegios separado del servidor web. Esto todavía no incluye todas las capacidades de Roblox Studio o Unity, ni intérpretes para todos los lenguajes, binario o ensamblador.
+
+Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor de rigging, huesos ni animación.
 
 ## API principal
 
