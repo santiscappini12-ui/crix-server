@@ -254,6 +254,10 @@ app.post('/api/user/:id', (req, res) => {
       return res.status(403).json({ ok:false, err:'No podés editar esta cuenta' });
     const u = DB.users[req.params.id];
     if (!u) return res.json({ ok:false });
+    if (req.body.avatar !== undefined && req.body.avatar !== '' &&
+        (typeof req.body.avatar !== 'string' || req.body.avatar.length > 180000 ||
+         !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(req.body.avatar)))
+      return res.status(400).json({ ok:false, err:'La foto debe ser JPG, PNG o WebP y no superar el límite permitido' });
     const allowed = ['bio','color','games','visits','following','liked','onlineAt','avatar'];
     if (actor.isAdmin) allowed.push('banned');
     allowed.forEach(k => { if (req.body[k] !== undefined) u[k] = req.body[k]; });
