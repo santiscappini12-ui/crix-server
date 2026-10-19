@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "description": "Crix — Servidor Multiplayer Node.js + Socket.IO",
   "main": "server.js",
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
   "scripts": {
-    "start": "node server.js",
-    "dev":   "node --watch server.js"
+    "start": "node --no-node-snapshot server.js",
+    "dev":   "node --no-node-snapshot --watch server.js"
   },
   "dependencies": {
     "express":   "^5.2.1",
+    "isolated-vm": "^5.0.4",
     "socket.io": "^4.8.3"
   }
 }
