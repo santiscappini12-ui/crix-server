@@ -31,11 +31,15 @@ En un alojamiento que borra el disco local al reiniciar, montá un volumen persi
 - Los videos cargados desde la interfaz tienen un límite de 30 MB.
 - La foto de perfil se cambia desde el perfil propio. Crix la recorta a 256 × 256, la comprime y la muestra en perfiles públicos y listas de usuarios; se guarda junto a la cuenta en el servidor.
 
-## Editor y scripting
+## Crix Hub y scripting
 
-El editor permite elegir **CrixScript** o **JavaScript** y asociar un script a `onStart`, `onUpdate` o `onStop`. Los scripts `onStart` se ejecutan al iniciar un juego; los otros eventos se pueden ejecutar desde el editor. El entorno de ejecución trabaja en un Web Worker y expone una API de lectura básica para `workspace`.
+**Crix Hub** incluye una escena 3D con Explorer filtrable, inspector de propiedades, selección, movimiento, rotación, escala, ajuste a cuadrícula, historial de deshacer/rehacer, atajos, duplicación, guardado y prueba del juego con retorno directo al editor. También permite importar geometría `.obj` (hasta 2 MB y 60.000 vértices expandidos); la geometría se guarda dentro del proyecto. Los materiales y texturas externos del OBJ no se importan.
 
-No incluye intérpretes para todos los lenguajes, binario o ensamblador, ni pretende sustituir el motor y las herramientas de Unity o Roblox Studio. Para agregar esos lenguajes hacen falta intérpretes o compiladores específicos y ampliar el motor.
+Los NPC incluidos ahora se construyen como humanoides 3D con articulaciones básicas y animación procedural. Esto no equivale a un sistema completo de huesos, rigging ni editor de animación.
+
+El editor de código permite **CrixScript** o **JavaScript**, con eventos `onStart`, `onUpdate` y `onStop`. `onStart` se ejecuta cuando empieza el juego; los otros eventos se ejecutan manualmente desde el editor. Los scripts se aíslan en un Web Worker y exponen una API de lectura básica para `workspace`.
+
+Crix Hub amplía el editor propio de Crix; todavía no reemplaza Roblox Studio o Unity. No incluye todos sus motores de física, rigging, animación, formatos 3D ni intérpretes para otros lenguajes, binario o ensamblador.
 
 ## API principal
 
