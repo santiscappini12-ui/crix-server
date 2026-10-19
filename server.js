@@ -87,11 +87,14 @@ const connSockets    = {};   // socketId → { userId, username, color, mapId }
 const onlineUsers    = {};   // userId   → { socketId, username, color }
 const stats = { start: Date.now(), total: 0 };
 
-function getRoom(mapId) {
-  if (!rooms[mapId]) rooms[mapId] = { players:{}, chat:[] };
-  return rooms[mapId];
+function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId]); }
+function gameChannel(mapId, instanceId) { return `game:${encodeURIComponent(mapId)}:${instanceId}`; }
+function getRoom(mapId, instanceId) {
+  const key = roomKey(mapId, instanceId);
+  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[] };
+  return rooms[key];
 }
-function roomPlayers(mapId) { return Object.values(getRoom(mapId).players); }
+function roomPlayers(room) { return Object.values(room.players); }
 function log(t,d) { console.log(`[${new Date().toLocaleTimeString()}] ${t}:`, d); }
 function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,...s}=u; return s; }
 function publicUser(u) {
@@ -293,10 +296,23 @@ app.get('/api/users', (req, res) => {
   const viewer = readSession(req);
   const out = {};
   for (const [id, u] of Object.entries(DB.users)) {
+    const presence = onlineUsers[id];
+    const activeMap = presence?.mapId ? DB.maps[presence.mapId] : null;
+    const activeRoom = presence?.instanceId ? rooms[roomKey(presence.mapId, presence.instanceId)] : null;
+    const canSeeGame = !!presence?.instanceId && !!activeMap && (viewer?.id === id || viewer?.isAdmin || canReadMap(activeMap, viewer));
     if (!viewer?.isAdmin && u.banned && u.banned.permanent) {
       out[id] = { id, username:'Banned User', color:'#333344', banned:true, created:u.created };
     } else {
-      out[id] = viewer?.isAdmin ? safeUser(u) : publicUser(u);
+      out[id] = {
+        ...(viewer?.isAdmin ? safeUser(u) : publicUser(u)),
+        online: !!presence,
+        ...(canSeeGame ? {
+          currentGameId: presence.mapId,
+          currentInstanceId: presence.instanceId,
+          currentGameName: activeMap?.name || presence.mapId,
+          currentInstancePlayers: activeRoom ? Object.keys(activeRoom.players).length : 1,
+        } : {}),
+      };
     }
   }
   res.json({ ok:true, users: out });
@@ -310,6 +326,33 @@ app.get('/api/maps', (req, res) => {
     if (canReadMap(m, uObj)) out[id]=m;
   }
   res.json({ ok:true, maps: out });
+});
+
+// ── PARTIDAS ACTIVAS (cada instancia es una sala separada) ──
+app.get('/api/maps/:id/instances', (req, res) => {
+  const user = readSession(req);
+  const map = DB.maps[req.params.id];
+  if (!map || !canReadMap(map, user)) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  const instances = Object.values(rooms)
+    .filter(room => room.mapId === req.params.id && Object.keys(room.players).length > 0)
+    .map(room => ({
+      id: room.instanceId,
+      mapId: room.mapId,
+      startedAt: room.createdAt,
+      playerCount: Object.keys(room.players).length,
+      players: Object.values(room.players).map(player => ({ id:player.userId, username:player.username })),
+    }))
+    .sort((a,b) => b.playerCount-a.playerCount || a.startedAt-b.startedAt);
+  res.json({ ok:true, instances });
+});
+
+// Reservar una sala nueva. Jugar en otra instancia nunca mezcla a sus jugadores.
+app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map || !canReadMap(map, req.user)) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  const instanceId = crypto.randomUUID();
+  const room = getRoom(req.params.id, instanceId);
+  res.status(201).json({ ok:true, instance:{ id:room.instanceId, mapId:room.mapId, startedAt:room.createdAt } });
 });
 
 // ── SAVE mapa ──
@@ -714,7 +757,7 @@ io.on('connection', socket => {
   socket.on('user_online', ({ userId, username, color }) => {
     const user = socket.data.user;
     if (!user || user.id !== userId) return;
-    onlineUsers[user.id] = { socketId: socket.id, username:user.username, color:user.color };
+    onlineUsers[user.id] = { ...(onlineUsers[user.id]||{}), socketId: socket.id, username:user.username, color:user.color };
     connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId:user.id, username:user.username, color:user.color };
     // Persistir onlineAt en DB para que el cliente lo vea
     DB.users[user.id].onlineAt = Date.now();
@@ -722,56 +765,65 @@ io.on('connection', socket => {
   });
 
   socket.on('join_game', data => {
-    const { mapId } = data;
+    const mapId = String(data?.mapId || '').slice(0,120);
+    const instanceId = String(data?.instanceId || '').slice(0,80);
     const user = socket.data.user;
     const storedMap = DB.maps[mapId];
-    if (!mapId || (storedMap && !canReadMap(storedMap, user))) return;
+    if (!mapId || !instanceId || !storedMap || !canReadMap(storedMap, user)) {
+      socket.emit('join_error', { message:'No tenés acceso a esta partida o ya no existe.' });
+      return;
+    }
     const userId = user?.id || socket.id;
     const username = user?.username || String(data?.username || 'Invitado');
     const color = user?.color || '#5b8def';
     const prev = connSockets[socket.id];
-    if (prev?.mapId && prev.mapId !== mapId) leaveRoom(socket, prev.mapId);
-    const room = getRoom(mapId);
+    if (prev?.mapId && (prev.mapId !== mapId || prev.instanceId !== instanceId)) leaveRoom(socket, prev.mapId, prev.instanceId);
+    const room = getRoom(mapId, instanceId);
+    const channel = gameChannel(mapId, instanceId);
     const pd = {
       socketId: socket.id, userId: userId||socket.id,
       username: username.substring(0,30), color: color||'#5b8def',
-      x:0,y:3,z:0, ry:0, anim:0, moving:false, mapId, joinedAt:Date.now(),
+      x:0,y:3,z:0, ry:0, anim:0, moving:false, mapId, instanceId, joinedAt:Date.now(),
     };
     room.players[socket.id] = pd;
-    connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color, mapId };
-    socket.join('map_'+mapId);
-    log('JOIN', `${username} → ${mapId}`);
+    connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color, mapId, instanceId };
+    socket.join(channel);
+    if (user) {
+      onlineUsers[user.id] = { ...(onlineUsers[user.id]||{}), socketId:socket.id, username, color, mapId, instanceId };
+      io.emit('online_update', { userId:user.id, online:true, mapId, instanceId });
+    }
+    log('JOIN', `${username} → ${mapId} / ${instanceId}`);
     socket.emit('room_state', {
-      players: roomPlayers(mapId).filter(p=>p.socketId!==socket.id),
-      chat: room.chat.slice(-30), mapId,
+      players: roomPlayers(room).filter(p=>p.socketId!==socket.id),
+      chat: room.chat.slice(-30), mapId, instanceId,
     });
-    socket.to('map_'+mapId).emit('player_joined', pd);
-    socket.emit('join_ack', { socketId:socket.id, mapId, playerCount:Object.keys(room.players).length });
+    socket.to(channel).emit('player_joined', pd);
+    socket.emit('join_ack', { socketId:socket.id, mapId, instanceId, playerCount:Object.keys(room.players).length });
   });
 
   socket.on('player_move', data => {
     const meta = connSockets[socket.id]; if (!meta?.mapId) return;
-    const room = rooms[meta.mapId]; if (!room?.players[socket.id]) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id]) return;
     const p = room.players[socket.id];
     p.x=data.x??p.x; p.y=data.y??p.y; p.z=data.z??p.z;
     p.ry=data.ry??p.ry; p.anim=data.anim??p.anim; p.moving=data.moving??p.moving;
-    socket.to('map_'+meta.mapId).emit('player_moved',
+    socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
       { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving });
   });
 
   socket.on('game_chat', data => {
     const meta = connSockets[socket.id]; if (!meta?.mapId||!data?.text) return;
     const msg = { socketId:socket.id, username:meta.username, text:String(data.text).slice(0,200), type:'chat' };
-    const room = getRoom(meta.mapId);
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room) return;
     room.chat.push({...msg, time:new Date().toISOString()});
     if (room.chat.length>100) room.chat.shift();
-    io.to('map_'+meta.mapId).emit('game_chat', msg);
+    io.to(gameChannel(meta.mapId, meta.instanceId)).emit('game_chat', msg);
   });
 
   socket.on('ping_req', ts => socket.emit('pong_res', ts));
 
   socket.on('leave_game', () => {
-    const meta = connSockets[socket.id]; if (meta?.mapId) leaveRoom(socket, meta.mapId);
+    const meta = connSockets[socket.id]; if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
   });
 
   socket.on('get_online_users', () => {
@@ -808,36 +860,47 @@ io.on('connection', socket => {
 
   socket.on('disconnect', () => {
     const meta = connSockets[socket.id];
-    if (meta?.mapId) leaveRoom(socket, meta.mapId);
+    if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
     if (meta?.userId) {
-      delete onlineUsers[meta.userId];
-      if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
-      io.emit('online_update', { userId:meta.userId, online:false });
+      const presence = onlineUsers[meta.userId];
+      if (presence?.socketId === socket.id) {
+        delete onlineUsers[meta.userId];
+        if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
+        io.emit('online_update', { userId:meta.userId, online:false });
+      }
     }
     delete connSockets[socket.id];
   });
 });
 
-function leaveRoom(socket, mapId) {
-  const room = rooms[mapId]; if (!room) return;
+function leaveRoom(socket, mapId, instanceId) {
+  const room = rooms[roomKey(mapId, instanceId)]; if (!room) return;
+  const channel = gameChannel(mapId, instanceId);
   if (room.players[socket.id]) {
-    socket.to('map_'+mapId).emit('player_left', { socketId:socket.id });
+    socket.to(channel).emit('player_left', { socketId:socket.id });
     delete room.players[socket.id];
   }
-  socket.leave('map_'+mapId);
-  if (connSockets[socket.id]) connSockets[socket.id].mapId = null;
+  socket.leave(channel);
+  const meta = connSockets[socket.id];
+  if (meta) { meta.mapId = null; meta.instanceId = null; }
+  if (meta?.userId && onlineUsers[meta.userId]?.socketId === socket.id) {
+    delete onlineUsers[meta.userId].mapId;
+    delete onlineUsers[meta.userId].instanceId;
+    io.emit('online_update', { userId:meta.userId, online:true });
+  }
 }
 
 // Limpiar zombies cada 30s
 setInterval(() => {
-  for (const [mapId, room] of Object.entries(rooms)) {
+  for (const [key, room] of Object.entries(rooms)) {
     for (const sid of Object.keys(room.players)) {
       const s = io.sockets.sockets.get(sid);
       if (!s||!s.connected) {
         delete room.players[sid];
-        io.to('map_'+mapId).emit('player_left', { socketId:sid });
+        io.to(gameChannel(room.mapId, room.instanceId)).emit('player_left', { socketId:sid });
       }
     }
+    if (!Object.keys(room.players).length && Date.now()-room.createdAt > 30*60*1000) delete rooms[key];
   }
 }, 30000);
 
