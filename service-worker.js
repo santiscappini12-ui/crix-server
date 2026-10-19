@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v3';
+const CACHE_NAME = 'crix-shell-v4';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg'];
 
 self.addEventListener('install', event => {
