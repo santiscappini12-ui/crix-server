@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v4';
+const CACHE_NAME = 'crix-shell-v5';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg'];
 
 self.addEventListener('install', event => {
@@ -21,10 +21,14 @@ self.addEventListener('fetch', event => {
 
   if (url.pathname === '/') {
     event.respondWith(
-      fetch(request).then(response => {
-        if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
-        return response;
-      }).catch(() => caches.match(request))
+      caches.open(CACHE_NAME).then(cache =>
+        fetch(request).then(response => {
+          if (!response.ok) return response;
+          // Clone before returning the response to the page; afterward its body may be consumed.
+          const cachedResponse = response.clone();
+          return cache.put(request, cachedResponse).then(() => response, () => response);
+        }).catch(() => cache.match(request))
+      )
     );
     return;
   }
