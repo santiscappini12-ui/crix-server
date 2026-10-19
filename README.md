@@ -13,20 +13,26 @@ Abrí `http://localhost:3000`.
 
 ## Cuentas y almacenamiento
 
-Las cuentas se comparten entre dispositivos cuando se conectan al mismo servidor público de Crix. Las contraseñas se guardan con hash scrypt y la sesión dura 30 días. Las cuentas locales anteriores se pueden migrar iniciando sesión desde el navegador donde están guardadas.
+Las cuentas son globales para quienes usan la misma plataforma y dominio público de Crix; no dependen del dispositivo. Las contraseñas se guardan con hash scrypt y la sesión dura 30 días. Las cuentas locales anteriores se pueden migrar iniciando sesión desde el navegador donde están guardadas.
 
 Para habilitar la cuenta administrativa `Crix`, configurá `CRIX_ADMIN_PASSWORD` como secreto del entorno y registrá o iniciá sesión con el nombre `Crix` y esa contraseña. Es necesario configurar el secreto antes de crear la cuenta.
 
 Los datos se guardan en un archivo JSON. `CRIX_DATA_FILE` permite elegir la ruta del archivo; si se omite, Crix usa `crix_data.json` junto al servidor.
 
-En un alojamiento que borra el disco local al reiniciar, montá un volumen persistente y configurá `CRIX_DATA_FILE` dentro de ese volumen. Todos los usuarios que visiten el mismo dominio de Crix comparten el catálogo público; no se replica automáticamente entre instalaciones o dominios independientes. Sin almacenamiento persistente, ningún cambio de código puede garantizar que cuentas, juegos o medios sobrevivan al reemplazo del servidor.
+En un alojamiento que borra el disco local al reiniciar, montá un volumen persistente y configurá `CRIX_DATA_FILE` dentro de ese volumen. El catálogo y las cuentas se comparten globalmente dentro de la plataforma que use ese almacenamiento y dominio; instalaciones independientes no se sincronizan por arte de magia. Sin almacenamiento persistente, ningún cambio de código puede garantizar que cuentas, juegos o medios sobrevivan al reemplazo del servidor.
+
+## Plataforma global y servidores de juego
+
+La plataforma comparte cuentas, juegos publicados y presencia de amigos. Cada vez que alguien toca **Jugar**, Crix crea una instancia de partida separada con un identificador propio. Los jugadores de una instancia no se mezclan con los de otra. El perfil de un amigo muestra el juego y la instancia pública a la que está conectado; **Unirme a su partida** abre ese juego y conecta a la misma instancia, aunque sea diferente del juego que estabas mirando. En la ficha de un juego también se pueden consultar y abrir otras instancias activas. Las partidas privadas solo revelan su presencia a personas autorizadas.
+
+En esta versión las instancias son salas separadas coordinadas por el proceso Node.js de Crix. No significa que todos jueguen en una sola sala. Para repartir salas entre varias máquinas físicas a gran escala, la plataforma todavía necesita un coordinador compartido y almacenamiento global con soporte para varios procesos; el repositorio no configura esa infraestructura por sí solo.
 
 ## Publicación y privacidad
 
-- Los juegos y mapas son públicos por defecto y se pueden limitar a amigos, usuarios asignados o solo al creador.
+- Los juegos y mapas son públicos por defecto y se pueden limitar a amigos, usuarios asignados o solo al creador. Todo lo público aparece en el catálogo global de Crix para cualquier cuenta, sin importar el país ni la instancia de juego.
 - Las apps creadas en Crix se guardan como proyectos HTML y usan los mismos ajustes de privacidad y publicación que los juegos.
-- Los videos pueden ser públicos o privados. El video se entrega a través de la API con la misma comprobación de visibilidad que su ficha.
-- El catálogo de juegos muestra las creaciones públicas en páginas sucesivas; el directorio incluye a todos los creadores públicos de la instancia. Los videos y publicaciones públicas se consultan desde el mismo catálogo central.
+- Los videos pueden ser públicos o privados. Cada video público se entrega desde el catálogo global de Crix a cualquier persona, sin requisito de amistad; el video privado se entrega solo tras comprobar permisos.
+- El catálogo de juegos muestra las creaciones públicas en páginas sucesivas; el directorio incluye a todos los creadores públicos de Crix. Los videos y publicaciones públicos se consultan desde el mismo catálogo global.
 - Las publicaciones del foro y sus imágenes son públicas.
 - Los medios que se guardan en el servidor requieren que el alojamiento tenga espacio de disco suficiente y mantenga el volumen persistente.
 - Los videos cargados desde la interfaz tienen un límite de 30 MB.
@@ -58,8 +64,10 @@ Crix Hub amplía el editor propio de Crix; todavía no reemplaza Roblox Studio o
 | `POST /api/login` | Iniciar sesión |
 | `GET /api/session` | Consultar la cuenta de la sesión actual |
 | `POST /api/logout` | Cerrar y revocar la sesión actual |
-| `GET /api/maps` | Listar creaciones públicas y contenido privado autorizado |
+| `GET /api/maps` | Listar creaciones públicas de la plataforma y contenido privado autorizado |
 | `POST /api/maps` | Crear o guardar un juego propio |
+| `GET /api/maps/:id/instances` | Ver las instancias activas de un juego autorizado |
+| `POST /api/maps/:id/instances` | Crear una instancia de partida nueva |
 | `GET /api/videos` | Listar videos públicos y privados autorizados |
 | `POST /api/videos` | Publicar o actualizar un video propio |
 | `GET /api/convs/:userId/:convId` | Sincronizar sobres E2EE de una conversación propia |
