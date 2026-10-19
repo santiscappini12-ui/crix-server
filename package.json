@@ -4,7 +4,7 @@
   "description": "Crix — Servidor Multiplayer Node.js + Socket.IO",
   "main": "server.js",
   "engines": {
-    "node": "^22.0.0 || ^24.0.0"
+    "node": ">=22.0.0 <23.0.0"
   },
   "scripts": {
     "start": "node --no-node-snapshot server.js",
