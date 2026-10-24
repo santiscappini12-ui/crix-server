@@ -88,6 +88,7 @@ const connSockets    = {};   // socketId → { userId, username, color, mapId }
 const onlineUsers    = {};   // userId   → { socketId, username, color }
 const stats = { start: Date.now(), total: 0 };
 
+function maxPlayersFor(map) { const n = Number(map?.maxPlayers); return Number.isFinite(n) ? Math.max(1, Math.min(200, Math.floor(n))) : 50; }
 function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId]); }
 function gameChannel(mapId, instanceId) { return `game:${encodeURIComponent(mapId)}:${instanceId}`; }
 function getRoom(mapId, instanceId) {
@@ -112,6 +113,8 @@ function normalizeRoomPart(id, source = {}) {
     color:/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?String(source.color):'#5b8def',
     material:materials.includes(source.material)?source.material:'SmoothPlastic',
     anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:number(source.transparent,0,0,0.95),
+    behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',
+    behaviorValue:number(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),
   };
   if(type==='ImportedMesh'&&typeof source.meshData==='string'&&source.meshData.length<=2*1024*1024)part.meshData=source.meshData;
   return part;
@@ -248,6 +251,25 @@ function stepServerWorldPhysics() {
 }
 setInterval(stepServerWorldPhysics,50);
 
+// Presencia visible para todos: qué juego e instancia está jugando cada persona.
+function presenceInfo(userId, viewer) {
+  const presence = onlineUsers[userId];
+  if (!presence) return { online:false };
+  const info = { online:true };
+  const map = presence.mapId ? DB.maps[presence.mapId] : null;
+  if (map && presence.instanceId && (viewer === undefined ? (map.privacy || 'public') === 'public' : (viewer?.id === userId || canReadMap(map, viewer)))) {
+    const room = rooms[roomKey(presence.mapId, presence.instanceId)];
+    info.currentGameId = presence.mapId; info.currentInstanceId = presence.instanceId;
+    info.currentGameName = map.name || presence.mapId;
+    info.currentInstancePlayers = room ? Object.keys(room.players).length : 1;
+  }
+  return info;
+}
+function emitPresence(userId) {
+  const user = DB.users[userId]; if (!user) return;
+  io.emit('presence_update', { userId, username:user.username, color:user.color, ...presenceInfo(userId) });
+}
+
 function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,...s}=u; return s; }
 function publicUser(u) {
   if (!u) return null;
@@ -333,10 +355,27 @@ app.use((req, res, next) => {
   if (requestedPath === DATA_FILE || requestedPath.startsWith(DATA_FILE + '.')) return res.sendStatus(404);
   next();
 });
-app.use(express.static(path.join(__dirname)));
+// Solo se publican los archivos del cliente. Antes se servía el directorio completo
+// (server.js, package.json, script-runner.js...).
+const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg'];
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get(PUBLIC_FILES, (req, res) => res.sendFile(path.join(__dirname, req.path)));
+
+// ── Límite de intentos de acceso por IP ──
+const authAttempts = new Map();
+function authLimited(req, res) {
+  const ip = req.ip || req.socket?.remoteAddress || 'x';
+  const now = Date.now(), entry = authAttempts.get(ip) || { count:0, first:now };
+  if (now - entry.first > 10 * 60 * 1000) { entry.count = 0; entry.first = now; }
+  entry.count++; authAttempts.set(ip, entry);
+  if (entry.count > 30) { res.status(429).json({ ok:false, err:'Demasiados intentos. Esperá unos minutos.' }); return true; }
+  return false;
+}
+setInterval(() => { const now = Date.now(); for (const [ip, e] of authAttempts) if (now - e.first > 10 * 60 * 1000) authAttempts.delete(ip); }, 60 * 1000);
 
 // ── REGISTER ──
 app.post('/api/register', (req, res) => {
+  if (authLimited(req, res)) return;
   try {
     const { username, pw, color } = req.body;
     if (!username || !pw) return res.json({ ok:false, err:'Faltan campos' });
@@ -367,12 +406,14 @@ app.post('/api/register', (req, res) => {
     DB.users[uid] = user;
     const token = issueSession(user);
     log('REGISTER', username);
+    io.emit('user_new', { userId: uid, username, color: user.color });
     res.json({ ok:true, user: safeUser(user), token });
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
 
 // ── LOGIN ──
 app.post('/api/login', (req, res) => {
+  if (authLimited(req, res)) return;
   try {
     const { username, pw } = req.body;
     if (!username || !pw) return res.json({ ok:false, err:'Faltan campos' });
@@ -470,6 +511,30 @@ app.get('/api/users', (req, res) => {
   res.json({ ok:true, users: out });
 });
 
+// ── Gente en línea ahora (visible para todos) ──
+app.get('/api/online', (req, res) => {
+  const viewer = readSession(req);
+  const list = Object.keys(onlineUsers).map(id => {
+    const u = DB.users[id]; if (!u || u.banned) return null;
+    return { id, username:u.username, color:u.color, avatar:u.avatar || '', ...presenceInfo(id, viewer) };
+  }).filter(Boolean);
+  res.json({ ok:true, users:list });
+});
+
+// ── Unirse al servidor de cualquier persona que esté jugando ──
+app.post('/api/join-user/:id', requireAuth, (req, res) => {
+  const target = DB.users[req.params.id];
+  const presence = onlineUsers[req.params.id];
+  if (!target || !presence) return res.status(404).json({ ok:false, err:'Esa persona no está en línea.' });
+  if (!presence.mapId || !presence.instanceId) return res.status(409).json({ ok:false, err:'Esa persona no está jugando ahora.' });
+  const map = DB.maps[presence.mapId];
+  if (!map || !canReadMap(map, req.user)) return res.status(403).json({ ok:false, err:'No tenés acceso al juego que está jugando.' });
+  const room = rooms[roomKey(presence.mapId, presence.instanceId)];
+  const count = room ? Object.keys(room.players).length : 0;
+  if (count >= maxPlayersFor(map)) return res.status(409).json({ ok:false, err:'Ese servidor está lleno.' });
+  res.json({ ok:true, mapId:presence.mapId, instanceId:presence.instanceId, gameName:map.name || presence.mapId, players:count });
+});
+
 // ── GET mapas ──
 app.get('/api/maps', (req, res) => {
   const uObj = readSession(req);
@@ -520,6 +585,7 @@ app.post('/api/maps', (req, res) => {
     DB.maps[m.id] = { ...m, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username };
     saveDB();
     io.emit('map_updated', { mapId: m.id });
+    if (!old && (DB.maps[m.id].privacy || 'public') === 'public') io.emit('map_new', { mapId:m.id, name:DB.maps[m.id].name, authorName:DB.maps[m.id].authorName });
     res.json({ ok:true });
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
@@ -892,17 +958,19 @@ setInterval(() => {
 io.on('connection', socket => {
   stats.total++;
 
-  socket.on('call_invite', ({ to, from, fromName, type }) => {
-    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
-    if (target) target.emit('call_invite', { from, fromName, type });
+  // Señalización de llamadas: se enruta por la presencia real del usuario autenticado.
+  const callTarget = to => onlineUsers[String(to || '')];
+  socket.on('call_invite', ({ to, type }) => {
+    const me = socket.data.user, target = callTarget(to); if (!me || !target) return;
+    io.to(target.socketId).emit('call_invite', { from:me.id, fromName:me.username, type: type === 'video' ? 'video' : 'audio' });
   });
-  socket.on('call_accept', ({ to, from }) => {
-    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
-    if (target) target.emit('call_accept', { from });
+  socket.on('call_accept', ({ to }) => {
+    const me = socket.data.user, target = callTarget(to); if (!me || !target) return;
+    io.to(target.socketId).emit('call_accept', { from:me.id });
   });
-  socket.on('call_end', ({ to, from }) => {
-    const target = Object.values(io.sockets.sockets).find(s => s.userId === to);
-    if (target) target.emit('call_end', { from });
+  socket.on('call_end', ({ to }) => {
+    const me = socket.data.user, target = callTarget(to); if (!me || !target) return;
+    io.to(target.socketId).emit('call_end', { from:me.id });
   });
   // El chat privado solo se almacena y notifica mediante la API E2EE.
   // No se reenvían eventos `msg` antiguos que pudieran contener texto plano.
@@ -914,6 +982,7 @@ io.on('connection', socket => {
     // Persistir onlineAt en DB para que el cliente lo vea
     DB.users[user.id].onlineAt = Date.now();
     io.emit('online_update', { userId:user.id, online:true });
+    emitPresence(user.id);
   });
 
   socket.on('join_game', data => {
@@ -931,6 +1000,10 @@ io.on('connection', socket => {
     const prev = connSockets[socket.id];
     if (prev?.mapId && (prev.mapId !== mapId || prev.instanceId !== instanceId)) leaveRoom(socket, prev.mapId, prev.instanceId);
     const room = getRoom(mapId, instanceId);
+    if (!room.players[socket.id] && Object.keys(room.players).length >= maxPlayersFor(storedMap)) {
+      socket.emit('join_error', { message:'Este servidor está lleno. Probá con otro.' });
+      return;
+    }
     if (!room.worldParts || room.pendingReset) initializeRoomWorld(room,storedMap);
     const channel = gameChannel(mapId, instanceId);
     const pd = {
@@ -944,6 +1017,7 @@ io.on('connection', socket => {
     if (user) {
       onlineUsers[user.id] = { ...(onlineUsers[user.id]||{}), socketId:socket.id, username, color, mapId, instanceId };
       io.emit('online_update', { userId:user.id, online:true, mapId, instanceId });
+      emitPresence(user.id);
     }
     startRoomServerScripts(room,storedMap);
     sendRoomPlayersToRunner(room);
@@ -1025,6 +1099,7 @@ io.on('connection', socket => {
         delete onlineUsers[meta.userId];
         if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
         io.emit('online_update', { userId:meta.userId, online:false });
+        io.emit('presence_update', { userId:meta.userId, online:false });
       }
     }
     delete connSockets[socket.id];
@@ -1050,6 +1125,7 @@ function leaveRoom(socket, mapId, instanceId) {
     delete onlineUsers[meta.userId].mapId;
     delete onlineUsers[meta.userId].instanceId;
     io.emit('online_update', { userId:meta.userId, online:true });
+    emitPresence(meta.userId);
   }
 }
 
