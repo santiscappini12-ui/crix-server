@@ -19,9 +19,17 @@ Las cuentas son globales para quienes usan la misma plataforma y dominio públic
 
 Para habilitar la cuenta administrativa `Crix`, configurá `CRIX_ADMIN_PASSWORD` como secreto del entorno y registrá o iniciá sesión con el nombre `Crix` y esa contraseña. Es necesario configurar el secreto antes de crear la cuenta.
 
-Los datos se guardan en un archivo JSON. `CRIX_DATA_FILE` permite elegir la ruta del archivo; si se omite, Crix usa `crix_data.json` junto al servidor.
+Los datos (cuentas, mapas, mensajes) se guardan en un archivo JSON. **Para que los usuarios no se borren en cada actualización, ese archivo tiene que estar en un volumen persistente**, fuera del código que se reemplaza en cada deploy.
 
-En un alojamiento que borra el disco local al reiniciar, montá un volumen persistente y configurá `CRIX_DATA_FILE` dentro de ese volumen. El catálogo y las cuentas se comparten globalmente dentro de la plataforma que use ese almacenamiento y dominio; instalaciones independientes no se sincronizan por arte de magia. Sin almacenamiento persistente, ningún cambio de código puede garantizar que cuentas, juegos o medios sobrevivan al reemplazo del servidor.
+Ruta de la base, por prioridad:
+
+1. `CRIX_DATA_FILE` (recomendado), por ejemplo `/data/crix_data.json`.
+2. Un volumen detectado automáticamente: `RAILWAY_VOLUME_MOUNT_PATH`, `RENDER_DISK_PATH`, `FLY_VOLUME_PATH`, `/var/data`, `/data`, `/persistent` o `/mnt/data`.
+3. `crix_data.json` junto al servidor. **Es efímero** en Render, Railway, Heroku, Koyeb y similares: se borra en cada deploy. Al arrancar con esta ruta, el servidor avisa en el log.
+
+Protecciones incluidas: nunca guarda antes de haber cargado bien la base; si el archivo está corrupto lo aparta como `.corrupt-<fecha>` y restaura el último backup en vez de sobrescribirlo; guarda copias en `<nombre>_backups/` (una cada 10 min, se conservan 10); guarda al recibir `SIGTERM` (lo que envía el hosting al desplegar); y el admin puede usar `GET /api/admin/export` y `POST /api/admin/import` para sacar y restaurar un respaldo completo a mano.
+
+Los backups viven junto a la base: si el disco es efímero, se pierden igual. Sin almacenamiento persistente ningún cambio de código puede garantizar que las cuentas sobrevivan.
 
 ## Plataforma global y servidores de juego
 
