@@ -37,8 +37,14 @@ En esta versión las instancias son salas separadas coordinadas por el proceso N
 - El catálogo de juegos muestra las creaciones públicas en páginas sucesivas; el directorio incluye a todos los creadores públicos de Crix. Los videos y publicaciones públicos se consultan desde el mismo catálogo global.
 - Las publicaciones del foro y sus imágenes son públicas.
 - Los medios que se guardan en el servidor requieren que el alojamiento tenga espacio de disco suficiente y mantenga el volumen persistente.
-- Los videos cargados desde la interfaz tienen un límite de 30 MB.
+- Los videos (MP4, WebM u OGG; hasta 60 MB) se suben como archivo binario con barra de progreso, se validan por su formato real (no por el nombre) y se guardan como archivos en disco junto a la base de datos, no dentro del JSON. Se reproducen por streaming con soporte de rangos (se puede adelantar y retroceder) y la app genera una miniatura automática. Los videos antiguos guardados como base64 se migran solos al iniciar el servidor.
 - La foto de perfil se cambia desde el perfil propio. Crix la recorta a 256 × 256, la comprime y la muestra en perfiles públicos y listas de usuarios; se guarda junto a la cuenta en el servidor.
+
+## Llamadas de voz y video
+
+Desde cualquier conversación se puede iniciar una **llamada de voz** o una **videollamada** con WebRTC real: se ve quién llama, se acepta o rechaza, hay timbre, silenciar micrófono, apagar cámara, cronómetro y avisos claros (rechazada, ocupado, sin respuesta, se cortó la conexión, falta el permiso del micrófono o la cámara). El audio y el video viajan directo entre las dos personas con cifrado DTLS-SRTP; el servidor solo retransmite la negociación (SDP e ICE) y lleva el estado de la llamada, y comprueba que quien envía señales sea realmente parte de una llamada aceptada.
+
+Por defecto se usan servidores STUN públicos de Google, que alcanzan para la mayoría de las redes. Detrás de redes muy restrictivas (NAT simétrico, algunas redes móviles o corporativas) hace falta un servidor **TURN**: configuralo con las variables de entorno `CRIX_TURN_URL` (una o varias URL separadas por coma, por ejemplo `turn:turn.midominio.com:3478`), `CRIX_TURN_USER` y `CRIX_TURN_PASS`; los clientes lo reciben desde `GET /api/ice`. Las llamadas requieren HTTPS (o `localhost`) para que el navegador permita el micrófono y la cámara.
 
 ## Chat privado E2EE
 
@@ -55,6 +61,10 @@ Crix no agrega filtros de moderación de contenido. La privacidad de las publica
 ### Anclar y soltar piezas
 
 Todas las piezas están **ancladas** salvo que se suelten (`anchored: false`). En el editor: botones **🔒 Anclar** / **🔓 Soltar** (sin selección actúan sobre todo el mapa), el interruptor *Anchored* del inspector y el icono 🔒/🔓 en el Explorador. **⚛ Física** simula la gravedad dentro del editor y al apagarla restaura las posiciones. Al jugar, las piezas sueltas caen y se apoyan sobre otras piezas, tanto en ▶ Probar como en partidas online.
+
+### Color, materiales y texturas
+
+El inspector tiene un selector de **color** (muestra, hexadecimal, paleta de 28 colores, recientes y gotero en los navegadores que lo ofrecen) con vista previa en vivo y un único paso de deshacer por arrastre, una grilla visual de **17 materiales** (plástico liso, plástico, ladrillo, madera, tablones, metal, chapa, neón, vidrio, hielo, pasto, arena, hormigón, roca, mármol, adoquín y tela) que se ven distintos de verdad —patrones procedurales que se repiten según el tamaño de la pieza— y un control de transparencia. Podés **importar tus propias texturas** (PNG, JPG, WEBP o GIF): se ajustan a 512 px como máximo, se guardan como archivos en el servidor (hasta 16 y 450 KB cada una por juego), se pueden reutilizar en otras piezas, elegir su tamaño de repetición y mezclarlas o no con el color. Cualquier persona que juegue ese juego las ve igual; en juegos privados solo las ven quienes tienen acceso.
 
 ### Juegos completos sin programar
 
@@ -110,7 +120,12 @@ Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y
 | `GET /api/maps/:id/instances` | Ver las instancias activas de un juego autorizado |
 | `POST /api/maps/:id/instances` | Crear una instancia de partida nueva |
 | `GET /api/videos` | Listar videos públicos y privados autorizados |
-| `POST /api/videos` | Publicar o actualizar un video propio |
+| `POST /api/videos` | Crear o actualizar los datos de un video propio |
+| `PUT /api/videos/:id/file` | Subir el archivo del video (binario); recién ahí se publica y se avisa a todos |
+| `GET /api/videos/:id/stream` | Reproducir un video por streaming con rangos (los privados aceptan `?t=` con la sesión) |
+| `GET /api/ice` | Servidores ICE (STUN/TURN) para las llamadas |
+| `POST /api/maps/:id/textures` | Subir texturas de un juego propio |
+| `GET /api/maps/:id/textures/:tid` | Descargar una textura (con caché) |
 | `GET /api/convs/:userId/:convId` | Sincronizar sobres E2EE de una conversación propia |
 | `POST /api/convs/:convId` | Guardar y retransmitir un mensaje cifrado |
 | `GET /api/e2ee/keys/:id` | Obtener la clave pública de una cuenta |
