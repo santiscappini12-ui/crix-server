@@ -8,11 +8,12 @@
   },
   "scripts": {
     "start": "node --no-node-snapshot server.js",
-    "dev":   "node --no-node-snapshot --watch server.js"
+    "dev": "node --no-node-snapshot --watch server.js"
   },
   "dependencies": {
-    "express":   "^5.2.1",
+    "express": "^5.2.1",
     "isolated-vm": "^5.0.4",
+    "pg": "^8.23.1",
     "socket.io": "^4.8.3"
   }
 }
