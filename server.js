@@ -39,6 +39,18 @@ const BACKUP_DIR = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, p
 const BACKUP_KEEP = 10;
 let DB_LOADED_OK = false; // solo se permite guardar si la carga fue correcta o el archivo realmente no existía
 
+// ── Almacenamiento externo (Postgres gratis: Neon/Supabase) para hostings sin disco persistente ──
+const remote = require('./remote-store');
+if (remote.enabled) {
+  try {
+    require('node:child_process').execFileSync(process.execPath, [path.join(__dirname, 'remote-store.js'), 'restore', DATA_FILE], { stdio: 'inherit', timeout: 60000 });
+  } catch (e) {
+    // Sin poder leer la base externa NO se arranca: empezar vacío y guardar borraría todo.
+    console.error('[DB] ❌ No se pudo leer DATABASE_URL. Se detiene el servidor para no perder datos.');
+    process.exit(1);
+  }
+}
+
 // ══════════════════════════════════════════════
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
 // a un disco persistente montado por el proveedor de alojamiento.
@@ -110,9 +122,11 @@ function loadDB() {
     console.log('[DB] Archivo nuevo — empezando vacío');
   }
   DB_LOADED_OK = true;
-  if (!DATA_LOCATION.persistent) {
+  if (remote.enabled) {
+    console.log('[DB] Almacenamiento: Postgres externo (DATABASE_URL) ✅ los datos sobreviven a los deploys');
+  } else if (!DATA_LOCATION.persistent) {
     console.warn('[DB] ⚠️  ALMACENAMIENTO NO PERSISTENTE: ' + DATA_FILE);
-    console.warn('[DB] ⚠️  En cada deploy/reinicio este archivo se borra y se pierden usuarios. Montá un volumen y definí CRIX_DATA_FILE (ej. /data/crix_data.json).');
+    console.warn('[DB] ⚠️  En cada deploy/reinicio este archivo se borra y se pierden usuarios. Definí DATABASE_URL (Postgres gratis) o montá un volumen con CRIX_DATA_FILE.');
   } else {
     console.log(`[DB] Almacenamiento: ${DATA_FILE} (${DATA_LOCATION.why})`);
   }
@@ -129,15 +143,21 @@ function rotateBackup() {
     for (const old of listBackups().slice(BACKUP_KEEP)) { try { fs.unlinkSync(old); } catch {} }
   } catch (e) { console.error('[DB] Error al crear backup:', e.message); }
 }
+let lastSaved = null;
 function saveDB() {
   if (!DB_LOADED_OK) return; // nunca guardar antes de haber cargado correctamente
   try {
+    const probe = JSON.stringify(DB);
+    if (probe === lastSaved) return; // sin cambios: no escribir
     DB._v = (DB._v || 0) + 1;
+    const json = JSON.stringify(DB);
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     rotateBackup();
     const tempFile = `${DATA_FILE}.${process.pid}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(DB), 'utf8');
+    fs.writeFileSync(tempFile, json, 'utf8');
     fs.renameSync(tempFile, DATA_FILE);
+    lastSaved = JSON.stringify(DB);
+    remote.push(json);
   } catch(e) { console.error('[DB] Error al guardar:', e.message); }
 }
 
@@ -151,7 +171,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     if (shuttingDown) return; shuttingDown = true;
     console.log(`[DB] ${sig} recibido — guardando base de datos…`);
     saveDB();
-    process.exit(0);
+    remote.flush().finally(() => process.exit(0));
   });
 }
 
@@ -413,6 +433,11 @@ app.get('/api/admin/export', requireAuth, requireAdmin, (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="crix_backup_${Date.now()}.json"`);
   res.send(JSON.stringify(DB));
 });
+app.get('/api/admin/storage', requireAuth, requireAdmin, async (req, res) => {
+  if (!remote.enabled) return res.json({ ok:true, remote:false });
+  try { const u = await remote.usage(); res.json({ ok:true, remote:true, files:u.files, filesMB:+(u.bytes/1048576).toFixed(1), databaseMB:+(u.dbBytes/1048576).toFixed(1) }); }
+  catch (e) { res.status(500).json({ ok:false, err:e.message }); }
+});
 app.post('/api/admin/import', requireAuth, requireAdmin, (req, res) => {
   const incoming = req.body;
   if (!incoming || typeof incoming !== 'object' || typeof incoming.users !== 'object' || !Object.keys(incoming.users).length)
@@ -455,7 +480,8 @@ function storeVideoBuffer(video, buffer) {
   const oldPath = videoFilePath(video);
   const file = `${video.id}.${VIDEO_EXT[mime]}`;
   fs.writeFileSync(path.join(VIDEO_DIR, file), buffer);
-  if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} }
+  remote.putFile('videos/' + file, buffer);
+  if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} remote.delFile('videos/' + path.basename(oldPath)); }
   video.file = file; video.mime = mime; video.size = buffer.length; video.ready = true;
   delete video.data;
 }
@@ -769,15 +795,19 @@ app.post('/api/maps/:id/textures', requireAuth, (req, res) => {
   fs.mkdirSync(texDir(req.params.id), { recursive:true });
   for (const { tid, buf, kind } of staged) {
     try { const old = texFile(req.params.id, tid); if (old) fs.unlinkSync(old); } catch {}
-    fs.writeFileSync(path.join(texDir(req.params.id), `${tid}.${kind.ext}`), buf); ids.add(tid);
+    remote.delPrefix(`textures/${req.params.id}/${tid}.`); // quita versiones anteriores (otra extensión)
+    fs.writeFileSync(path.join(texDir(req.params.id), `${tid}.${kind.ext}`), buf);
+    remote.putFile(`textures/${req.params.id}/${tid}.${kind.ext}`, buf); ids.add(tid);
   }
   map.textureIds = [...ids]; saveDB();
   res.json({ ok:true, textureIds: map.textureIds });
 });
-app.get('/api/maps/:id/textures/:tid', (req, res) => {
+app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
-  const file = texFile(req.params.id, req.params.tid); if (!file) return res.status(404).end();
+  let file = texFile(req.params.id, req.params.tid);
+  if (!file) { await remote.ensureDir(`textures/${req.params.id}/`, texDir(req.params.id)); file = texFile(req.params.id, req.params.tid); }
+  if (!file) return res.status(404).end();
   res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
@@ -810,7 +840,7 @@ app.delete('/api/maps/:id', (req, res) => {
   if (existing.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
   delete DB.maps[req.params.id];
-  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} }
+  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} remote.delPrefix(`textures/${req.params.id}/`); }
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
   res.json({ ok:true });
@@ -1002,10 +1032,11 @@ app.get('/api/videos', (req, res) => {
 });
 
 // Compatibilidad con clientes viejos: devuelve el archivo como data URL (solo videos chicos).
-app.get('/api/videos/:id/data', (req, res) => {
+app.get('/api/videos/:id/data', async (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
   if (!v || !canReadVideo(v, readSession(req))) return res.status(404).json({ ok: false });
   const file = videoFilePath(v);
+  if (file) await remote.ensureFile('videos/' + path.basename(file), file);
   if (!file || !fs.existsSync(file)) return res.status(404).json({ ok:false, err:'El archivo del video no está disponible' });
   if (v.size > 25 * 1024 * 1024) return res.status(413).json({ ok:false, err:'Usá /stream para videos grandes', stream:`/api/videos/${v.id}/stream` });
   res.json({ ok: true, data: `data:${v.mime};base64,${fs.readFileSync(file).toString('base64')}`, thumb: v.thumb });
@@ -1013,11 +1044,12 @@ app.get('/api/videos/:id/data', (req, res) => {
 
 // Reproducción por streaming (con soporte de rangos para adelantar/retroceder).
 // El <video> no puede enviar encabezados, por eso el token de sesión también se acepta por ?t= (solo aquí).
-app.get('/api/videos/:id/stream', (req, res) => {
+app.get('/api/videos/:id/stream', async (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
   const user = readSession(req) || userFromToken(req.query.t);
   if (!v || !canReadVideo(v, user)) return res.status(404).end();
   const file = videoFilePath(v);
+  if (file) await remote.ensureFile('videos/' + path.basename(file), file);
   if (!file || !fs.existsSync(file)) return res.status(404).end();
   res.set({ 'Content-Type': v.mime || 'video/mp4', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': (v.privacy || 'public') === 'public' ? 'public, max-age=3600' : 'private, max-age=600' });
   res.sendFile(file, { acceptRanges: true, dotfiles: 'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
@@ -1115,7 +1147,7 @@ app.delete('/api/videos/:id', (req, res) => {
   if (video.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este video' });
   DB.videos = DB.videos.filter(v => v.id !== req.params.id);
-  { const f = videoFilePath(video); if (f) { try { fs.unlinkSync(f); } catch {} } }
+  { const f = videoFilePath(video); if (f) { try { fs.unlinkSync(f); } catch {} remote.delFile('videos/' + path.basename(f)); } }
   saveDB();
   if ((video.privacy || 'public') === 'public') io.emit('video_deleted', { id:req.params.id });
   res.json({ ok:true });
@@ -1434,6 +1466,7 @@ setInterval(() => {
 }, 30000);
 
 server.listen(PORT, () => {
+  remote.syncUp([{ dir: VIDEO_DIR, prefix: 'videos/' }, { dir: TEX_DIR, prefix: 'textures/' }]);
   console.log('');
   console.log('  ╔══════════════════════════════════╗');
   console.log('  ║    CRIX — Servidor Multijugador  ║');
