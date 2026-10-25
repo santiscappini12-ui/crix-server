@@ -19,15 +19,36 @@ Las cuentas son globales para quienes usan la misma plataforma y dominio públic
 
 Para habilitar la cuenta administrativa `Crix`, configurá `CRIX_ADMIN_PASSWORD` como secreto del entorno y registrá o iniciá sesión con el nombre `Crix` y esa contraseña. Es necesario configurar el secreto antes de crear la cuenta.
 
-Los datos (cuentas, mapas, mensajes, publicaciones) se guardan en un archivo JSON local y, si definís `DATABASE_URL`, **también en un Postgres externo gratuito** (Neon, Supabase, etc.). Con `DATABASE_URL` los usuarios sobreviven a cada deploy en hostings sin disco persistente como Render free: al arrancar, el servidor restaura la base desde Postgres, y cada cambio se sincroniza allí. Si no puede conectarse, no arranca (para no empezar vacío y sobrescribir nada). Si Postgres está vacío y hay un archivo local, lo sube la primera vez.
+Los datos se guardan en un archivo JSON (`CRIX_DATA_FILE` elige la ruta; por defecto `crix_data.json` junto al servidor) y los medios en carpetas junto a él.
 
-Alternativas sin Postgres: `CRIX_DATA_FILE` apuntando a un volumen persistente (por ejemplo `/data/crix_data.json`), o un volumen detectado automáticamente (`RAILWAY_VOLUME_MOUNT_PATH`, `RENDER_DISK_PATH`, `FLY_VOLUME_PATH`, `/var/data`, `/data`, `/persistent`, `/mnt/data`). Sin ninguna de las dos, el archivo junto al servidor es efímero y el log lo avisa.
+### Persistencia en Render sin disco de pago
 
-Protecciones incluidas: nunca guarda antes de cargar bien la base; un archivo corrupto se aparta como `.corrupt-<fecha>` y se restaura el último backup; backups locales en `<nombre>_backups/` y una copia anterior en Postgres (fila `id = 2`); guarda y sincroniza al recibir `SIGTERM`; y el admin puede usar `GET /api/admin/export` y `POST /api/admin/import`.
+Render (plan gratis) borra el disco local en cada deploy o reinicio. Crix puede respaldar **usuarios, juegos, posts, videos y texturas** en un bucket compatible con S3 y restaurarlos solo al arrancar:
 
-**Videos y texturas también se guardan en Postgres** (tabla `crix_files`): cada archivo subido se copia ahí, y tras un deploy se restaura bajo demanda la primera vez que alguien lo pide (el disco local solo es una caché). Al arrancar, el servidor sube a Postgres cualquier archivo local que todavía no esté. Los borrados también se reflejan. Un admin puede ver el uso con `GET /api/admin/storage`.
+- Al iniciar, `start.js` baja la base del bucket; las texturas y los videos se bajan bajo demanda la primera vez que alguien los pide.
+- Cada cambio de la base se sube comprimida (como máximo una vez cada 3 s) y cada video/textura se sube al guardarse.
+- Al recibir `SIGTERM` (cada deploy de Render) se guarda y se sube todo lo pendiente antes de salir.
+- Se conserva un respaldo diario de la base (los últimos 7 días) en `db/backup-AAAA-MM-DD.json.gz`.
+- Si el bucket no responde al arrancar, el servidor **no arranca**, para no reemplazar tus datos con una base vacía.
+- Si se configura el bucket y ya había datos en el disco local, lo que falte en el bucket se sube solo.
 
-**Capacidad:** los planes gratuitos de Postgres tienen un tope (Neon: 0,5 GB en total). Cada video ocupa lo que pesa su archivo (hasta 60 MB), así que con muchos videos ese límite se llena. Si el espacio se acaba, el log muestra `❌ NO se pudo sincronizar` y el archivo queda solo en el disco local hasta el próximo deploy. Revisá el uso con `/api/admin/storage` y, si crece, pasá a un plan con más espacio.
+Configuración (ejemplo con Backblaze B2; sirve cualquier servicio compatible con S3):
+
+1. Creá un bucket **privado** y una *Application Key* con acceso a ese bucket.
+2. En Render → *Environment* cargá las variables:
+
+| Variable | Valor |
+| --- | --- |
+| `CRIX_S3_BUCKET` | nombre del bucket |
+| `CRIX_S3_ACCESS_KEY_ID` | keyID de la clave |
+| `CRIX_S3_SECRET_ACCESS_KEY` | applicationKey |
+| `CRIX_S3_ENDPOINT` | por ejemplo `https://s3.us-west-004.backblazeb2.com` |
+| `CRIX_S3_REGION` | por ejemplo `us-west-004` |
+| `CRIX_S3_PREFIX` | (opcional) carpeta dentro del bucket |
+
+3. El *Start Command* de Render tiene que ser `npm start` (no `node server.js`; en ese caso el servidor se niega a iniciar para proteger los datos).
+
+El bucket no tiene tope fijo: el costo crece solo con lo que se almacena. Sin estas variables Crix funciona como antes, solo con disco local.
 
 ## Plataforma global y servidores de juego
 
