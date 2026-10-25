@@ -4016,8 +4016,7 @@ function stTextureIds() { const m = getMaps()[stMapId]; return [...new Set([...(
 function stTexSrc(id) { return stTexData[id] || texUrl(stMapId, id); }
 function stTexId(url) { let h = 5381; for (let i = 0; i < url.length; i += 7) h = ((h << 5) + h + url.charCodeAt(i)) | 0; return 'tx_' + (h >>> 0).toString(36) + url.length.toString(36); }
 function stuAddTextureFromDataUrl(url, name) {
-  const id = stTexId(url), ids = stTextureIds();
-  if (!ids.includes(id) && ids.length >= 16) { showToast('Máximo 16 texturas por juego'); return null; }
+  const id = stTexId(url);
   stTexData[id] = url; stTexNames[id] = String(name || 'Textura').slice(0, 40);
   texLibSet(id, url); stPushTextures(); return id;
 }
