@@ -16,7 +16,28 @@ const io     = new Server(server, {
 app.use(express.json({ limit: '50mb' }));
 
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.resolve(process.env.CRIX_DATA_FILE || path.join(__dirname, 'crix_data.json'));
+// Ruta de la base de datos. Prioridad:
+//  1) CRIX_DATA_FILE (explícita)
+//  2) Volumen persistente del proveedor (Railway, Fly.io, Render disks, /data, etc.)
+//  3) crix_data.json junto al servidor (EFÍMERO en la mayoría de hostings: se borra en cada deploy)
+function resolveDataFile() {
+  if (process.env.CRIX_DATA_FILE) return { file: path.resolve(process.env.CRIX_DATA_FILE), persistent: true, why: 'CRIX_DATA_FILE' };
+  const mounts = [process.env.RAILWAY_VOLUME_MOUNT_PATH, process.env.RENDER_DISK_PATH, process.env.FLY_VOLUME_PATH, '/var/data', '/data', '/persistent', '/mnt/data'].filter(Boolean);
+  for (const dir of mounts) {
+    try {
+      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+        fs.accessSync(dir, fs.constants.W_OK);
+        return { file: path.join(dir, 'crix_data.json'), persistent: true, why: dir };
+      }
+    } catch {}
+  }
+  return { file: path.join(__dirname, 'crix_data.json'), persistent: false, why: 'junto al servidor' };
+}
+const DATA_LOCATION = resolveDataFile();
+const DATA_FILE = DATA_LOCATION.file;
+const BACKUP_DIR = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, path.extname(DATA_FILE)) + '_backups');
+const BACKUP_KEEP = 10;
+let DB_LOADED_OK = false; // solo se permite guardar si la carga fue correcta o el archivo realmente no existía
 
 // ══════════════════════════════════════════════
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
@@ -24,11 +45,35 @@ const DATA_FILE = path.resolve(process.env.CRIX_DATA_FILE || path.join(__dirname
 // ══════════════════════════════════════════════
 let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, _v: 0 };
 
-function loadDB() {
+function listBackups() {
+  try { return fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.json')).sort().reverse().map(f => path.join(BACKUP_DIR, f)); }
+  catch { return []; }
+}
+// Lee y valida un archivo de base de datos. Devuelve el objeto o null si no sirve.
+function readDBFile(file) {
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch (e) { console.error(`[DB] No se pudo leer ${file}:`, e.message); return null; }
+}
+function loadDB() {
+  let parsed = null;
+  const mainExists = fs.existsSync(DATA_FILE);
+  if (mainExists) {
+    parsed = readDBFile(DATA_FILE);
+    if (!parsed) {
+      // Archivo corrupto: se aparta (nunca se sobrescribe) y se intenta el último backup válido.
+      try { fs.renameSync(DATA_FILE, `${DATA_FILE}.corrupt-${Date.now()}`); } catch {}
+      for (const b of listBackups()) { parsed = readDBFile(b); if (parsed) { console.warn(`[DB] Restaurado desde backup ${b}`); break; } }
+      if (!parsed) { console.error('[DB] ❌ No hay datos válidos. Se detiene el servidor para NO sobrescribir nada.'); process.exit(1); }
+    }
+  } else {
+    // El archivo principal no existe (p.ej. disco nuevo tras un deploy): intentar recuperar el último backup.
+    for (const b of listBackups()) { parsed = readDBFile(b); if (parsed) { console.warn(`[DB] Archivo principal ausente — restaurado desde backup ${b}`); break; } }
+  }
+  if (parsed) {
+    try {
       DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
       DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {};
@@ -60,16 +105,36 @@ function loadDB() {
         saveDB();
       }
       console.log(`[DB] Cargado: ${Object.keys(DB.users).length} usuarios, ${Object.keys(DB.maps).length} mapas`);
-    } else {
-      console.log('[DB] Archivo nuevo — empezando vacío');
-    }
-  } catch(e) { console.error('[DB] Error al cargar:', e.message); }
+    } catch(e) { console.error('[DB] Error al procesar:', e.message); process.exit(1); }
+  } else {
+    console.log('[DB] Archivo nuevo — empezando vacío');
+  }
+  DB_LOADED_OK = true;
+  if (!DATA_LOCATION.persistent) {
+    console.warn('[DB] ⚠️  ALMACENAMIENTO NO PERSISTENTE: ' + DATA_FILE);
+    console.warn('[DB] ⚠️  En cada deploy/reinicio este archivo se borra y se pierden usuarios. Montá un volumen y definí CRIX_DATA_FILE (ej. /data/crix_data.json).');
+  } else {
+    console.log(`[DB] Almacenamiento: ${DATA_FILE} (${DATA_LOCATION.why})`);
+  }
 }
 
+let lastBackupAt = 0;
+function rotateBackup() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return;
+    if (Date.now() - lastBackupAt < 10 * 60 * 1000) return; // un backup cada 10 min como máximo
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    fs.copyFileSync(DATA_FILE, path.join(BACKUP_DIR, `backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+    lastBackupAt = Date.now();
+    for (const old of listBackups().slice(BACKUP_KEEP)) { try { fs.unlinkSync(old); } catch {} }
+  } catch (e) { console.error('[DB] Error al crear backup:', e.message); }
+}
 function saveDB() {
+  if (!DB_LOADED_OK) return; // nunca guardar antes de haber cargado correctamente
   try {
     DB._v = (DB._v || 0) + 1;
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+    rotateBackup();
     const tempFile = `${DATA_FILE}.${process.pid}.tmp`;
     fs.writeFileSync(tempFile, JSON.stringify(DB), 'utf8');
     fs.renameSync(tempFile, DATA_FILE);
@@ -79,6 +144,16 @@ function saveDB() {
 loadDB();
 // Guardar cada 10 segundos para no perder datos
 setInterval(saveDB, 10000);
+// Los hostings envían SIGTERM al reemplazar el servidor: guardar antes de salir.
+let shuttingDown = false;
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    if (shuttingDown) return; shuttingDown = true;
+    console.log(`[DB] ${sig} recibido — guardando base de datos…`);
+    saveDB();
+    process.exit(0);
+  });
+}
 
 // ══════════════════════════════════════════════
 // ESTADO EN MEMORIA (sesiones activas)
@@ -331,6 +406,22 @@ function requireAdmin(req, res, next) {
   if (!req.user?.isAdmin) return res.status(403).json({ ok:false, err:'Se requieren permisos de administración' });
   next();
 }
+// ── Respaldo manual (solo admin): permite llevarse los datos antes de un deploy y restaurarlos después ──
+app.get('/api/admin/export', requireAuth, requireAdmin, (req, res) => {
+  saveDB();
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="crix_backup_${Date.now()}.json"`);
+  res.send(JSON.stringify(DB));
+});
+app.post('/api/admin/import', requireAuth, requireAdmin, (req, res) => {
+  const incoming = req.body;
+  if (!incoming || typeof incoming !== 'object' || typeof incoming.users !== 'object' || !Object.keys(incoming.users).length)
+    return res.status(400).json({ ok:false, err:'Respaldo inválido: no contiene usuarios' });
+  saveDB(); lastBackupAt = 0; rotateBackup(); // backup del estado actual antes de reemplazar
+  DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...incoming };
+  saveDB();
+  res.json({ ok:true, users:Object.keys(DB.users).length, maps:Object.keys(DB.maps || {}).length });
+});
 function canReadMap(map, user) {
   const privacy = map.privacy || 'public';
   if (privacy === 'public') return true;
