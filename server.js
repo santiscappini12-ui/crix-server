@@ -6,6 +6,12 @@ const fs       = require('fs');
 const https    = require('https');
 const crypto   = require('crypto');
 const { fork } = require('node:child_process');
+const persist  = require('./persist');
+
+if (persist.enabled && !persist.restored) {
+  console.error('[PERSIST] Hay almacenamiento externo configurado: arrancá con "npm start" (start.js) para restaurar los datos antes de iniciar el servidor.');
+  process.exit(1);
+}
 
 const app    = express();
 const server = http.createServer(app);
@@ -16,40 +22,7 @@ const io     = new Server(server, {
 app.use(express.json({ limit: '50mb' }));
 
 const PORT = process.env.PORT || 3000;
-// Ruta de la base de datos. Prioridad:
-//  1) CRIX_DATA_FILE (explícita)
-//  2) Volumen persistente del proveedor (Railway, Fly.io, Render disks, /data, etc.)
-//  3) crix_data.json junto al servidor (EFÍMERO en la mayoría de hostings: se borra en cada deploy)
-function resolveDataFile() {
-  if (process.env.CRIX_DATA_FILE) return { file: path.resolve(process.env.CRIX_DATA_FILE), persistent: true, why: 'CRIX_DATA_FILE' };
-  const mounts = [process.env.RAILWAY_VOLUME_MOUNT_PATH, process.env.RENDER_DISK_PATH, process.env.FLY_VOLUME_PATH, '/var/data', '/data', '/persistent', '/mnt/data'].filter(Boolean);
-  for (const dir of mounts) {
-    try {
-      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
-        fs.accessSync(dir, fs.constants.W_OK);
-        return { file: path.join(dir, 'crix_data.json'), persistent: true, why: dir };
-      }
-    } catch {}
-  }
-  return { file: path.join(__dirname, 'crix_data.json'), persistent: false, why: 'junto al servidor' };
-}
-const DATA_LOCATION = resolveDataFile();
-const DATA_FILE = DATA_LOCATION.file;
-const BACKUP_DIR = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, path.extname(DATA_FILE)) + '_backups');
-const BACKUP_KEEP = 10;
-let DB_LOADED_OK = false; // solo se permite guardar si la carga fue correcta o el archivo realmente no existía
-
-// ── Almacenamiento externo (Postgres gratis: Neon/Supabase) para hostings sin disco persistente ──
-const remote = require('./remote-store');
-if (remote.enabled) {
-  try {
-    require('node:child_process').execFileSync(process.execPath, [path.join(__dirname, 'remote-store.js'), 'restore', DATA_FILE], { stdio: 'inherit', timeout: 60000 });
-  } catch (e) {
-    // Sin poder leer la base externa NO se arranca: empezar vacío y guardar borraría todo.
-    console.error('[DB] ❌ No se pudo leer DATABASE_URL. Se detiene el servidor para no perder datos.');
-    process.exit(1);
-  }
-}
+const DATA_FILE = persist.DATA_FILE;
 
 // ══════════════════════════════════════════════
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
@@ -57,35 +30,11 @@ if (remote.enabled) {
 // ══════════════════════════════════════════════
 let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, _v: 0 };
 
-function listBackups() {
-  try { return fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.json')).sort().reverse().map(f => path.join(BACKUP_DIR, f)); }
-  catch { return []; }
-}
-// Lee y valida un archivo de base de datos. Devuelve el objeto o null si no sirve.
-function readDBFile(file) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    return parsed;
-  } catch (e) { console.error(`[DB] No se pudo leer ${file}:`, e.message); return null; }
-}
 function loadDB() {
-  let parsed = null;
-  const mainExists = fs.existsSync(DATA_FILE);
-  if (mainExists) {
-    parsed = readDBFile(DATA_FILE);
-    if (!parsed) {
-      // Archivo corrupto: se aparta (nunca se sobrescribe) y se intenta el último backup válido.
-      try { fs.renameSync(DATA_FILE, `${DATA_FILE}.corrupt-${Date.now()}`); } catch {}
-      for (const b of listBackups()) { parsed = readDBFile(b); if (parsed) { console.warn(`[DB] Restaurado desde backup ${b}`); break; } }
-      if (!parsed) { console.error('[DB] ❌ No hay datos válidos. Se detiene el servidor para NO sobrescribir nada.'); process.exit(1); }
-    }
-  } else {
-    // El archivo principal no existe (p.ej. disco nuevo tras un deploy): intentar recuperar el último backup.
-    for (const b of listBackups()) { parsed = readDBFile(b); if (parsed) { console.warn(`[DB] Archivo principal ausente — restaurado desde backup ${b}`); break; } }
-  }
-  if (parsed) {
-    try {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
       DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
       DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {};
@@ -117,63 +66,34 @@ function loadDB() {
         saveDB();
       }
       console.log(`[DB] Cargado: ${Object.keys(DB.users).length} usuarios, ${Object.keys(DB.maps).length} mapas`);
-    } catch(e) { console.error('[DB] Error al procesar:', e.message); process.exit(1); }
-  } else {
-    console.log('[DB] Archivo nuevo — empezando vacío');
-  }
-  DB_LOADED_OK = true;
-  if (remote.enabled) {
-    console.log('[DB] Almacenamiento: Postgres externo (DATABASE_URL) ✅ los datos sobreviven a los deploys');
-  } else if (!DATA_LOCATION.persistent) {
-    console.warn('[DB] ⚠️  ALMACENAMIENTO NO PERSISTENTE: ' + DATA_FILE);
-    console.warn('[DB] ⚠️  En cada deploy/reinicio este archivo se borra y se pierden usuarios. Definí DATABASE_URL (Postgres gratis) o montá un volumen con CRIX_DATA_FILE.');
-  } else {
-    console.log(`[DB] Almacenamiento: ${DATA_FILE} (${DATA_LOCATION.why})`);
-  }
+    } else {
+      console.log('[DB] Archivo nuevo — empezando vacío');
+    }
+  } catch(e) { console.error('[DB] Error al cargar:', e.message); }
 }
 
-let lastBackupAt = 0;
-function rotateBackup() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) return;
-    if (Date.now() - lastBackupAt < 10 * 60 * 1000) return; // un backup cada 10 min como máximo
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    fs.copyFileSync(DATA_FILE, path.join(BACKUP_DIR, `backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
-    lastBackupAt = Date.now();
-    for (const old of listBackups().slice(BACKUP_KEEP)) { try { fs.unlinkSync(old); } catch {} }
-  } catch (e) { console.error('[DB] Error al crear backup:', e.message); }
-}
-let lastSaved = null;
+let lastDbSig = null;
 function saveDB() {
-  if (!DB_LOADED_OK) return; // nunca guardar antes de haber cargado correctamente
   try {
-    const probe = JSON.stringify(DB);
-    if (probe === lastSaved) return; // sin cambios: no escribir
-    DB._v = (DB._v || 0) + 1;
+    // Solo se escribe (y se sube al almacenamiento externo) si el contenido cambió.
+    const prevV = DB._v || 0;
+    DB._v = 0;
+    const sig = crypto.createHash('sha1').update(JSON.stringify(DB)).digest('hex');
+    if (sig === lastDbSig) { DB._v = prevV; return; }
+    DB._v = prevV + 1;
     const json = JSON.stringify(DB);
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-    rotateBackup();
     const tempFile = `${DATA_FILE}.${process.pid}.tmp`;
     fs.writeFileSync(tempFile, json, 'utf8');
     fs.renameSync(tempFile, DATA_FILE);
-    lastSaved = JSON.stringify(DB);
-    remote.push(json);
+    lastDbSig = sig;
+    persist.saveDb(json);
   } catch(e) { console.error('[DB] Error al guardar:', e.message); }
 }
 
 loadDB();
 // Guardar cada 10 segundos para no perder datos
 setInterval(saveDB, 10000);
-// Los hostings envían SIGTERM al reemplazar el servidor: guardar antes de salir.
-let shuttingDown = false;
-for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => {
-    if (shuttingDown) return; shuttingDown = true;
-    console.log(`[DB] ${sig} recibido — guardando base de datos…`);
-    saveDB();
-    remote.flush().finally(() => process.exit(0));
-  });
-}
 
 // ══════════════════════════════════════════════
 // ESTADO EN MEMORIA (sesiones activas)
@@ -426,27 +346,6 @@ function requireAdmin(req, res, next) {
   if (!req.user?.isAdmin) return res.status(403).json({ ok:false, err:'Se requieren permisos de administración' });
   next();
 }
-// ── Respaldo manual (solo admin): permite llevarse los datos antes de un deploy y restaurarlos después ──
-app.get('/api/admin/export', requireAuth, requireAdmin, (req, res) => {
-  saveDB();
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', `attachment; filename="crix_backup_${Date.now()}.json"`);
-  res.send(JSON.stringify(DB));
-});
-app.get('/api/admin/storage', requireAuth, requireAdmin, async (req, res) => {
-  if (!remote.enabled) return res.json({ ok:true, remote:false });
-  try { const u = await remote.usage(); res.json({ ok:true, remote:true, files:u.files, filesMB:+(u.bytes/1048576).toFixed(1), databaseMB:+(u.dbBytes/1048576).toFixed(1) }); }
-  catch (e) { res.status(500).json({ ok:false, err:e.message }); }
-});
-app.post('/api/admin/import', requireAuth, requireAdmin, (req, res) => {
-  const incoming = req.body;
-  if (!incoming || typeof incoming !== 'object' || typeof incoming.users !== 'object' || !Object.keys(incoming.users).length)
-    return res.status(400).json({ ok:false, err:'Respaldo inválido: no contiene usuarios' });
-  saveDB(); lastBackupAt = 0; rotateBackup(); // backup del estado actual antes de reemplazar
-  DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...incoming };
-  saveDB();
-  res.json({ ok:true, users:Object.keys(DB.users).length, maps:Object.keys(DB.maps || {}).length });
-});
 function canReadMap(map, user) {
   const privacy = map.privacy || 'public';
   if (privacy === 'public') return true;
@@ -457,7 +356,7 @@ function canReadMap(map, user) {
   return false;
 }
 // ── Almacenamiento de videos: archivos en disco (no base64 dentro del JSON de la base) ──
-const VIDEO_DIR = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, path.extname(DATA_FILE)) + '_videos');
+const VIDEO_DIR = persist.VIDEO_DIR;
 const VIDEO_EXT = { 'video/mp4':'mp4', 'video/webm':'webm', 'video/ogg':'ogv' };
 const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -480,10 +379,14 @@ function storeVideoBuffer(video, buffer) {
   const oldPath = videoFilePath(video);
   const file = `${video.id}.${VIDEO_EXT[mime]}`;
   fs.writeFileSync(path.join(VIDEO_DIR, file), buffer);
-  remote.putFile('videos/' + file, buffer);
-  if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} remote.delFile('videos/' + path.basename(oldPath)); }
+  if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} persist.delKey('videos/' + path.basename(oldPath)); }
   video.file = file; video.mime = mime; video.size = buffer.length; video.ready = true;
   delete video.data;
+  return persist.putFile('videos/' + file, path.join(VIDEO_DIR, file));   // promesa: se resuelve cuando la copia llegó al bucket
+}
+async function videoLocalFile(video) {   // ruta local del video; lo baja del bucket si el disco se reinició
+  const f = videoFilePath(video); if (!f) return null;
+  return (await persist.ensureLocal('videos/' + path.basename(f), f)) ? f : null;
 }
 function dataUrlToBuffer(value) {
   const m = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.*)$/s.exec(String(value || ''));
@@ -761,9 +664,9 @@ app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
 });
 
 // ── Texturas de los juegos: archivos en disco (el mapa solo guarda la lista de ids) ──
-const TEX_DIR = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, path.extname(DATA_FILE)) + '_textures');
+const TEX_DIR = persist.TEX_DIR;
 const TEX_ID_RE = /^tx_[a-z0-9]{3,40}$/, MAP_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const MAX_TEX_BYTES = 450 * 1024, MAX_TEXTURES_PER_MAP = 16;
+const MAX_TEX_BYTES = 450 * 1024;   // sin límite de cantidad de texturas por juego
 function sniffImage(buf) {   // formato REAL por los primeros bytes
   if (!buf || buf.length < 12) return null;
   if (buf[0] === 0x89 && buf.toString('latin1', 1, 4) === 'PNG') return { mime:'image/png', ext:'png' };
@@ -775,7 +678,7 @@ function sniffImage(buf) {   // formato REAL por los primeros bytes
 const TEX_MIME = { png:'image/png', jpg:'image/jpeg', webp:'image/webp', gif:'image/gif' };
 function texDir(mapId) { return path.join(TEX_DIR, mapId); }
 function texFile(mapId, tid) { try { const f = fs.readdirSync(texDir(mapId)).find(x => x.startsWith(tid + '.')); return f ? path.join(texDir(mapId), f) : null; } catch { return null; } }
-app.post('/api/maps/:id/textures', requireAuth, (req, res) => {
+app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
   const map = DB.maps[req.params.id];
   if (!map || !MAP_ID_RE.test(req.params.id)) return res.status(404).json({ ok:false, err:'Guardá el juego antes de subir texturas' });
   if (map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
@@ -789,25 +692,24 @@ app.post('/api/maps/:id/textures', requireAuth, (req, res) => {
     if (buf.length > MAX_TEX_BYTES) return res.status(413).json({ ok:false, err:'La textura supera 450 KB' });
     const kind = sniffImage(buf);
     if (!kind) return res.status(400).json({ ok:false, err:'Formato de imagen no soportado (PNG, JPG, WEBP o GIF)' });
-    if (!ids.has(tid) && ids.size + staged.filter(x => !ids.has(x.tid)).length >= MAX_TEXTURES_PER_MAP) return res.status(400).json({ ok:false, err:'Máximo ' + MAX_TEXTURES_PER_MAP + ' texturas por juego' });
     staged.push({ tid, buf, kind });
   }
   fs.mkdirSync(texDir(req.params.id), { recursive:true });
+  const uploads = [];
   for (const { tid, buf, kind } of staged) {
-    try { const old = texFile(req.params.id, tid); if (old) fs.unlinkSync(old); } catch {}
-    remote.delPrefix(`textures/${req.params.id}/${tid}.`); // quita versiones anteriores (otra extensión)
-    fs.writeFileSync(path.join(texDir(req.params.id), `${tid}.${kind.ext}`), buf);
-    remote.putFile(`textures/${req.params.id}/${tid}.${kind.ext}`, buf); ids.add(tid);
+    const name = `${tid}.${kind.ext}`;
+    try { const old = texFile(req.params.id, tid); if (old) { fs.unlinkSync(old); if (path.basename(old) !== name) persist.delKey(`textures/${req.params.id}/${path.basename(old)}`); } } catch {}
+    fs.writeFileSync(path.join(texDir(req.params.id), name), buf); ids.add(tid);
+    uploads.push(persist.putFile(`textures/${req.params.id}/${name}`, path.join(texDir(req.params.id), name)));
   }
+  await Promise.all(uploads);
   map.textureIds = [...ids]; saveDB();
   res.json({ ok:true, textureIds: map.textureIds });
 });
 app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
-  let file = texFile(req.params.id, req.params.tid);
-  if (!file) { await remote.ensureDir(`textures/${req.params.id}/`, texDir(req.params.id)); file = texFile(req.params.id, req.params.tid); }
-  if (!file) return res.status(404).end();
+  const file = texFile(req.params.id, req.params.tid) || await persist.fetchTexture(req.params.id, req.params.tid); if (!file) return res.status(404).end();
   res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
@@ -840,7 +742,7 @@ app.delete('/api/maps/:id', (req, res) => {
   if (existing.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
   delete DB.maps[req.params.id];
-  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} remote.delPrefix(`textures/${req.params.id}/`); }
+  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${req.params.id}/`); }
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
   res.json({ ok:true });
@@ -1035,9 +937,8 @@ app.get('/api/videos', (req, res) => {
 app.get('/api/videos/:id/data', async (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
   if (!v || !canReadVideo(v, readSession(req))) return res.status(404).json({ ok: false });
-  const file = videoFilePath(v);
-  if (file) await remote.ensureFile('videos/' + path.basename(file), file);
-  if (!file || !fs.existsSync(file)) return res.status(404).json({ ok:false, err:'El archivo del video no está disponible' });
+  const file = await videoLocalFile(v);
+  if (!file) return res.status(404).json({ ok:false, err:'El archivo del video no está disponible' });
   if (v.size > 25 * 1024 * 1024) return res.status(413).json({ ok:false, err:'Usá /stream para videos grandes', stream:`/api/videos/${v.id}/stream` });
   res.json({ ok: true, data: `data:${v.mime};base64,${fs.readFileSync(file).toString('base64')}`, thumb: v.thumb });
 });
@@ -1048,14 +949,13 @@ app.get('/api/videos/:id/stream', async (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
   const user = readSession(req) || userFromToken(req.query.t);
   if (!v || !canReadVideo(v, user)) return res.status(404).end();
-  const file = videoFilePath(v);
-  if (file) await remote.ensureFile('videos/' + path.basename(file), file);
-  if (!file || !fs.existsSync(file)) return res.status(404).end();
+  const file = await videoLocalFile(v);
+  if (!file) return res.status(404).end();
   res.set({ 'Content-Type': v.mime || 'video/mp4', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': (v.privacy || 'public') === 'public' ? 'public, max-age=3600' : 'private, max-age=600' });
   res.sendFile(file, { acceptRanges: true, dotfiles: 'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 
-app.post('/api/videos', (req, res) => {
+app.post('/api/videos', async (req, res) => {
   try {
     const user = readSession(req);
     if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
@@ -1078,7 +978,8 @@ app.post('/api/videos', (req, res) => {
     if (typeof v.data === 'string' && v.data !== '[data]') {   // compatibilidad: archivo embebido en base64
       const buf = dataUrlToBuffer(v.data);
       if (!buf) return res.status(400).json({ ok:false, err:'Archivo de video inválido' });
-      try { storeVideoBuffer(saved, buf); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
+      let upload; try { upload = storeVideoBuffer(saved, buf); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
+      await upload;
     } else if (!old) saved.ready = false;                       // el archivo llega después con PUT /file
     if (idx >= 0) DB.videos[idx] = saved; else DB.videos.push(saved);
     saveDB();
@@ -1088,7 +989,7 @@ app.post('/api/videos', (req, res) => {
 });
 
 // Subida binaria del archivo (sin base64: más rápido y sin inflar 33 %).
-app.put('/api/videos/:id/file', express.raw({ type: () => true, limit: MAX_VIDEO_BYTES + 1024 }), (req, res) => {
+app.put('/api/videos/:id/file', express.raw({ type: () => true, limit: MAX_VIDEO_BYTES + 1024 }), async (req, res) => {
   try {
     const user = readSession(req);
     if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
@@ -1097,7 +998,8 @@ app.put('/api/videos/:id/file', express.raw({ type: () => true, limit: MAX_VIDEO
     if (video.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
     if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ ok:false, err:'Archivo vacío' });
     const wasReady = !!video.ready;
-    try { storeVideoBuffer(video, req.body); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
+    let upload; try { upload = storeVideoBuffer(video, req.body); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
+    await upload;
     saveDB();
     if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
     res.json({ ok:true, size:video.size, mime:video.mime });
@@ -1147,7 +1049,7 @@ app.delete('/api/videos/:id', (req, res) => {
   if (video.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este video' });
   DB.videos = DB.videos.filter(v => v.id !== req.params.id);
-  { const f = videoFilePath(video); if (f) { try { fs.unlinkSync(f); } catch {} remote.delFile('videos/' + path.basename(f)); } }
+  { const f = videoFilePath(video); if (f) { try { fs.unlinkSync(f); } catch {} persist.delKey('videos/' + path.basename(f)); } }
   saveDB();
   if ((video.privacy || 'public') === 'public') io.emit('video_deleted', { id:req.params.id });
   res.json({ ok:true });
@@ -1466,7 +1368,6 @@ setInterval(() => {
 }, 30000);
 
 server.listen(PORT, () => {
-  remote.syncUp([{ dir: VIDEO_DIR, prefix: 'videos/' }, { dir: TEX_DIR, prefix: 'textures/' }]);
   console.log('');
   console.log('  ╔══════════════════════════════════╗');
   console.log('  ║    CRIX — Servidor Multijugador  ║');
@@ -1476,3 +1377,14 @@ server.listen(PORT, () => {
   console.log('  ╚══════════════════════════════════╝');
   console.log('');
 });
+
+// Render envía SIGTERM en cada deploy: guardar y subir todo lo pendiente antes de salir.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return; shuttingDown = true;
+  console.log(`[${signal}] Guardando datos antes de salir…`);
+  try { saveDB(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
