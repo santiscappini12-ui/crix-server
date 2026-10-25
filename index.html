@@ -273,6 +273,50 @@ input,select,textarea{font-family:var(--font);}
 .gui-li:hover{background:var(--bg3)}.gui-li.sel{background:var(--bg3);color:var(--acc)}
 .gui-li .x{margin-left:auto;opacity:.6}.gui-li .x:hover{opacity:1;color:var(--red)}
 @media(max-width:820px){#gui-left{width:130px}#gui-props{width:190px}}
+/* ═══ LLAMADAS ═══ */
+#call-overlay{background:#06080d;gap:0;overflow:hidden}
+#call-remote{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+#call-remote.audio-only{opacity:0;pointer-events:none;width:2px;height:2px}
+#call-center{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:0 20px;transition:all .3s}
+#call-center.compact{position:absolute;top:18px;left:18px;align-items:flex-start;text-align:left;gap:2px;padding:8px 14px;background:rgba(0,0,0,.45);border-radius:12px}
+#call-center.compact .call-av-big{display:none}
+#call-name{font-family:var(--display);font-size:26px;font-weight:800}
+#call-center.compact #call-name{font-size:15px}
+#call-status{color:var(--text2);font-size:14px}
+#call-kind{font-size:12px;color:var(--text3);letter-spacing:2px;text-transform:uppercase}
+#call-local{position:absolute;right:16px;bottom:104px;width:min(34vw,170px);aspect-ratio:3/4;object-fit:cover;border-radius:14px;background:#111;border:2px solid rgba(255,255,255,.25);transform:scaleX(-1);z-index:3;display:none}
+#call-overlay .call-btns{position:absolute;bottom:28px;left:0;right:0;justify-content:center;z-index:4}
+.call-av-big.ringing{animation:callPulse 1.4s ease-in-out infinite}
+@keyframes callPulse{0%,100%{box-shadow:0 0 0 0 rgba(91,141,239,.55)}50%{box-shadow:0 0 0 22px rgba(91,141,239,0)}}
+/* ═══ COLOR / MATERIAL / TEXTURA (inspector) ═══ */
+.ap-sec{padding:9px 12px 4px;border-top:1px solid var(--border)}
+.ap-hd{display:flex;align-items:center;justify-content:space-between;font-size:9px;font-weight:800;letter-spacing:1.6px;color:var(--text3);text-transform:uppercase;margin-bottom:7px}
+.ap-hd b{color:var(--text2);letter-spacing:0;font-size:10px;text-transform:none;font-weight:600}
+.clr-top{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.clr-sw{position:relative;width:38px;height:30px;border-radius:8px;border:2px solid var(--border);cursor:pointer;overflow:hidden;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,.35)}
+.clr-sw input{position:absolute;inset:-6px;width:60px;height:50px;opacity:0;cursor:pointer}
+.clr-hex{flex:1;font-family:var(--mono);text-transform:uppercase;min-width:0}
+.clr-pal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.clr-dot{aspect-ratio:1;border-radius:6px;border:1.5px solid rgba(255,255,255,.14);cursor:pointer;padding:0;transition:transform .1s}
+.clr-dot:hover{transform:scale(1.14)}.clr-dot.sel{outline:2px solid var(--acc);outline-offset:1px}
+.clr-recent{display:flex;gap:4px;margin-top:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--text3)}
+.clr-recent .clr-dot{width:20px;aspect-ratio:1}
+.mat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.mat-tile{display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 2px 4px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg3);cursor:pointer;color:var(--text2);font-size:9.5px;line-height:1.1;transition:border-color .12s,transform .1s}
+.mat-tile:hover{border-color:var(--text3);transform:translateY(-1px)}
+.mat-tile.sel{border-color:var(--acc);color:var(--text);background:rgba(91,141,239,.14)}
+.mat-prev{width:100%;aspect-ratio:1;max-width:46px;border-radius:7px;background-size:cover;background-position:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)}
+.mat-nm{text-align:center;overflow:hidden;text-overflow:ellipsis;max-width:100%;white-space:nowrap}
+.tr-row{display:flex;align-items:center;gap:8px}.tr-row input[type=range]{flex:1;accent-color:var(--acc)}.tr-row span{width:34px;text-align:right;font-size:10px;color:var(--text2);font-family:var(--mono)}
+.tex-cur{display:flex;gap:8px;align-items:center;margin-bottom:8px;padding:6px;background:var(--bg3);border-radius:9px;border:1px solid var(--border)}
+.tex-cur img{width:40px;height:40px;border-radius:6px;object-fit:cover;background:#000;flex-shrink:0}
+.tex-cur .nm{flex:1;min-width:0;font-size:10.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tex-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px}
+.tex-th{aspect-ratio:1;border-radius:7px;border:1.5px solid var(--border);background-size:cover;background-position:center;cursor:pointer;padding:0;background-color:#000}
+.tex-th.sel{outline:2px solid var(--acc);outline-offset:1px}
+.tex-add{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box;cursor:pointer;border:1.5px dashed var(--border);border-radius:9px;padding:9px;font-size:11px;color:var(--text2)}
+.tex-add:hover{border-color:var(--acc);color:var(--acc)}
+.tex-note{font-size:9.5px;color:var(--text3);line-height:1.5;margin-top:6px}
 #g-back-btn{position:fixed;top:10px;right:10px;z-index:80;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.1);color:white;padding:6px 13px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:11px;font-weight:700;}
 /* ═══ MODAL ═══ */
 .mo-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:600;display:none;align-items:center;justify-content:center;padding:16px;}
@@ -592,7 +636,8 @@ input,select,textarea{font-family:var(--font);}
   <div class="field-grp"><label class="field-lbl">Categoría</label><select class="inp" id="uv-cat"><option value="gaming">🎮 Gaming</option><option value="tutorial">📚 Tutorial</option><option value="music">🎵 Música</option><option value="art">🎨 Arte</option><option value="other">🌐 Otro</option></select></div>
   <div class="field-grp"><label class="field-lbl">Visibilidad</label><select class="inp" id="uv-privacy"><option value="public">🌍 Público: visible para todos</option><option value="private">🔒 Privado: solo yo</option></select></div>
   <div class="field-grp"><label class="field-lbl">Archivo de video</label><label class="upload-zone" style="padding:12px">📹 Seleccioná un video<input type="file" id="uv-file" accept="video/*" style="display:none" onchange="previewVideoUpload(event)"></label><video id="uv-preview" style="display:none;width:100%;border-radius:8px;margin-top:8px;max-height:180px" controls></video></div>
-  <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-upload-video')">Cancelar</button><button class="btn btn-p" onclick="confirmUploadVideo()">📤 Publicar</button></div>
+  <div id="uv-progress" style="display:none;margin:4px 0 12px"><div style="height:8px;background:var(--bg3);border-radius:6px;overflow:hidden"><div id="uv-progress-bar" style="height:100%;width:0;background:var(--acc);transition:width .15s"></div></div><div id="uv-progress-txt" style="font-size:11px;color:var(--text2);margin-top:4px"></div></div>
+  <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-upload-video')">Cancelar</button><button class="btn btn-p" id="uv-submit" onclick="confirmUploadVideo()">📤 Publicar</button></div>
 </div>
 </div>
 <div id="s-studio" class="screen">
@@ -872,19 +917,16 @@ input,select,textarea{font-family:var(--font);}
 </div>
 </div>
 <!-- ═══ CALL OVERLAY ═══ -->
-<div id="call-overlay">
-  <div class="call-av-big" id="call-av"></div>
-  <div style="font-family:var(--display);font-size:22px;font-weight:800" id="call-name"></div>
-  <div style="color:var(--text2);font-size:13px" id="call-status">Llamando...</div>
-  <div id="vid-wrap" style="display:none;gap:10px;max-width:700px;width:100%">
-    <video id="vid-remote" style="flex:1;background:#111;border-radius:12px;aspect-ratio:16/9;object-fit:cover" autoplay playsinline></video>
-    <video id="vid-local" style="width:130px;background:#111;border-radius:10px;aspect-ratio:16/9;object-fit:cover" autoplay playsinline muted></video>
+<div id="call-overlay" role="dialog" aria-label="Llamada">
+  <video id="call-remote" class="audio-only" autoplay playsinline></video>
+  <div id="call-center">
+    <div id="call-kind"></div>
+    <div class="call-av-big" id="call-av"></div>
+    <div id="call-name"></div>
+    <div id="call-status">Llamando...</div>
   </div>
-  <div class="call-btns">
-    <button class="call-btn" style="background:#2a2f3e" onclick="toggleMute()" id="mute-btn">🎤</button>
-    <button class="call-btn" style="background:#2a2f3e" onclick="toggleCam()" id="cam-btn">📹</button>
-    <button class="call-btn" style="background:var(--red)" onclick="endCall()">📵</button>
-  </div>
+  <video id="call-local" autoplay playsinline muted></video>
+  <div class="call-btns" id="call-btns"></div>
 </div>
 <div id="toast"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -1057,7 +1099,7 @@ async function decryptChatMessage(convIdValue,message) {
 function nextId(type) { const k = 'ctr_' + type; let n = DB.get(k) || 1000; n++; DB.set(k, n); return String(n); }
 const AV_COLORS = ['#5b8def','#8b5cf6','#ec4899','#22d3a6','#f59e0b','#ef4444','#f97316','#38bdf8','#a78bfa'];
 function randColor() { return AV_COLORS[Math.floor(Math.random() * AV_COLORS.length)]; }
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function timeStr() { return new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); }
 function dateStr(iso) { return new Date(iso).toLocaleDateString('es-AR',{year:'numeric',month:'short',day:'numeric'}); }
 let ME = null;
@@ -1698,12 +1740,12 @@ let mediaRec = null, audioChunks = [];
 function toggleRecord() { const btn = document.getElementById('rec-btn'); if (mediaRec && mediaRec.state === 'recording') { mediaRec.stop(); btn.classList.remove('rec'); btn.textContent = '🎤'; } else { navigator.mediaDevices.getUserMedia({audio:true}).then(stream => { audioChunks = []; mediaRec = new MediaRecorder(stream); mediaRec.ondataavailable = e => audioChunks.push(e.data); mediaRec.onstop = () => { const blob = new Blob(audioChunks, {type:'audio/webm'}); const r = new FileReader(); r.onload = ev => { if (activeConvId) pushMsg(activeConvId, {type:'audio',data:ev.target.result,from:ME.id,time:timeStr(),read:false}); }; r.readAsDataURL(blob); stream.getTracks().forEach(t => t.stop()); }; mediaRec.start(); btn.classList.add('rec'); btn.textContent = '⏹️'; }).catch(() => showToast('⚠️ Sin acceso al micrófono')); } }
 let callStream = null;
 let _muted = false, _camOff = false;
-function toggleMute() { _muted = !_muted; if (callStream) callStream.getAudioTracks().forEach(t => t.enabled = !_muted); document.getElementById('mute-btn').textContent = _muted ? '🔇' : '🎤'; }
-function toggleCam() { _camOff = !_camOff; if (callStream) callStream.getVideoTracks().forEach(t => t.enabled = !_camOff); document.getElementById('cam-btn').textContent = _camOff ? '📷' : '📹'; }
+function toggleMute() { callToggleMute(); }
+function toggleCam() { callToggleCam(); }
 let stScene, stCamera, stRenderer; let stParts = [], stScripts = []; let selPart = null, selOutline = null, gizmoArrows = []; let stTool = 'sel'; let stMapId = null, stInited = false, stPlaytesting = false; let stCamTheta = Math.PI/4, stCamPhi = 0.4, stCamDist = 35, stCamTarget = new THREE.Vector3(); let stDrag = false, stLX = 0, stLY = 0; let gizmoDragging = false, gizmoAxis = null, gizmoStart = new THREE.Vector3(), gizmoLastAngle = 0, gizmoStartRotation = new THREE.Vector3(), gizmoRotationDelta = 0; let stSnap = 1, stUndoStack = [], stRedoStack = [], stHistoryMapId = null, stHistoryApplying = false;
 function initStudio() { if (!stInited) { stInited = true; _setupStRenderer(); _setupStInput(); _stLoop(); } loadMyMap(); }
 function _setupStRenderer() { stScene = new THREE.Scene(); stScene.background = new THREE.Color(0x0d1020); stScene.fog = new THREE.FogExp2(0x0d1020, 0.007); const wrap = document.getElementById('stu-canvas-wrap'); stCamera = new THREE.PerspectiveCamera(60, wrap.clientWidth/wrap.clientHeight, 0.1, 1000); stRenderer = new THREE.WebGLRenderer({antialias:true}); stRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); stRenderer.shadowMap.enabled = true; wrap.appendChild(stRenderer.domElement); stScene.add(new THREE.AmbientLight(0xffffff, 0.55)); const sun = new THREE.DirectionalLight(0xffffff, 0.85); sun.position.set(40,60,30); sun.castShadow = true; stScene.add(sun); const grid = new THREE.GridHelper(200, 50, 0x1a2035, 0x111828); stScene.add(grid); new ResizeObserver(() => { stCamera.aspect = wrap.clientWidth/wrap.clientHeight; stCamera.updateProjectionMatrix(); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); }).observe(wrap); }
-function _setupStInput() { const el = stRenderer.domElement; el.addEventListener('mousedown', e => { if (e.button === 1 || e.button === 2) { stDrag = true; stLX = e.clientX; stLY = e.clientY; } if (e.button === 0) onStClick(e); }); window.addEventListener('mouseup', () => { stDrag = false; gizmoDragging = false; if (selPart) { updateGizmoPos(); renderProps(selPart); } }); window.addEventListener('mousemove', e => { if (gizmoDragging && selPart) onGizmoDrag(e); if (stDrag) { stCamTheta -= (e.clientX - stLX) * 0.01; stCamPhi = Math.max(0.05, Math.min(Math.PI/2.1, stCamPhi + (e.clientY - stLY) * 0.01)); stLX = e.clientX; stLY = e.clientY; } }); el.addEventListener('wheel', e => { stCamDist = Math.max(3, Math.min(200, stCamDist + e.deltaY * 0.07)); e.preventDefault(); }, {passive:false}); el.addEventListener('contextmenu', e => e.preventDefault()); let panDrag = false, px = 0, py = 0; el.addEventListener('mousedown', e => { if (e.shiftKey) { panDrag = true; px = e.clientX; py = e.clientY; } }); window.addEventListener('mouseup', () => panDrag = false); window.addEventListener('mousemove', e => { if (!panDrag) return; const r = new THREE.Vector3(); stCamera.getWorldDirection(r); const up = new THREE.Vector3(0,1,0); r.cross(up).normalize(); stCamTarget.addScaledVector(r, -(e.clientX-px)*0.05); stCamTarget.y += (e.clientY-py)*0.05; px = e.clientX; py = e.clientY; }); document.addEventListener('keydown', studioShortcuts); }
+function _setupStInput() { const el = stRenderer.domElement; el.addEventListener('mousedown', e => { if (e.button === 1 || e.button === 2) { stDrag = true; stLX = e.clientX; stLY = e.clientY; } if (e.button === 0) onStClick(e); }); window.addEventListener('mouseup', () => { const wasDragging = gizmoDragging; stDrag = false; gizmoDragging = false; if (wasDragging && selPart) { updateGizmoPos(); renderProps(selPart); } }); window.addEventListener('mousemove', e => { if (gizmoDragging && selPart) onGizmoDrag(e); if (stDrag) { stCamTheta -= (e.clientX - stLX) * 0.01; stCamPhi = Math.max(0.05, Math.min(Math.PI/2.1, stCamPhi + (e.clientY - stLY) * 0.01)); stLX = e.clientX; stLY = e.clientY; } }); el.addEventListener('wheel', e => { stCamDist = Math.max(3, Math.min(200, stCamDist + e.deltaY * 0.07)); e.preventDefault(); }, {passive:false}); el.addEventListener('contextmenu', e => e.preventDefault()); let panDrag = false, px = 0, py = 0; el.addEventListener('mousedown', e => { if (e.shiftKey) { panDrag = true; px = e.clientX; py = e.clientY; } }); window.addEventListener('mouseup', () => panDrag = false); window.addEventListener('mousemove', e => { if (!panDrag) return; const r = new THREE.Vector3(); stCamera.getWorldDirection(r); const up = new THREE.Vector3(0,1,0); r.cross(up).normalize(); stCamTarget.addScaledVector(r, -(e.clientX-px)*0.05); stCamTarget.y += (e.clientY-py)*0.05; px = e.clientX; py = e.clientY; }); document.addEventListener('keydown', studioShortcuts); }
 function onStClick(e) { if (gizmoDragging) return; const wrap=document.getElementById('stu-canvas-wrap'), rect=wrap.getBoundingClientRect(), mouse=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1), ray=new THREE.Raycaster(); ray.setFromCamera(mouse,stCamera); if(gizmoArrows.length){const ghits=ray.intersectObjects(gizmoArrows,false);if(ghits.length){recordStudioHistory();gizmoDragging=true;gizmoAxis=ghits[0].object.userData.axis;gizmoStart.copy(ghits[0].point);gizmoStartRotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0);gizmoRotationDelta=0;gizmoLastAngle=rotationPointerAngle(gizmoAxis,gizmoStart,selPart.mesh.position);return;}} const meshes=stParts.map(p=>p.mesh).filter(Boolean),hits=ray.intersectObjects(meshes,true); if(hits.length){const root=hits[0].object.userData.studioRoot||hits[0].object;selectPart(stParts.find(p=>p.mesh===root||p.mesh===hits[0].object));}else deselect(); }
 function rotationPointerAngle(axis, point, center) { const v=point.clone().sub(center); return axis==='x'?Math.atan2(v.y,v.z):axis==='y'?Math.atan2(v.x,v.z):Math.atan2(v.y,v.x); }
 function onGizmoDrag(e) { if(!selPart||!gizmoAxis)return; const wrap=document.getElementById('stu-canvas-wrap'),rect=wrap.getBoundingClientRect(),mouse=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1),ray=new THREE.Raycaster(); ray.setFromCamera(mouse,stCamera); const center=selPart.mesh.position.clone(); let normal;if(stTool==='rot'){normal=new THREE.Vector3(gizmoAxis==='x'?1:0,gizmoAxis==='y'?1:0,gizmoAxis==='z'?1:0);}else{normal=gizmoAxis==='y'?new THREE.Vector3(0,0,1):new THREE.Vector3(0,1,0);} const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(normal,center),hitPt=new THREE.Vector3(); if(!ray.ray.intersectPlane(plane,hitPt))return;
@@ -1721,13 +1763,13 @@ function studioUndo() { if(!stUndoStack.length)return; const current=studioSnaps
 function studioRedo() { if(!stRedoStack.length)return; const current=studioSnapshot(), next=stRedoStack.pop(); if(current)stUndoStack.push(current); applyStudioSnapshot(next); updateHubHistoryButtons(); showToast('↷ Cambio rehecho'); }
 function setStudioProjectName(value) { const name=String(value||'').trim().slice(0,80)||'Proyecto sin nombre'; const maps=getMaps(), map=maps[stMapId]; if(!map)return; if(name===map.name)return; recordStudioHistory(); map.name=name; setMaps(maps); const input=document.getElementById('hub-project-name'); if(input)input.value=name; updateStStatus(); }
 function studioShortcuts(e) { if(!document.getElementById('s-studio')?.classList.contains('active'))return; const overlay=document.getElementById('code-overlay'); if(overlay?.classList.contains('open')||document.getElementById('gui-overlay')?.classList.contains('open'))return; const tag=document.activeElement?.tagName; if(['INPUT','TEXTAREA','SELECT'].includes(tag)||document.activeElement?.isContentEditable)return; if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();stuSave();return;} if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?studioRedo():studioUndo();return;} if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();studioRedo();return;} if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();stuDelete();return;} if(e.key.toLowerCase()==='f'&&selPart){stCamTarget.copy(selPart.mesh.position);stCamDist=Math.max(8,Math.min(stCamDist,20));} }
-function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = nextId('map'); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', privacy:'public', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; if(stHistoryMapId!==stMapId){stHistoryMapId=stMapId;stUndoStack=[];stRedoStack=[];updateHubHistoryButtons();} const title=document.getElementById('hub-project-name'); if(title)title.value=m.name||'Proyecto sin nombre'; stScripts = m.scripts || []; stSettings = {...(m.settings||{})}; stGuis = JSON.parse(JSON.stringify(m.guis||[]));
+function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = nextId('map'); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', privacy:'public', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; if(stHistoryMapId!==stMapId){stHistoryMapId=stMapId;stUndoStack=[];stRedoStack=[];updateHubHistoryButtons();} const title=document.getElementById('hub-project-name'); if(title)title.value=m.name||'Proyecto sin nombre'; stScripts = m.scripts || []; stSettings = {...(m.settings||{})}; stGuis = JSON.parse(JSON.stringify(m.guis||[])); stTexNames = {...(m.textureNames||{})}; registerMapTextures(m);
   if (m.lighting) stLighting = {...stLighting, ...m.lighting};
   clearSt(); (m.parts||[]).forEach(d => addPartMesh({...d})); refreshExplorer();
   setTimeout(applyLighting, 100);
 }
 function clearSt() { stParts.forEach(p => p.mesh && stScene.remove(p.mesh)); stParts = []; if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; }
-function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,2,1,0,3,2, 3,5,2,3,4,5, 0,4,3, 1,5,2,0,4,1, 1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color||'#888888'), transparent: Number(d.transparent||0) > 0, opacity: 1 - Number(d.transparent||0), wireframe: d.type === 'TrussPart' }); if (d.material === 'Neon') { mat.emissive = new THREE.Color(d.color||'#00ff88'); mat.emissiveIntensity = 0.7; } if (d.material === 'Metal') { mat.shininess = 120; mat.specular = new THREE.Color(0x888888); } if (d.material === 'Glass') { mat.transparent = true; mat.opacity = Math.max(0.2, 1-Number(d.transparent||0.5)); mat.shininess = 200; } const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); mesh.castShadow = true; mesh.receiveShadow = true; return mesh; }
+function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,2,1,0,3,2, 3,5,2,3,4,5, 0,4,3, 1,5,2,0,4,1, 1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); applyPartUVs(geo, d, sx, sy, sz); const mat = buildPartMaterial(d); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); mesh.castShadow = true; mesh.receiveShadow = true; return mesh; }
 function makeHumanoidRig(d) { const root=new THREE.Group(),bodyMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.color||'#cc6644')}),skinMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.skinColor||'#f0bf98')});root.position.set(d.x||0,d.y||0,d.z||0);root.rotation.set(d.rx||0,d.ry||0,d.rz||0);root.scale.set(d.sx||1,(d.sy||2.6)/2.6,d.sz||1);const addBox=(size,material,position,parent=root)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.position.set(...position);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;};addBox([0.92,1.15,0.48],bodyMat,[0,1.32,0]);const head=new THREE.Mesh(new THREE.SphereGeometry(0.37,16,12),skinMat);head.position.set(0,2.2,0);head.castShadow=true;root.add(head);const armL=new THREE.Group(),armR=new THREE.Group(),legL=new THREE.Group(),legR=new THREE.Group();armL.position.set(-0.58,1.78,0);armR.position.set(0.58,1.78,0);legL.position.set(-0.24,0.78,0);legR.position.set(0.24,0.78,0);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armL);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armR);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legL);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legR);root.add(armL,armR,legL,legR);root.userData.rig={armL,armR,legL,legR};root.traverse(child=>child.userData.studioRoot=root);return root; }
 function addPartMesh(d) { if(d.anchored===undefined)d.anchored=true; if(d.canCollide===undefined)d.canCollide=true; const mesh=d.isNPC?makeHumanoidRig(d):makeMesh(d); stScene.add(mesh); const entry = {data:d, mesh}; stParts.push(entry); return entry; }
 async function importObjModel(event) { const input=event.target,file=input.files&&input.files[0];input.value='';if(!file)return;if(file.size>2*1024*1024){showToast('El OBJ no puede superar 2 MB');return;}try{const text=await file.text(),vertices=[],positions=[];for(const raw of text.split(/\r?\n/)){const line=raw.trim();if(line.startsWith('v ')){const values=line.slice(2).trim().split(/\s+/).slice(0,3).map(Number);if(values.length===3&&values.every(Number.isFinite))vertices.push(values);}else if(line.startsWith('f ')){const face=line.slice(2).trim().split(/\s+/).map(token=>{const rawIndex=parseInt(token.split('/')[0],10);return rawIndex<0?vertices.length+rawIndex:rawIndex-1;});if(face.length<3||face.some(index=>index<0||index>=vertices.length))continue;for(let i=1;i<face.length-1;i++)for(const index of [face[0],face[i],face[i+1]])positions.push(...vertices[index]);if(positions.length>180000)throw new Error('El modelo supera el límite de 60.000 vértices');}}if(positions.length<9)throw new Error('El OBJ no contiene caras triangulables');const mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];for(let i=0;i<positions.length;i+=3)for(let axis=0;axis<3;axis++){mins[axis]=Math.min(mins[axis],positions[i+axis]);maxs[axis]=Math.max(maxs[axis],positions[i+axis]);}const center=mins.map((value,axis)=>(value+maxs[axis])/2),extent=Math.max(...maxs.map((value,axis)=>value-mins[axis]));if(!extent)throw new Error('El modelo no tiene tamaño');const normalized=new Float32Array(positions.length);for(let i=0;i<positions.length;i++)normalized[i]=(positions[i]-center[i%3])*4/extent;const bytes=new Uint8Array(normalized.buffer);let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));const data={id:'model'+Date.now(),type:'ImportedMesh',name:file.name.replace(/\.obj$/i,'').slice(0,80)||'Modelo OBJ',x:stCamTarget.x,y:stCamTarget.y,z:stCamTarget.z,sx:4,sy:4,sz:4,rx:0,ry:0,rz:0,color:'#d7deed',material:'SmoothPlastic',anchored:true,canCollide:true,transparent:0,meshData:btoa(binary)};recordStudioHistory();const entry=addPartMesh(data);refreshExplorer();selectPart(entry);updateStStatus();showToast('🧩 Modelo OBJ importado. La geometría se guardará con el proyecto.');}catch(err){showToast(err.message||'No se pudo importar el OBJ');} }
@@ -1755,7 +1797,7 @@ function updateGizmoPos() { if(!selPart)return;const pos=selPart.mesh.position,d
 function updateSelectionOutline() { if(!selOutline||!selPart)return;if(selOutline.isBoxHelper){selOutline.update();return;}selOutline.position.copy(selPart.mesh.position);selOutline.rotation.copy(selPart.mesh.rotation);selOutline.scale.copy(selPart.mesh.scale).multiplyScalar(1.02); }
 function selectPart(entry) { if (!entry) return; deselect(); selPart = entry; try { if(entry.mesh.isMesh){const og=entry.mesh.geometry.clone(),om=new THREE.MeshBasicMaterial({color:0x5b8def,wireframe:true,depthTest:false});selOutline=new THREE.Mesh(og,om);selOutline.renderOrder=998;}else selOutline=new THREE.BoxHelper(entry.mesh,0x5b8def);stScene.add(selOutline);updateSelectionOutline(); } catch {} buildGizmo(entry); renderProps(entry); refreshExplorer(); }
 function deselect() { if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; document.getElementById('props-body').innerHTML = '<div style="padding:20px 12px;color:var(--text3);font-size:11px;text-align:center;line-height:1.6">Seleccioná un objeto<br>para editar sus propiedades</div>'; refreshExplorer(); }
-function renderProps(entry) { const d=entry.data,materials=['SmoothPlastic','Brick','Wood','Metal','Neon','Glass','Grass','Sand','Concrete','Ice','Rock','DiamondPlate'],degrees=key=>((Number(d[key])||0)*180/Math.PI).toFixed(1),step=stSnap||0.5; document.getElementById('props-body').innerHTML=`<div class="prop-row"><div class="prop-lbl">Nombre</div><input class="prop-inp" value="${esc(d.name||'')}" maxlength="80" onchange="sp('name',this.value);refreshExplorer()"></div><div class="prop-row"><div class="prop-lbl">Posición · studs (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${Number(d.x||0).toFixed(2)}" step="${step}" onchange="spn('x',this.value)"><input class="prop-inp" type="number" value="${Number(d.y||0).toFixed(2)}" step="${step}" onchange="spn('y',this.value)"><input class="prop-inp" type="number" value="${Number(d.z||0).toFixed(2)}" step="${step}" onchange="spn('z',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Rotación · grados (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${degrees('rx')}" step="15" onchange="spRot('rx',this.value)"><input class="prop-inp" type="number" value="${degrees('ry')}" step="15" onchange="spRot('ry',this.value)"><input class="prop-inp" type="number" value="${degrees('rz')}" step="15" onchange="spRot('rz',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Tamaño (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${d.sx||4}" step="${step}" min="0.1" onchange="spSize('sx',this.value)"><input class="prop-inp" type="number" value="${d.sy||4}" step="${step}" min="0.1" onchange="spSize('sy',this.value)"><input class="prop-inp" type="number" value="${d.sz||4}" step="${step}" min="0.1" onchange="spSize('sz',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Color</div><input type="color" value="${d.color||'#888888'}" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer" onchange="recordStudioHistory();sp('color',this.value);rebuildMesh()"></div><div class="prop-row"><div class="prop-lbl">Material</div><select class="prop-inp" onchange="recordStudioHistory();sp('material',this.value);rebuildMesh()">${materials.map(o=>`<option ${d.material===o?'selected':''}>${o}</option>`).join('')}</select></div><div class="prop-row"><div class="prop-lbl">Transparencia</div><input class="prop-inp" type="number" value="${d.transparent||0}" step="0.05" min="0" max="1" onchange="recordStudioHistory();sp('transparent',this.value);rebuildMesh()"></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('anchored')"><div class="tgl ${d.anchored?'on':''}" id="tgl-anchored"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Anchored</span></div></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('canCollide')"><div class="tgl ${d.canCollide?'on':''}" id="tgl-canCollide"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">CanCollide</span></div></div>${behaviorFields(d)}<div style="padding:8px;display:flex;gap:4px"><button class="st-btn" style="flex:1" onclick="stuDuplicate()">⎘ Duplicar</button><button class="st-btn red" style="flex:1" onclick="stuDelete()">✕ Borrar</button></div>`; }
+function renderProps(entry) { const d=entry.data,materials=['SmoothPlastic','Brick','Wood','Metal','Neon','Glass','Grass','Sand','Concrete','Ice','Rock','DiamondPlate'],degrees=key=>((Number(d[key])||0)*180/Math.PI).toFixed(1),step=stSnap||0.5; document.getElementById('props-body').innerHTML=`<div class="prop-row"><div class="prop-lbl">Nombre</div><input class="prop-inp" value="${esc(d.name||'')}" maxlength="80" onchange="sp('name',this.value);refreshExplorer()"></div><div class="prop-row"><div class="prop-lbl">Posición · studs (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${Number(d.x||0).toFixed(2)}" step="${step}" onchange="spn('x',this.value)"><input class="prop-inp" type="number" value="${Number(d.y||0).toFixed(2)}" step="${step}" onchange="spn('y',this.value)"><input class="prop-inp" type="number" value="${Number(d.z||0).toFixed(2)}" step="${step}" onchange="spn('z',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Rotación · grados (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${degrees('rx')}" step="15" onchange="spRot('rx',this.value)"><input class="prop-inp" type="number" value="${degrees('ry')}" step="15" onchange="spRot('ry',this.value)"><input class="prop-inp" type="number" value="${degrees('rz')}" step="15" onchange="spRot('rz',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Tamaño (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${d.sx||4}" step="${step}" min="0.1" onchange="spSize('sx',this.value)"><input class="prop-inp" type="number" value="${d.sy||4}" step="${step}" min="0.1" onchange="spSize('sy',this.value)"><input class="prop-inp" type="number" value="${d.sz||4}" step="${step}" min="0.1" onchange="spSize('sz',this.value)"></div></div>${appearanceFields(d)}<div class="prop-row"><div class="tgl-row" onclick="toggleProp('anchored')"><div class="tgl ${d.anchored?'on':''}" id="tgl-anchored"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Anchored</span></div></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('canCollide')"><div class="tgl ${d.canCollide?'on':''}" id="tgl-canCollide"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">CanCollide</span></div></div>${behaviorFields(d)}<div style="padding:8px;display:flex;gap:4px"><button class="st-btn" style="flex:1" onclick="stuDuplicate()">⎘ Duplicar</button><button class="st-btn red" style="flex:1" onclick="stuDelete()">✕ Borrar</button></div>`; }
 function sp(k,v){if(!selPart)return;recordStudioHistory();selPart.data[k]=String(v).slice(0,80);}
 function spn(k,v){if(!selPart)return;recordStudioHistory();selPart.data[k]=parseFloat(v)||0;selPart.mesh.position.set(selPart.data.x,selPart.data.y,selPart.data.z);updateSelectionOutline();updateGizmoPos();}
 function spRot(k,v){if(!selPart)return;recordStudioHistory();selPart.data[k]=(parseFloat(v)||0)*Math.PI/180;selPart.mesh.rotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0);updateSelectionOutline();}
@@ -1858,7 +1900,7 @@ function toggleFolder(el) { el.classList.toggle('open'); }
 function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖',ImportedMesh:'🧩'}[t]||'📦'; }
 function updateStStatus() { document.getElementById('stu-status').textContent = `${stParts.length} partes · ${stScripts.length} scripts · #${stMapId||'?'}`; }
 function delScript(id) { if(!stScripts.some(s=>s.id===id))return;recordStudioHistory();stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
-function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); setMaps(maps); showToast('💾 Guardado'); }
+function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); maps[stMapId].textureNames = {...stTexNames}; setMaps(maps); showToast('💾 Guardado'); if (Object.keys(stTexData).length) setTimeout(stPushTextures, 900); }
 function stuTest() { stuSave(); if(stMapId){stPlaytesting=true;const back=document.getElementById('g-back-btn');if(back)back.textContent='⏹ Volver a Crix Hub';playMap(stMapId);} }
 let pubThumbData = null;
 function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; openModal('mo-publish'); }
@@ -2003,8 +2045,8 @@ function runScript(scriptOverride, partsOverride) {
 }
 const SCRIPT_TICK_MS=50, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=80, SCRIPT_MAX_PARTS=2000;
 let runtimeScripts=new Map(), runtimeObjects=new Map(), runtimeWorkspaceBase=[], runtimeTickHandle=null, runtimePhysicsHandle=null, currentGameSession=0, netServerScriptsActive=false, networkRuntimePartIds=new Set();
-function normalizeGamePart(id,source={}) { const pos=source.position||{},size=source.size||{},num=(v,d,min=-10000,max=10000)=>{let n=Number(v);if(!Number.isFinite(n))n=d;return Math.max(min,Math.min(max,n));},type=['Block','Sphere','Cylinder','Wedge','TrussPart','ImportedMesh'].includes(source.type)?source.type:'Block',color=/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?source.color:'#5b8def',materials=['SmoothPlastic','Neon','Metal','Glass','Grass','Brick','Wood'];
-  return {id:String(id),name:String(source.name||'Part').slice(0,80),type,x:num(source.x??pos.x??pos.X,0),y:num(source.y??pos.y??pos.Y,0),z:num(source.z??pos.z??pos.Z,0),sx:num(source.sx??size.x??size.X,4,0.1,1000),sy:num(source.sy??size.y??size.Y,4,0.1,1000),sz:num(source.sz??size.z??size.Z,4,0.1,1000),rx:num(source.rx,0,-1000,1000),ry:num(source.ry,0,-1000,1000),rz:num(source.rz,0,-1000,1000),color,material:materials.includes(source.material)?source.material:'SmoothPlastic',anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:num(source.transparent,0,0,0.95),behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',behaviorValue:num(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),meshData:source.type==='ImportedMesh'?source.meshData:undefined};
+function normalizeGamePart(id,source={}) { const pos=source.position||{},size=source.size||{},num=(v,d,min=-10000,max=10000)=>{let n=Number(v);if(!Number.isFinite(n))n=d;return Math.max(min,Math.min(max,n));},type=['Block','Sphere','Cylinder','Wedge','TrussPart','ImportedMesh'].includes(source.type)?source.type:'Block',color=/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?source.color:'#5b8def',materials=Object.keys(MATERIAL_DEFS);
+  return {id:String(id),name:String(source.name||'Part').slice(0,80),type,x:num(source.x??pos.x??pos.X,0),y:num(source.y??pos.y??pos.Y,0),z:num(source.z??pos.z??pos.Z,0),sx:num(source.sx??size.x??size.X,4,0.1,1000),sy:num(source.sy??size.y??size.Y,4,0.1,1000),sz:num(source.sz??size.z??size.Z,4,0.1,1000),rx:num(source.rx,0,-1000,1000),ry:num(source.ry,0,-1000,1000),rz:num(source.rz,0,-1000,1000),color,material:materials.includes(source.material)?source.material:'SmoothPlastic',anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:num(source.transparent,0,0,0.95),behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',behaviorValue:num(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:num(source.texScale,4,0.25,64),texTint:source.texTint===true,meshData:source.type==='ImportedMesh'?source.meshData:undefined};
 }
 function _runtimeObjectSummary(object) { const d=object.data; return {id:String(object.id),name:d.name,type:d.type,x:d.x,y:d.y,z:d.z,sx:d.sx,sy:d.sy,sz:d.sz,color:d.color,anchored:d.anchored,canCollide:d.canCollide,material:d.material}; }
 function _scriptWorkspaceSnapshot() { return [...runtimeWorkspaceBase,...Array.from(runtimeObjects.values(),_runtimeObjectSummary)]; }
@@ -2214,6 +2256,7 @@ window.playMap = async function(mapId, instanceId = null) {
     } catch (err) { console.warn('[NET] No se pudo reservar una instancia:', err.message); }
   }
   netServerScriptsActive=!!(targetInstanceId&&ME&&!stPlaytesting&&!getMaps()[mapId]?.isHtmlGame);
+  try { await registerMapTextures(getMaps()[mapId]); } catch {}
   _origPlayMap(mapId);
   setTimeout(() => { if (targetInstanceId) netJoinGame(mapId, targetInstanceId); _patchGameLoopWithNet(); }, 200);
 };
@@ -2242,10 +2285,7 @@ let _vidFilter = 'all';
 let _activeVideoId = null;
 let _uvFileData = null;
 function getVideos() { const v = DB.get('crix_videos'); return Array.isArray(v) ? v : []; }
-function saveVideos(arr) {
-  const light = arr.map(video => video.data && video.data.length > 1500000 ? { ...video, data:null } : video);
-  DB.set('crix_videos', light);
-}
+function saveVideos(arr) { DB.set('crix_videos', arr.map(video => ({ ...video, data: video.data ? '[data]' : null }))); }
 function vidFilter(f, el) {
   _vidFilter = f;
   document.querySelectorAll('#s-videos .filter-btn').forEach(b => b.classList.remove('active'));
@@ -2286,10 +2326,6 @@ async function openVideoPlayer(vid) {
   v.views = (v.views || 0) + 1;
   saveVideos(vids);
   apiRequest('/api/videos/' + encodeURIComponent(vid) + '/view', { method:'POST', body:{} }).then(result => { v.views = result.views; }).catch(() => {});
-  if ((!v.data || v.data === '[data]') && CLOUD_READY) {
-    try { const source = await apiRequest('/api/videos/' + encodeURIComponent(vid) + '/data'); v.data = source.data; }
-    catch (err) { console.warn('[VIDEO] No se pudo cargar el archivo:', err.message); }
-  }
   goTab('home'); // reset screens
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
@@ -2300,22 +2336,21 @@ async function openVideoPlayer(vid) {
     pp.id = 's-video-player-dynamic';
     pp.className = 'screen';
     pp.style.background = '#080a0f';
-    document.querySelector('.screens').appendChild(pp);
+    (document.querySelector('.screens') || document.getElementById('s-home').parentNode).appendChild(pp);
   }
   _activeVideoId = vid;
   const liked = (v.likes||[]).includes(ME.id);
   pp.innerHTML = '<div style="max-width:1000px;margin:0 auto;padding:70px 16px 20px">' +
     '<button class="btn btn-g" style="font-size:12px;margin-bottom:14px" onclick="goTab(\'videos\')">← Volver</button>' +
     '<div style="width:100%;aspect-ratio:16/9;background:#000;border-radius:12px;overflow:hidden;margin-bottom:14px">' +
-    (v.data ? '<video controls autoplay style="width:100%;height:100%" src="' + v.data + '"></video>' :
-     '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text2)">Video no disponible</div>') +
+    videoPlayerHtml(v) +
     '</div>' +
     '<div style="font-family:var(--display);font-size:20px;font-weight:800;margin-bottom:8px">' + esc(v.title) + '</div>' +
     '<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-bottom:12px">' +
     '<span>👁 ' + v.views + ' vistas</span><span>❤️ ' + (v.likes||[]).length + '</span><span>🕒 ' + dateStr(v.created) + '</span>' +
     '</div>' +
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">' +
-    '<div style="width:38px;height:38px;border-radius:50%;background:' + (ME.color||'#5b8def') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + v.authorName[0].toUpperCase() + '</div>' +
+    '<div style="width:38px;height:38px;border-radius:50%;background:' + ((getUsers()[v.authorId]||{}).color||'#5b8def') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + v.authorName[0].toUpperCase() + '</div>' +
     '<div style="flex:1"><div style="font-weight:700">' + esc(v.authorName) + '</div></div>' +
     '<button class="btn ' + (liked?'btn-red':'btn-g') + '" id="vp-like-btn" onclick="toggleVideoLike(\'' + v.id + '\')" >❤️ ' + (v.likes||[]).length + '</button>' +
     '</div>' +
@@ -2378,44 +2413,49 @@ async function deleteVideo(vid) {
   showToast('Video eliminado');
 }
 function openUploadVideo() {
-  _uvFileData = null;
+  _uvFileData = null; _uvFile = null; _uvThumb = null; document.getElementById('uv-file').value = ''; uvProgress(-1);
   document.getElementById('uv-title').value = '';
   document.getElementById('uv-desc').value = '';
   document.getElementById('uv-privacy').value = 'public';
   document.getElementById('uv-preview').style.display = 'none';
   openModal('mo-upload-video');
 }
-function previewVideoUpload(e) {
-  const file = e.target.files[0]; if (!file) return;
-  if (file.size > 30 * 1024 * 1024) { showToast('El video debe ser menor a 30 MB'); return; }
-  const url = URL.createObjectURL(file);
+async function previewVideoUpload(e) {
+  const file = e.target.files && e.target.files[0]; if (!file) return;
+  if (file.size > 60 * 1024 * 1024) { showToast('El video debe pesar menos de 60 MB'); e.target.value = ''; return; }
+  if (file.type && !/^video\/(mp4|webm|ogg|quicktime|x-m4v)$/.test(file.type)) { showToast('Formato no soportado. Usá MP4, WebM u OGG.'); e.target.value = ''; return; }
+  _uvFile = file; _uvThumb = null;
   const preview = document.getElementById('uv-preview');
-  preview.src = url; preview.style.display = 'block';
-  const reader = new FileReader();
-  reader.onload = ev => { _uvFileData = ev.target.result; };
-  reader.readAsDataURL(file);
+  preview.onerror = () => showToast('Tu navegador no puede reproducir este archivo. Probá exportarlo como MP4 (H.264).');
+  preview.src = URL.createObjectURL(file); preview.style.display = 'block';
+  makeVideoThumb(file).then(thumb => { if (_uvFile === file) _uvThumb = thumb; });
 }
 async function confirmUploadVideo() {
   const title = document.getElementById('uv-title').value.trim();
   if (!title) { showToast('Poné un título'); return; }
-  if (!_uvFileData) { showToast('Seleccioná un video primero'); return; }
-  const vids = getVideos();
+  if (!_uvFile) { showToast('Seleccioná un video primero'); return; }
+  const btn = document.getElementById('uv-submit'); btn.disabled = true;
+  const file = _uvFile;
+  if (!_uvThumb) _uvThumb = await makeVideoThumb(file);
   const v = {
-    id: 'v'+Date.now(), title,
+    id: 'v' + Date.now() + Math.random().toString(36).slice(2, 6), title,
     desc: document.getElementById('uv-desc').value.trim(),
     cat: document.getElementById('uv-cat').value,
-    authorId: ME.id, authorName: ME.username,
     privacy: document.getElementById('uv-privacy').value,
-    data: _uvFileData, thumb: null,
-    views: 0, likes: [], comments: [],
-    created: new Date().toISOString()
+    thumb: _uvThumb || null, created: new Date().toISOString()
   };
-  try { await apiRequest('/api/videos', { method:'POST', body:v }); }
-  catch (err) { showToast('No se pudo subir: ' + err.message); return; }
-  vids.push(v); saveVideos(vids);
-  closeModal('mo-upload-video');
-  showToast('¡Video publicado!');
-  openVideoPlayer(v.id);
+  try {
+    await apiRequest('/api/videos', { method:'POST', body:v });
+    uvProgress(0);
+    await uploadVideoFile(v.id, file, uvProgress);
+  } catch (err) {
+    try { await apiRequest('/api/videos/' + encodeURIComponent(v.id), { method:'DELETE' }); } catch {}
+    uvProgress(-1); btn.disabled = false; showToast('No se pudo subir: ' + err.message); return;
+  }
+  const vids = getVideos();
+  vids.push({ ...v, authorId: ME.id, authorName: ME.username, views: 0, likes: [], comments: [], data: '[data]', ready: true });
+  saveVideos(vids); btn.disabled = false; uvProgress(-1);
+  closeModal('mo-upload-video'); showToast('¡Video publicado!'); openVideoPlayer(v.id);
 }
 function initVideos() { renderVideos(); }
 // ══════════════════════════════════════════════════
@@ -2812,57 +2852,10 @@ function sendVoiceMessage(convId, audioData, duration) {
 // LLAMADAS Y VIDEOLLAMADAS (WebRTC simplificado con señalización)
 // ════════════════════════════════════════════════════════════════
 let _callState = null; // { type:'audio'|'video', peerId, stream, peerConn }
-function startCall(peerId, type) {
-  const users = getUsers();
-  const peer = users[peerId];
-  if (!peer) return;
-  if (_callState) { showToast('Ya hay una llamada activa'); return; }
-  // Mostrar UI de llamada
-  showCallUI(peerId, type, 'calling');
-  // Señalizar por socket
-  if (socket) socket.emit('call_invite', { to: peerId, from: ME.id, fromName: ME.username, type });
-}
-function showCallUI(peerId, type, status) {
-  const users = getUsers();
-  const peer = users[peerId] || { username: peerId, color: '#5b8def' };
-  let callUI = document.getElementById('call-overlay');
-  if (!callUI) {
-    callUI = document.createElement('div');
-    callUI.id = 'call-overlay';
-    callUI.style.cssText = 'position:fixed;inset:0;background:rgba(8,10,15,.97);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px';
-    document.body.appendChild(callUI);
-  }
-  _callState = { peerId, type, status };
-  const statusText = status === 'calling' ? 'Llamando...' : status === 'incoming' ? 'Llamada entrante' : 'En llamada';
-  callUI.innerHTML =
-    '<div style="font-size:14px;color:var(--text2);letter-spacing:2px;text-transform:uppercase">' + (type === 'video' ? '📹 Videollamada' : '📞 Llamada de voz') + '</div>' +
-    '<div style="width:90px;height:90px;border-radius:50%;background:' + (peer.color||'#5b8def') + ';display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:800;border:3px solid rgba(255,255,255,.2)">' + (peer.username||'?')[0].toUpperCase() + '</div>' +
-    '<div style="font-family:var(--display);font-size:28px;font-weight:800">' + esc(peer.username) + '</div>' +
-    '<div style="font-size:14px;color:var(--text2)" id="call-status">' + statusText + '</div>' +
-    (type === 'video' ? '<video id="local-video" autoplay muted style="width:180px;border-radius:12px;display:none"></video>' : '') +
-    (type === 'video' ? '<video id="remote-video" autoplay style="width:320px;border-radius:12px;display:none"></video>' : '') +
-    '<div style="display:flex;gap:16px;margin-top:10px">' +
-    (status === 'incoming' ? '<button class="btn btn-p" style="width:60px;height:60px;border-radius:50%;font-size:24px" onclick="acceptCall()">📞</button>' : '') +
-    '<button class="btn btn-red" style="width:60px;height:60px;border-radius:50%;font-size:24px" onclick="endCall()">📵</button>' +
-    (status === 'active' ? '<button class="btn btn-g" id="mute-btn" style="width:50px;height:50px;border-radius:50%;font-size:18px" onclick="toggleMuteCall()">🎤</button>' : '') +
-    '</div>';
-}
-function acceptCall() {
-  if (!_callState) return;
-  const el = document.getElementById('call-status');
-  if (el) el.textContent = 'Conectando...';
-  if (socket) socket.emit('call_accept', { to: _callState.peerId, from: ME.id });
-  _callState.status = 'active';
-  showCallUI(_callState.peerId, _callState.type, 'active');
-}
-function endCall() {
-  if (_callState && socket) socket.emit('call_end', { to: _callState.peerId, from: ME.id });
-  _callState = null;
-  const overlay = document.getElementById('call-overlay');
-  if (overlay) overlay.remove();
-  // Detener streams
-  if (window._localStream) { window._localStream.getTracks().forEach(t => t.stop()); window._localStream = null; }
-}
+async function startCall(peerId, type) { return callStart(peerId, type); }
+function showCallUI() { callRender(); }
+async function acceptCall() { return callAccept(); }
+function endCall(reason) { return callHangup(typeof reason === 'string' ? reason : ''); }
 function toggleMuteCall() {
   if (!window._localStream) return;
   const audioTrack = window._localStream.getAudioTracks()[0];
@@ -2876,7 +2869,7 @@ function toggleMuteCall() {
 // SOCKET EVENTS PARA LLAMADAS Y SOLICITUDES
 // ════════════════════════════════════════════════════════════════
 function initCallSocketEvents() {
-  if (!socket) return;
+  if (!socket || socket._callEv) return; socket._callEv = true;
   socket.on('friend_request', ({ from, fromName }) => {
     refreshCloudContent().then(() => {
       renderFriendRequests();
@@ -2891,20 +2884,7 @@ function initCallSocketEvents() {
     sendBrowserNotif('Solicitud aceptada', fromName + ' ahora es tu amigo en Crix');
     renderProfile(ME.id);
   });
-  socket.on('call_invite', ({ from, fromName, type }) => {
-    _callState = { peerId: from, type, status: 'incoming' };
-    showCallUI(from, type, 'incoming');
-    sendBrowserNotif(fromName + ' te llama', type === 'video' ? '📹 Videollamada entrante' : '📞 Llamada de voz entrante');
-  });
-  socket.on('call_accept', ({ from }) => {
-    if (_callState && _callState.peerId === from) {
-      _callState.status = 'active';
-      showCallUI(_callState.peerId, _callState.type, 'active');
-    }
-  });
-  socket.on('call_end', ({ from }) => {
-    if (_callState && _callState.peerId === from) endCall();
-  });
+  callInitSignaling();
 }
 // ════════════════════════════════════════════════════════════════
 // RENDERIZADO DE MENSAJES CON SOPORTE AUDIO
@@ -3676,6 +3656,504 @@ function codeInsertExample(index) {
   showToast('Ejemplo insertado: ' + ex[0] + (ex[1] === 'LocalScript' && s.type !== 'LocalScript' ? ' (funciona mejor como LocalScript)' : ''));
 }
 (function initCodeExamples() { const sel = document.getElementById('code-examples'); if (sel) sel.innerHTML = '<option value="">📋 Ejemplos…</option>' + CODE_EXAMPLES.map((e, i) => '<option value="' + i + '">' + e[0] + '</option>').join(''); })();
+
+// ═══ Videos: subida binaria con progreso, miniatura y reproducción por streaming ═══
+var _uvFile = null, _uvThumb = null;
+function uvProgress(pct) {
+  const box = document.getElementById('uv-progress'); if (!box) return;
+  if (pct < 0) { box.style.display = 'none'; return; }
+  box.style.display = 'block'; document.getElementById('uv-progress-bar').style.width = pct + '%';
+  document.getElementById('uv-progress-txt').textContent = pct >= 100 ? 'Procesando…' : 'Subiendo… ' + pct + ' %';
+}
+function uploadVideoFile(id, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', '/api/videos/' + encodeURIComponent(id) + '/file');
+    xhr.setRequestHeader('Authorization', 'Bearer ' + DB.get('token'));
+    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100)); };
+    xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch {} (xhr.status >= 200 && xhr.status < 300 && j.ok) ? resolve(j) : reject(new Error(j.err || ('Error ' + xhr.status))); };
+    xhr.onerror = () => reject(new Error('Sin conexión con el servidor'));
+    xhr.send(file);
+  });
+}
+function makeVideoThumb(file) {
+  return new Promise(resolve => {
+    let done = false; const url = URL.createObjectURL(file), video = document.createElement('video');
+    const finish = value => { if (done) return; done = true; clearTimeout(timer); try { URL.revokeObjectURL(url); } catch {} resolve(value); };
+    const timer = setTimeout(() => finish(null), 6000);
+    video.muted = true; video.playsInline = true; video.preload = 'metadata'; video.src = url;
+    video.onloadedmetadata = () => { try { video.currentTime = Math.min(1, (video.duration || 2) / 4); } catch { finish(null); } };
+    video.onseeked = () => {
+      try {
+        const w = 320, h = Math.round(w * (video.videoHeight || 9) / (video.videoWidth || 16)), c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(video, 0, 0, w, h); const d = c.toDataURL('image/jpeg', 0.72); finish(d.length < 190000 ? d : null);
+      } catch { finish(null); }
+    };
+    video.onerror = () => finish(null);
+  });
+}
+function videoStreamUrl(v) {
+  const base = '/api/videos/' + encodeURIComponent(v.id) + '/stream', token = DB.get('token');
+  return (v.privacy === 'private' && token) ? base + '?t=' + encodeURIComponent(token) : base;
+}
+function videoPlayerHtml(v) {
+  if (v.ready === false) return '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text2);text-align:center;padding:20px">⏳ Este video todavía se está subiendo…</div>';
+  return '<video id="vp-video" controls autoplay playsinline preload="metadata" ' + (v.thumb ? 'poster="' + esc(v.thumb) + '" ' : '') + 'style="width:100%;height:100%;background:#000" src="' + esc(videoStreamUrl(v)) + '" onerror="videoPlayError(this)"></video>';
+}
+function videoPlayError(el) {
+  el.parentElement.innerHTML = '<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text2);text-align:center;padding:20px;gap:6px">⚠️ No se pudo reproducir este video.<small style="color:var(--text3)">Puede estar en un formato que tu navegador no soporta (probá MP4/H.264 o WebM).</small></div>';
+}
+
+// ═══ Llamadas de voz y video con WebRTC ═══
+// Audio y video van directo entre las dos personas (cifrado DTLS-SRTP). El servidor solo retransmite la
+// negociación (SDP/ICE) y avisa: sonando, ocupado, rechazada, terminada.
+var _callGen = 0, _toneCtx = null, _toneTimer = null, _callClock = null;
+function callPeerInfo(st) { const u = (getUsers() || {})[st.peerId]; return { name: (u && u.username) || st.peerName || 'Usuario', color: (u && u.color) || '#5b8def' }; }
+async function callIceServers() {
+  try { const r = await apiRequest('/api/ice'); if (r.iceServers && r.iceServers.length) return r.iceServers; } catch {}
+  return [{ urls: ['stun:stun.l.google.com:19302'] }];
+}
+async function callGetMedia(type) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof RTCPeerConnection === 'undefined')
+    throw new Error('Tu navegador no permite llamadas (hace falta HTTPS o localhost)');
+  const audio = { echoCancellation:true, noiseSuppression:true, autoGainControl:true };
+  try { return await navigator.mediaDevices.getUserMedia({ audio, video: type === 'video' ? { width:{ ideal:1280 }, height:{ ideal:720 }, facingMode:'user' } : false }); }
+  catch (err) {
+    const n = err && err.name;
+    if (type === 'video' && (n === 'NotFoundError' || n === 'OverconstrainedError' || n === 'NotReadableError')) {
+      try { const s = await navigator.mediaDevices.getUserMedia({ audio, video:false }); showToast('No se encontró cámara: entrás solo con audio'); return s; } catch (e2) { err = e2; }
+    }
+    const name = err && err.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError') throw new Error('Permití el micrófono' + (type === 'video' ? ' y la cámara' : '') + ' en tu navegador para llamar');
+    if (name === 'NotFoundError') throw new Error('No se encontró un micrófono en este dispositivo');
+    throw new Error('No se pudo acceder al micrófono' + (type === 'video' ? '/cámara' : '') + ': ' + ((err && err.message) || name));
+  }
+}
+function callTone(kind) {
+  clearInterval(_toneTimer); _toneTimer = null; if (!kind) return;
+  try { _toneCtx = _toneCtx || new (window.AudioContext || window.webkitAudioContext)(); if (_toneCtx.state === 'suspended') _toneCtx.resume(); } catch { return; }
+  const beep = (freq, dur) => { try { const o = _toneCtx.createOscillator(), g = _toneCtx.createGain(); o.frequency.value = freq; g.gain.value = kind === 'ring' ? 0.12 : 0.06; o.connect(g); g.connect(_toneCtx.destination); o.start(); o.stop(_toneCtx.currentTime + dur); } catch {} };
+  const pattern = () => { if (kind === 'ring') { beep(880, 0.25); setTimeout(() => beep(660, 0.25), 300); } else beep(440, 0.9); };
+  pattern(); _toneTimer = setInterval(pattern, kind === 'ring' ? 2000 : 3000);
+}
+async function callStart(peerId, type) {
+  if (!ME || !peerId || peerId === ME.id) return;
+  const peer = (getUsers() || {})[peerId]; if (!peer) { showToast('Usuario no encontrado'); return; }
+  if (_callState) { showToast('Ya estás en una llamada'); return; }
+  if (!socket || !socket.connected) { showToast('Sin conexión con el servidor'); return; }
+  if (!peer.online) { showToast(peer.username + ' no está en línea'); return; }
+  const st = _callState = { peerId, type: type === 'video' ? 'video' : 'audio', role:'caller', status:'calling', pendingIce:[], gen:++_callGen };
+  callRender();
+  try { st.local = await callGetMedia(st.type); }
+  catch (err) { if (_callState === st) { callCleanup(); showToast(err.message); } return; }
+  if (_callState !== st) { st.local.getTracks().forEach(t => t.stop()); return; }
+  if (st.type === 'video' && !st.local.getVideoTracks().length) st.type = 'audio';
+  callAttachLocal(); callRender();
+  socket.emit('call_invite', { to: peerId, type: st.type });
+  callTone('ringback');
+  st.ringTimer = setTimeout(() => { if (_callState === st && st.status === 'calling') callHangup('Sin respuesta'); }, 46000);
+}
+async function callAccept() {
+  const st = _callState; if (!st || st.status !== 'incoming') return;
+  clearTimeout(st.ringTimer); callTone(null); st.status = 'connecting'; callRender();
+  try { st.local = await callGetMedia(st.type); }
+  catch (err) { if (_callState === st) { socket.emit('call_decline', { to: st.peerId }); callCleanup(); showToast(err.message); } return; }
+  if (_callState !== st) { st.local.getTracks().forEach(t => t.stop()); return; }
+  callAttachLocal();
+  try { await callCreatePeer(st); } catch (err) { callHangup('No se pudo iniciar la llamada'); return; }
+  socket.emit('call_accept', { to: st.peerId });
+  callArmConnectTimeout(st);
+}
+function callArmConnectTimeout(st) { clearTimeout(st.connTimer); st.connTimer = setTimeout(() => { if (_callState === st && st.status !== 'active') callHangup('No se pudo establecer la conexión'); }, 25000); }
+async function callCreatePeer(st) {
+  const pc = new RTCPeerConnection({ iceServers: await callIceServers() });
+  st.pc = pc; st.remote = null;
+  st.local.getTracks().forEach(track => pc.addTrack(track, st.local));
+  pc.ontrack = e => {
+    if (e.streams && e.streams[0]) st.remote = e.streams[0];
+    else { st.remote = st.remote || new MediaStream(); st.remote.addTrack(e.track); }
+    callAttachRemote();
+  };
+  pc.onicecandidate = e => { if (_callState === st && socket) socket.emit('call_signal', { to: st.peerId, kind:'ice', candidate: e.candidate ? (e.candidate.toJSON ? e.candidate.toJSON() : e.candidate) : null }); };
+  const onState = () => callOnConnState(st);
+  pc.onconnectionstatechange = onState; pc.oniceconnectionstatechange = onState;
+  return pc;
+}
+function callOnConnState(st) {
+  if (_callState !== st || !st.pc) return;
+  const c = st.pc.connectionState, i = st.pc.iceConnectionState;
+  if (c === 'connected' || i === 'connected' || i === 'completed') {
+    clearTimeout(st.discTimer); clearTimeout(st.connTimer);
+    if (st.status !== 'active') { st.status = 'active'; st.startedAt = Date.now(); callTone(null); callRender(); callStartClock(); }
+    else callUpdateStatus();
+  } else if (c === 'failed' || i === 'failed') callHangup('No se pudo mantener la conexión (red restringida)');
+  else if ((c === 'disconnected' || i === 'disconnected') && st.status === 'active') {
+    const el = document.getElementById('call-status'); if (el) el.textContent = 'Reconectando…';
+    clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('Se perdió la conexión'); }, 10000);
+  }
+}
+function callStartClock() { clearInterval(_callClock); _callClock = setInterval(callUpdateStatus, 1000); callUpdateStatus(); }
+function callUpdateStatus() {
+  const st = _callState, el = document.getElementById('call-status'); if (!st || !el) return;
+  if (st.status === 'active') { const s = Math.floor((Date.now() - st.startedAt) / 1000); el.textContent = 'En llamada · ' + String(Math.floor(s / 60)).padStart(2,'0') + ':' + String(s % 60).padStart(2,'0'); }
+}
+function callAttachLocal() {
+  const st = _callState, el = document.getElementById('call-local'); if (!st || !el || !st.local) return;
+  el.srcObject = st.local; el.style.display = st.local.getVideoTracks().length ? 'block' : 'none';
+  try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch {}
+}
+function callAttachRemote() {
+  const st = _callState, el = document.getElementById('call-remote'); if (!st || !el || !st.remote) return;
+  el.srcObject = st.remote; callRender();
+  try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => { const ov = document.getElementById('call-overlay'); const once = () => { el.play().catch(() => {}); ov.removeEventListener('click', once); }; ov.addEventListener('click', once); showToast('Tocá la pantalla para activar el audio'); }); } catch {}
+}
+function callRender() {
+  const st = _callState, ov = document.getElementById('call-overlay'); if (!ov) return;
+  if (!st) { ov.classList.remove('open'); return; }
+  ov.classList.add('open');
+  const info = callPeerInfo(st), hasRemoteVideo = !!(st.remote && st.remote.getVideoTracks && st.remote.getVideoTracks().length);
+  const av = document.getElementById('call-av'); av.style.background = info.color; av.textContent = info.name[0].toUpperCase(); av.classList.toggle('ringing', st.status === 'calling' || st.status === 'incoming');
+  document.getElementById('call-name').textContent = info.name;
+  document.getElementById('call-kind').textContent = st.type === 'video' ? '📹 Videollamada' : '📞 Llamada de voz';
+  const text = { calling:'Llamando…', incoming: st.type === 'video' ? 'Videollamada entrante' : 'Llamada entrante', connecting:'Conectando…', active:'En llamada' }[st.status];
+  if (st.status !== 'active') document.getElementById('call-status').textContent = text; else callUpdateStatus();
+  document.getElementById('call-remote').classList.toggle('audio-only', !(st.status === 'active' && hasRemoteVideo));
+  document.getElementById('call-center').classList.toggle('compact', st.status === 'active' && hasRemoteVideo);
+  const local = document.getElementById('call-local'); if (st.local) local.style.display = st.local.getVideoTracks().length && !st.camOff ? 'block' : 'none';
+  const btn = (cls, bg, fn, label, id) => '<button class="call-btn" ' + (id ? 'id="' + id + '" ' : '') + 'style="background:' + bg + '" onclick="' + fn + '" title="' + label + '" aria-label="' + label + '">' + cls + '</button>';
+  let html = '';
+  if (st.status === 'incoming') html = btn('📵', 'var(--red)', 'callHangup()', 'Rechazar') + btn('📞', '#22c55e', 'callAccept()', 'Aceptar');
+  else if (st.status === 'active') html = btn(st.muted ? '🔇' : '🎤', st.muted ? '#7a3030' : '#2a2f3e', 'callToggleMute()', 'Silenciar micrófono', 'mute-btn') + (st.local && st.local.getVideoTracks().length ? btn(st.camOff ? '📷' : '📹', st.camOff ? '#7a3030' : '#2a2f3e', 'callToggleCam()', 'Activar o apagar la cámara', 'cam-btn') : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
+  else html = btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
+  document.getElementById('call-btns').innerHTML = html;
+}
+function callToggleMute() { const st = _callState; if (!st || !st.local) return; st.muted = !st.muted; st.local.getAudioTracks().forEach(t => { t.enabled = !st.muted; }); callRender(); }
+function callToggleCam() { const st = _callState; if (!st || !st.local) return; st.camOff = !st.camOff; st.local.getVideoTracks().forEach(t => { t.enabled = !st.camOff; }); callRender(); }
+function callCleanup() {
+  const st = _callState; _callState = null;
+  clearInterval(_callClock); callTone(null);
+  if (st) {
+    ['ringTimer','connTimer','discTimer'].forEach(k => clearTimeout(st[k]));
+    if (st.pc) { try { st.pc.ontrack = st.pc.onicecandidate = st.pc.onconnectionstatechange = st.pc.oniceconnectionstatechange = null; st.pc.close(); } catch {} }
+    if (st.local) st.local.getTracks().forEach(t => { try { t.stop(); } catch {} });
+  }
+  ['call-remote','call-local'].forEach(id => { const el = document.getElementById(id); if (el) { try { el.srcObject = null; } catch {} } });
+  const ov = document.getElementById('call-overlay'); if (ov) ov.classList.remove('open');
+}
+function callHangup(reason) {
+  const st = _callState; if (!st) return;
+  if (socket && socket.connected) socket.emit(st.status === 'incoming' ? 'call_decline' : 'call_end', { to: st.peerId });
+  callCleanup(); if (reason) showToast(reason);
+}
+function callRemoteEnded(from, message) { const st = _callState; if (!st || st.peerId !== from) return; callCleanup(); if (message) showToast(message); }
+function callInitSignaling() {
+  if (!socket || socket._callSig) return; socket._callSig = true;
+  socket.on('call_invite', ({ from, fromName, type }) => {
+    if (_callState) { socket.emit('call_decline', { to: from }); return; }
+    const st = _callState = { peerId: from, peerName: fromName, type: type === 'video' ? 'video' : 'audio', role:'callee', status:'incoming', pendingIce:[], gen:++_callGen };
+    callRender(); callTone('ring');
+    try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch {}
+    sendBrowserNotif(fromName + ' te llama', st.type === 'video' ? '📹 Videollamada entrante' : '📞 Llamada de voz entrante');
+    st.ringTimer = setTimeout(() => { if (_callState === st && st.status === 'incoming') { callHangup(''); showToast('Llamada perdida de ' + fromName); } }, 46000);
+  });
+  socket.on('call_accept', async ({ from }) => {
+    const st = _callState; if (!st || st.role !== 'caller' || st.status !== 'calling' || st.peerId !== from) return;
+    clearTimeout(st.ringTimer); callTone(null); st.status = 'connecting'; callRender(); callArmConnectTimeout(st);
+    try {
+      const pc = await callCreatePeer(st);
+      const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+      socket.emit('call_signal', { to: st.peerId, kind:'offer', sdp: offer.sdp });
+    } catch (err) { callHangup('No se pudo iniciar la llamada'); }
+  });
+  socket.on('call_signal', async ({ from, kind, sdp, candidate }) => {
+    const st = _callState; if (!st || st.peerId !== from || !st.pc) { if (st && st.peerId === from && kind === 'ice' && candidate) st.pendingIce.push(candidate); return; }
+    try {
+      if (kind === 'offer') {
+        await st.pc.setRemoteDescription({ type:'offer', sdp });
+        for (const c of st.pendingIce.splice(0)) { try { await st.pc.addIceCandidate(c); } catch {} }
+        const answer = await st.pc.createAnswer(); await st.pc.setLocalDescription(answer);
+        socket.emit('call_signal', { to: st.peerId, kind:'answer', sdp: answer.sdp });
+      } else if (kind === 'answer') {
+        await st.pc.setRemoteDescription({ type:'answer', sdp });
+        for (const c of st.pendingIce.splice(0)) { try { await st.pc.addIceCandidate(c); } catch {} }
+      } else if (kind === 'ice' && candidate) {
+        if (st.pc.remoteDescription) { try { await st.pc.addIceCandidate(candidate); } catch {} } else st.pendingIce.push(candidate);
+      }
+    } catch (err) { console.warn('[CALL] señal', kind, err); callHangup('Error de conexión en la llamada'); }
+  });
+  socket.on('call_decline', ({ from }) => callRemoteEnded(from, (callPeerInfo(_callState || { peerId: from }).name) + ' rechazó la llamada'));
+  socket.on('call_busy', ({ from }) => callRemoteEnded(from, (callPeerInfo(_callState || { peerId: from }).name) + ' está en otra llamada'));
+  socket.on('call_unavailable', ({ from, reason }) => callRemoteEnded(from, reason === 'self_busy' ? 'Ya estás en otra llamada' : 'Esa persona no está disponible'));
+  socket.on('call_end', ({ from, reason }) => {
+    const st = _callState, wasActive = st && st.status === 'active', wasIncoming = st && st.status === 'incoming';
+    callRemoteEnded(from, reason === 'timeout' ? (wasIncoming ? 'Llamada perdida' : 'Sin respuesta') : reason === 'disconnect' ? 'Se desconectó' : (wasActive ? 'Llamada finalizada' : (wasIncoming ? 'Llamada perdida' : '')));
+  });
+}
+window.addEventListener('beforeunload', () => { if (_callState && socket && socket.connected) socket.emit('call_end', { to: _callState.peerId }); });
+
+// ═══ Materiales con aspecto real, color y texturas ═══
+var texLib = {}, stTexData = {}, stTexNames = {};
+const MATERIAL_DEFS = {
+  SmoothPlastic:{label:'Plástico liso',shine:70},
+  Plastic:{label:'Plástico',shine:25,pattern:'speck'},
+  Brick:{label:'Ladrillo',shine:4,pattern:'brick'},
+  Wood:{label:'Madera',shine:14,pattern:'wood'},
+  WoodPlanks:{label:'Tablones',shine:12,pattern:'planks'},
+  Metal:{label:'Metal',shine:140,specular:0xaaaaaa,pattern:'brushed'},
+  DiamondPlate:{label:'Chapa',shine:110,specular:0x999999,pattern:'diamond'},
+  Neon:{label:'Neón',shine:30,emissive:0.7},
+  Glass:{label:'Vidrio',shine:200,glass:true},
+  Ice:{label:'Hielo',shine:150,ice:true,pattern:'ice'},
+  Grass:{label:'Pasto',shine:2,pattern:'grass'},
+  Sand:{label:'Arena',shine:1,pattern:'sand'},
+  Concrete:{label:'Hormigón',shine:3,pattern:'concrete'},
+  Rock:{label:'Roca',shine:6,pattern:'rock'},
+  Marble:{label:'Mármol',shine:90,pattern:'marble'},
+  Cobblestone:{label:'Adoquín',shine:5,pattern:'cobble'},
+  Fabric:{label:'Tela',shine:1,pattern:'weave'}
+};
+const COLOR_PALETTE = ['#ffffff','#e5e7eb','#9ca3af','#6b7280','#374151','#111827','#78350f','#ef4444','#f97316','#f59e0b','#eab308','#84cc16','#22c55e','#10b981','#14b8a6','#06b6d4','#0ea5e9','#3b82f6','#6366f1','#8b5cf6','#a855f7','#d946ef','#ec4899','#f43f5e','#a16207','#365314','#1e3a8a','#7f1d1d'];
+function _rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+var _patCache = {};
+function patternCanvas(kind) {
+  if (_patCache[kind]) return _patCache[kind];
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S; _patCache[kind] = c;
+  const x = c.getContext('2d'), r = _rng(kind.split('').reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7)), g = v => 'rgb(' + v + ',' + v + ',' + v + ')';
+  const fill = v => { x.fillStyle = g(v); x.fillRect(0, 0, S, S); };
+  const dots = (n, size, lo, hi) => { for (let i = 0; i < n; i++) { x.fillStyle = g(lo + Math.floor(r() * (hi - lo))); x.fillRect(Math.floor(r() * S), Math.floor(r() * S), size, size); } };
+  try {
+    if (kind === 'speck') { fill(238); dots(500, 2, 215, 250); }
+    else if (kind === 'brick') { fill(190); for (let row = 0; row < 8; row++) for (let col = -1; col < 4; col++) { const ox = (row % 2) * 16; x.fillStyle = g(215 + Math.floor(r() * 40)); x.fillRect(col * 32 + ox + 2, row * 16 + 2, 29, 13); } dots(400, 1, 190, 235); }
+    else if (kind === 'wood') { fill(235); for (let i = 0; i < S; i++) { const v = 205 + 30 * Math.sin(i * 0.33 + Math.sin(i * 0.07) * 3) + r() * 10; x.fillStyle = g(Math.round(v)); x.fillRect(i, 0, 1, S); } for (let i = 0; i < 6; i++) { x.strokeStyle = 'rgba(120,120,120,.25)'; x.beginPath(); x.ellipse(r() * S, r() * S, 4 + r() * 8, 12 + r() * 16, 0, 0, 6.3); x.stroke(); } }
+    else if (kind === 'planks') { for (let i = 0; i < 4; i++) { x.fillStyle = g(215 + Math.floor(r() * 35)); x.fillRect(0, i * 32, S, 32); for (let j = 0; j < 32; j += 2) { x.fillStyle = 'rgba(120,120,120,' + (0.05 + r() * 0.12) + ')'; x.fillRect(0, i * 32 + j, S, 1); } x.fillStyle = g(120); x.fillRect(0, i * 32, S, 2); x.fillRect(Math.floor(r() * S), i * 32, 2, 32); } }
+    else if (kind === 'brushed') { fill(232); for (let i = 0; i < S; i++) { x.fillStyle = g(215 + Math.floor(r() * 40)); x.fillRect(0, i, S, 1); } }
+    else if (kind === 'diamond') { fill(205); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const cx = i * 32 + 16, cy = j * 32 + 16; x.fillStyle = g(250); x.beginPath(); x.moveTo(cx, cy - 11); x.lineTo(cx + 5, cy); x.lineTo(cx, cy + 11); x.lineTo(cx - 5, cy); x.fill(); x.fillStyle = g(170); x.fillRect(cx - 1, cy - 10, 2, 20); } }
+    else if (kind === 'grass') { fill(205); for (let i = 0; i < 1400; i++) { x.fillStyle = g(185 + Math.floor(r() * 70)); x.fillRect(Math.floor(r() * S), Math.floor(r() * S), 1, 2 + Math.floor(r() * 4)); } }
+    else if (kind === 'sand') { fill(238); dots(2600, 1, 200, 255); dots(500, 2, 215, 250); }
+    else if (kind === 'concrete') { fill(226); for (let i = 0; i < 40; i++) { x.fillStyle = 'rgba(' + (180 + Math.floor(r() * 60)) + ',' + (180 + Math.floor(r() * 60)) + ',' + (180 + Math.floor(r() * 60)) + ',.22)'; x.beginPath(); x.arc(r() * S, r() * S, 6 + r() * 18, 0, 6.3); x.fill(); } dots(900, 1, 170, 245); }
+    else if (kind === 'rock') { fill(208); for (let i = 0; i < 26; i++) { x.fillStyle = 'rgba(' + (150 + Math.floor(r() * 90)) + ',' + (150 + Math.floor(r() * 90)) + ',' + (150 + Math.floor(r() * 90)) + ',.45)'; x.beginPath(); x.arc(r() * S, r() * S, 8 + r() * 22, 0, 6.3); x.fill(); } x.strokeStyle = 'rgba(90,90,90,.5)'; for (let i = 0; i < 9; i++) { x.beginPath(); let px = r() * S, py = r() * S; x.moveTo(px, py); for (let k = 0; k < 4; k++) { px += (r() - .5) * 40; py += (r() - .5) * 40; x.lineTo(px, py); } x.stroke(); } dots(500, 1, 150, 230); }
+    else if (kind === 'marble') { fill(246); x.lineWidth = 1.5; for (let i = 0; i < 7; i++) { x.strokeStyle = 'rgba(' + (120 + Math.floor(r() * 60)) + ',' + (125 + Math.floor(r() * 60)) + ',' + (140 + Math.floor(r() * 60)) + ',' + (0.25 + r() * 0.35) + ')'; x.beginPath(); let px = r() * S, py = 0; x.moveTo(px, py); while (py < S) { px += (r() - .5) * 18; py += 8; x.lineTo(px, py); } x.stroke(); } }
+    else if (kind === 'cobble') { fill(150); for (let row = 0; row < 4; row++) for (let col = -1; col < 5; col++) { const ox = (row % 2) * 16; x.fillStyle = g(190 + Math.floor(r() * 50)); x.beginPath(); x.ellipse(col * 32 + ox + 16, row * 32 + 16, 14, 13, 0, 0, 6.3); x.fill(); } dots(300, 1, 140, 230); }
+    else if (kind === 'weave') { fill(235); for (let i = 0; i < S; i += 4) { x.fillStyle = g(210); x.fillRect(i, 0, 2, S); x.fillStyle = g(250); x.fillRect(0, i, S, 2); } dots(300, 1, 200, 250); }
+    else if (kind === 'ice') { fill(246); for (let i = 0; i < 14; i++) { x.strokeStyle = 'rgba(255,255,255,' + (0.4 + r() * 0.5) + ')'; x.lineWidth = 1 + r() * 1.5; x.beginPath(); x.moveTo(r() * S, r() * S); x.lineTo(r() * S, r() * S); x.stroke(); } dots(120, 2, 215, 255); }
+    else fill(240);
+  } catch {}
+  return c;
+}
+var _procTex = {};
+function proceduralTexture(kind) {
+  if (_procTex[kind]) return _procTex[kind];
+  const t = new THREE.CanvasTexture(patternCanvas(kind)); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; _procTex[kind] = t; return t;
+}
+function applyPartUVs(geo, d, sx, sy, sz) {
+  const T = Math.max(0.25, Math.min(64, Number(d.textureId ? d.texScale : 4) || 4)), uv = geo.attributes && geo.attributes.uv;
+  if (!uv || d.type === 'Wedge' || d.type === 'ImportedMesh') {
+    const pos = geo.attributes.position, nrm = geo.attributes.normal; if (!pos) return;
+    if (!nrm) geo.computeVertexNormals();
+    const n = geo.attributes.normal, k = d.type === 'ImportedMesh' ? Math.max(sx, sy, sz, 0.1) / 4 : 1, arr = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i)); let u, v;
+      if (ay >= ax && ay >= az) { u = pos.getX(i); v = pos.getZ(i); } else if (ax >= az) { u = pos.getZ(i); v = pos.getY(i); } else { u = pos.getX(i); v = pos.getY(i); }
+      arr[i*2] = u * k / T; arr[i*2+1] = v * k / T;
+    }
+    geo.setAttribute('uv', new THREE.BufferAttribute(arr, 2)); return;
+  }
+  if (geo.type === 'BoxGeometry' && uv.count === 24) {
+    const w = geo.parameters.width, h = geo.parameters.height, dp = geo.parameters.depth, faces = [[dp,h],[dp,h],[w,dp],[w,dp],[w,h],[w,h]];
+    for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const i = f * 4 + v; uv.setXY(i, uv.getX(i) * faces[f][0] / T, uv.getY(i) * faces[f][1] / T); }
+  } else if (geo.type === 'SphereGeometry') { const r = geo.parameters.radius; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2 * Math.PI * r / T, uv.getY(i) * Math.PI * r / T); }
+  else if (geo.type === 'CylinderGeometry') { const r = geo.parameters.radiusTop, h = geo.parameters.height; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2 * Math.PI * r / T, uv.getY(i) * h / T); }
+  uv.needsUpdate = true;
+}
+function buildPartMaterial(d) {
+  const def = MATERIAL_DEFS[d.material] || MATERIAL_DEFS.SmoothPlastic, tr = Number(d.transparent || 0);
+  const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color || '#888888'), transparent: tr > 0, opacity: 1 - tr, wireframe: d.type === 'TrussPart', shininess: def.shine });
+  if (def.specular) mat.specular = new THREE.Color(def.specular);
+  if (def.emissive) { mat.emissive = new THREE.Color(d.color || '#00ff88'); mat.emissiveIntensity = def.emissive; }
+  if (def.glass) { mat.transparent = true; mat.opacity = Math.max(0.2, 1 - Number(d.transparent || 0.5)); }
+  if (def.ice) { mat.transparent = true; mat.opacity = Math.max(0.35, 0.82 - tr); }
+  const custom = d.textureId && texLib[d.textureId] && texLib[d.textureId].ready ? texLib[d.textureId] : null;
+  if (custom) {
+    const t = new THREE.Texture(custom.img); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.needsUpdate = true;
+    mat.map = t; mat.userData.customTex = t; if (!d.texTint) mat.color = new THREE.Color('#ffffff');
+  } else if (def.pattern) mat.map = proceduralTexture(def.pattern);
+  return mat;
+}
+function updatePartAppearance(entry) {
+  const mesh = entry && entry.mesh; if (!mesh || !mesh.isMesh || (entry.data && entry.data.isNPC)) return;
+  const old = mesh.material; mesh.material = buildPartMaterial(entry.data);
+  if (old && old.dispose) { if (old.userData && old.userData.customTex) old.userData.customTex.dispose(); old.dispose(); }
+}
+function refreshTexturedMeshes(id) {
+  const upd = e => { if (e && e.data && e.data.textureId === id) updatePartAppearance(e); };
+  if (typeof stParts !== 'undefined') stParts.forEach(upd);
+  if (typeof runtimeObjects !== 'undefined') for (const o of runtimeObjects.values()) upd(o);
+}
+function texUrl(mapId, tid) {
+  const m = getMaps()[mapId], base = '/api/maps/' + encodeURIComponent(mapId) + '/textures/' + encodeURIComponent(tid), token = DB.get('token');
+  return (m && (m.privacy || 'public') !== 'public' && token) ? base + '?t=' + encodeURIComponent(token) : base;
+}
+function texLibSet(id, src) {
+  const old = texLib[id]; if (old && (old.src === src || old.ready)) return old.promise || Promise.resolve(old);
+  const entry = texLib[id] = { src, img:new Image(), ready:false };
+  entry.promise = new Promise(resolve => {
+    let done = false; const end = () => { if (!done) { done = true; resolve(entry); } };
+    entry.img.onload = () => { entry.ready = true; refreshTexturedMeshes(id); end(); };
+    entry.img.onerror = () => { entry.failed = true; end(); };
+    setTimeout(end, 6000);
+  });
+  entry.img.src = src; return entry.promise;
+}
+function registerMapTextures(m) {
+  if (!m) return Promise.resolve();
+  const jobs = [], ids = m.textureIds || [];
+  for (const id of ids) jobs.push(texLibSet(id, stTexData[id] || texUrl(m.id, id)));
+  for (const id of Object.keys(stTexData)) if (!ids.includes(id)) jobs.push(texLibSet(id, stTexData[id]));
+  return Promise.all(jobs);
+}
+function stTextureIds() { const m = getMaps()[stMapId]; return [...new Set([...(m && m.textureIds || []), ...Object.keys(stTexData)])]; }
+function stTexSrc(id) { return stTexData[id] || texUrl(stMapId, id); }
+function stTexId(url) { let h = 5381; for (let i = 0; i < url.length; i += 7) h = ((h << 5) + h + url.charCodeAt(i)) | 0; return 'tx_' + (h >>> 0).toString(36) + url.length.toString(36); }
+function stuAddTextureFromDataUrl(url, name) {
+  const id = stTexId(url), ids = stTextureIds();
+  if (!ids.includes(id) && ids.length >= 16) { showToast('Máximo 16 texturas por juego'); return null; }
+  stTexData[id] = url; stTexNames[id] = String(name || 'Textura').slice(0, 40);
+  texLibSet(id, url); stPushTextures(); return id;
+}
+async function stPushTextures(attempt) {
+  const mapId = stMapId; if (!mapId || !ME) return;
+  const m = getMaps()[mapId], pending = Object.entries(stTexData).filter(([id]) => !(m && m.textureIds || []).includes(id)).slice(0, 4);
+  if (!pending.length) return;
+  try {
+    const r = await apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/textures', { method:'POST', body:{ textures:Object.fromEntries(pending) } });
+    const cur = getMaps(); if (cur[mapId]) { cur[mapId].textureIds = r.textureIds; DB.set('maps', cur); }
+    if (Object.keys(stTexData).some(id => !r.textureIds.includes(id))) stPushTextures();
+  } catch (err) {
+    if (err.status === 404 && (attempt || 0) < 6) setTimeout(() => stPushTextures((attempt || 0) + 1), 1500);
+    else if (err.status !== 404) showToast('No se pudo subir la textura: ' + err.message);
+  }
+}
+function downscaleImageFile(file, max) {
+  max = max || 512;
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const po2 = n => { let q = 1; while (q * 2 <= n) q *= 2; return q; }, k = Math.min(1, max / Math.max(img.width, img.height));
+      const w = po2(Math.max(8, Math.round(img.width * k))), h = po2(Math.max(8, Math.round(img.height * k))), c = document.createElement('canvas');
+      c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h);
+      let out = /png|webp|gif/.test(file.type) ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.88);
+      if (out.length > 600000) out = c.toDataURL('image/jpeg', 0.72);
+      out.length > 600000 ? reject(new Error('La imagen es muy pesada; probá con una más chica')) : resolve({ url:out, w, h });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen')); };
+    img.src = url;
+  });
+}
+async function stuImportTexture(e) {
+  const file = e.target.files && e.target.files[0]; e.target.value = ''; if (!file || !selPart) return;
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { showToast('Usá una imagen PNG, JPG, WEBP o GIF'); return; }
+  if (file.size > 12 * 1024 * 1024) { showToast('La imagen pesa más de 12 MB'); return; }
+  try {
+    const { url } = await downscaleImageFile(file, 512);
+    const id = stuAddTextureFromDataUrl(url, file.name.replace(/\.[^.]+$/, '')); if (!id) return;
+    stuApplyTexture(id); showToast('🖼 Textura aplicada');
+  } catch (err) { showToast(err.message); }
+}
+function stuApplyTexture(id) {
+  if (!selPart) return; recordStudioHistory();
+  selPart.data.textureId = id; if (!selPart.data.texScale) selPart.data.texScale = 4;
+  rebuildMesh();
+}
+function stuClearTexture() { if (!selPart) return; recordStudioHistory(); selPart.data.textureId = ''; rebuildMesh(); }
+function stuTexScale(v) { if (!selPart) return; recordStudioHistory(); selPart.data.texScale = Math.max(0.25, Math.min(64, parseFloat(v) || 4)); rebuildMesh(); }
+function stuTexTint() { if (!selPart) return; recordStudioHistory(); selPart.data.texTint = !selPart.data.texTint; updatePartAppearance(selPart); const t = document.getElementById('tgl-texTint'); if (t) t.classList.toggle('on', !!selPart.data.texTint); }
+// ── color ──
+var _clrHist = false, _trHist = false;
+function clrNorm(v) {
+  v = String(v || '').trim().toLowerCase();
+  if (/^#?[0-9a-f]{3}$/.test(v)) { v = v.replace('#', ''); return '#' + v.split('').map(c => c + c).join(''); }
+  return /^#?[0-9a-f]{6}$/.test(v) ? '#' + v.replace('#', '') : null;
+}
+function clrRecent() { const r = DB.get('hub_recent_colors'); return Array.isArray(r) ? r : []; }
+function clrAddRecent(hex) { DB.set('hub_recent_colors', [hex, ...clrRecent().filter(c => c !== hex)].slice(0, 10)); }
+function clrSyncUi(hex) {
+  const sw = document.getElementById('clr-sw'), hx = document.getElementById('clr-hex'), nat = document.getElementById('clr-native');
+  if (sw) sw.style.background = hex; if (hx && document.activeElement !== hx) hx.value = hex; if (nat && nat.value !== hex) nat.value = hex;
+  document.querySelectorAll('.clr-dot').forEach(b => b.classList.toggle('sel', b.dataset.c === hex));
+}
+function clrRenderRecent() {
+  const box = document.getElementById('clr-recent'); if (!box) return; const r = clrRecent();
+  box.innerHTML = r.length ? '<span>Recientes</span>' + r.map(c => '<button type="button" class="clr-dot" data-c="' + c + '" style="background:' + c + '" onclick="stuColorPick(\'' + c + '\')" title="' + c + '"></button>').join('') : '';
+}
+function stuColorSet(hex, commit) {
+  if (!selPart || !hex) return;
+  if (!_clrHist) { recordStudioHistory(); _clrHist = true; }
+  selPart.data.color = hex; updatePartAppearance(selPart); clrSyncUi(hex);
+  if (commit) { _clrHist = false; clrAddRecent(hex); clrRenderRecent(); matRefreshPreviews(); }
+}
+function stuColorLive(v) { stuColorSet(v, false); }
+function stuColorCommit(v) { stuColorSet(v, true); }
+function stuColorPick(hex) { _clrHist = false; stuColorSet(hex, true); }
+function stuColorHex(v) { const n = clrNorm(v); if (!n) { showToast('Color inválido. Usá el formato #RRGGBB'); clrSyncUi(selPart.data.color || '#888888'); return; } _clrHist = false; stuColorSet(n, true); }
+function stuEyeDropper() { if (!window.EyeDropper) { showToast('Tu navegador no tiene gotero de color'); return; } new window.EyeDropper().open().then(r => stuColorPick(r.sRGBHex)).catch(() => {}); }
+// ── material ──
+var _matPrev = new Map();
+function matPreviewUrl(id, color) {
+  const key = id + '|' + color; if (_matPrev.has(key)) return _matPrev.get(key);
+  let url = '';
+  try {
+    const def = MATERIAL_DEFS[id], c = document.createElement('canvas'); c.width = c.height = 48; const x = c.getContext('2d');
+    if (def.glass || def.ice) { for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) { x.fillStyle = (i + j) % 2 ? '#cfd6e4' : '#8d97ad'; x.fillRect(i * 8, j * 8, 8, 8); } x.globalAlpha = def.glass ? 0.5 : 0.62; x.fillStyle = color; x.fillRect(0, 0, 48, 48); x.globalAlpha = 1; }
+    else { x.fillStyle = color; x.fillRect(0, 0, 48, 48); }
+    if (def.pattern) { x.globalCompositeOperation = 'multiply'; x.drawImage(patternCanvas(def.pattern), 0, 0, 48, 48); x.globalCompositeOperation = 'source-over'; }
+    if (id === 'Neon') { const g = x.createRadialGradient(24, 24, 2, 24, 24, 30); g.addColorStop(0, 'rgba(255,255,255,.75)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 48, 48); }
+    else if (def.shine >= 60) { const g = x.createLinearGradient(0, 0, 48, 48); g.addColorStop(0, 'rgba(255,255,255,.6)'); g.addColorStop(.45, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(0,0,0,.18)'); x.fillStyle = g; x.fillRect(0, 0, 48, 48); }
+    url = c.toDataURL('image/png') || '';
+  } catch { url = ''; }
+  if (_matPrev.size > 240) _matPrev.clear(); _matPrev.set(key, url); return url;
+}
+function matTileHtml(id, color, selected) {
+  const def = MATERIAL_DEFS[id], url = matPreviewUrl(id, color);
+  return '<button type="button" class="mat-tile' + (selected ? ' sel' : '') + '" data-m="' + id + '" onclick="stuSetMaterial(\'' + id + '\')" title="' + def.label + '"><span class="mat-prev" style="' + (url ? "background-image:url('" + url + "')" : 'background:' + color) + '"></span><span class="mat-nm">' + def.label + '</span></button>';
+}
+function matRefreshPreviews() {
+  if (!selPart) return; const color = selPart.data.color || '#888888';
+  document.querySelectorAll('.mat-tile').forEach(b => { const url = matPreviewUrl(b.dataset.m, color), pv = b.querySelector('.mat-prev'); if (pv && url) pv.style.backgroundImage = "url('" + url + "')"; });
+}
+function stuSetMaterial(id) {
+  if (!selPart || !MATERIAL_DEFS[id]) return; recordStudioHistory();
+  selPart.data.material = id; updatePartAppearance(selPart);
+  document.querySelectorAll('.mat-tile').forEach(b => b.classList.toggle('sel', b.dataset.m === id));
+  const lbl = document.getElementById('mat-name'); if (lbl) lbl.textContent = MATERIAL_DEFS[id].label;
+}
+function stuTransparency(v, commit) {
+  if (!selPart) return; if (!_trHist) { recordStudioHistory(); _trHist = true; }
+  selPart.data.transparent = Math.max(0, Math.min(0.95, parseFloat(v) || 0)); updatePartAppearance(selPart);
+  const lbl = document.getElementById('tr-val'); if (lbl) lbl.textContent = Math.round(selPart.data.transparent * 100) + '%';
+  if (commit) _trHist = false;
+}
+function appearanceFields(d) {
+  const color = clrNorm(d.color) || '#888888', mat = d.material && MATERIAL_DEFS[d.material] ? d.material : 'SmoothPlastic', tr = Number(d.transparent || 0), ids = typeof stTextureIds === 'function' ? stTextureIds() : [];
+  const names = (getMaps()[stMapId] || {}).textureNames || {}, nameOf = id => stTexNames[id] || names[id] || 'Textura';
+  let h = '<div class="ap-sec"><div class="ap-hd">Color <b>' + color.toUpperCase() + '</b></div>' +
+    '<div class="clr-top"><label class="clr-sw" id="clr-sw" style="background:' + color + '" title="Elegir color"><input type="color" id="clr-native" value="' + color + '" oninput="stuColorLive(this.value)" onchange="stuColorCommit(this.value)" aria-label="Selector de color"></label>' +
+    '<input class="prop-inp clr-hex" id="clr-hex" value="' + color + '" maxlength="7" spellcheck="false" onchange="stuColorHex(this.value)" aria-label="Color en hexadecimal">' +
+    (window.EyeDropper ? '<button type="button" class="st-btn" onclick="stuEyeDropper()" title="Gotero: tomar un color de la pantalla">💧</button>' : '') + '</div>' +
+    '<div class="clr-pal">' + COLOR_PALETTE.map(c => '<button type="button" class="clr-dot' + (c === color ? ' sel' : '') + '" data-c="' + c + '" style="background:' + c + '" onclick="stuColorPick(\'' + c + '\')" title="' + c + '"></button>').join('') + '</div>' +
+    '<div class="clr-recent" id="clr-recent">' + (clrRecent().length ? '<span>Recientes</span>' + clrRecent().map(c => '<button type="button" class="clr-dot" data-c="' + c + '" style="background:' + c + '" onclick="stuColorPick(\'' + c + '\')" title="' + c + '"></button>').join('') : '') + '</div></div>';
+  h += '<div class="ap-sec"><div class="ap-hd">Material <b id="mat-name">' + MATERIAL_DEFS[mat].label + '</b></div><div class="mat-grid">' + Object.keys(MATERIAL_DEFS).map(id => matTileHtml(id, color, id === mat)).join('') + '</div></div>';
+  h += '<div class="ap-sec"><div class="ap-hd">Transparencia <b id="tr-val">' + Math.round(tr * 100) + '%</b></div><div class="tr-row"><input type="range" min="0" max="0.95" step="0.05" value="' + tr + '" oninput="stuTransparency(this.value,false)" onchange="stuTransparency(this.value,true)" aria-label="Transparencia"></div></div>';
+  const cur = d.textureId && ids.includes(d.textureId) ? d.textureId : '';
+  h += '<div class="ap-sec"><div class="ap-hd">Textura <b>' + (cur ? nameOf(cur) : 'Ninguna') + '</b></div>';
+  if (cur) h += '<div class="tex-cur"><img src="' + esc(stTexSrc(cur)) + '" alt=""><div class="nm">' + esc(nameOf(cur)) + '</div><button type="button" class="st-btn red" onclick="stuClearTexture()" title="Quitar textura">✕</button></div>' +
+    '<div class="prop-row" style="padding:0 0 8px"><div class="prop-lbl">Tamaño de cada repetición (studs)</div><input class="prop-inp" type="number" min="0.25" max="64" step="0.5" value="' + (d.texScale || 4) + '" onchange="stuTexScale(this.value)"></div>' +
+    '<div class="tgl-row" style="padding:0 0 8px" onclick="stuTexTint()"><div class="tgl ' + (d.texTint ? 'on' : '') + '" id="tgl-texTint"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Teñir con el color</span></div>';
+  if (ids.length) h += '<div class="tex-grid">' + ids.map(id => '<button type="button" class="tex-th' + (id === cur ? ' sel' : '') + '" style="background-image:url(\'' + esc(stTexSrc(id)) + '\')" onclick="stuApplyTexture(\'' + id + '\')" title="' + esc(nameOf(id)) + '"></button>').join('') + '</div>';
+  h += '<label class="tex-add">＋ Importar imagen<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onchange="stuImportTexture(event)"></label><div class="tex-note">PNG, JPG, WEBP o GIF. Se ajusta a 512 px y se repite sobre la pieza. Máx. 16 por juego.</div></div>';
+  return h;
+}
 
 </script>
 <!-- GAME PAGE MODAL -->
