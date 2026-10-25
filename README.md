@@ -19,17 +19,15 @@ Las cuentas son globales para quienes usan la misma plataforma y dominio públic
 
 Para habilitar la cuenta administrativa `Crix`, configurá `CRIX_ADMIN_PASSWORD` como secreto del entorno y registrá o iniciá sesión con el nombre `Crix` y esa contraseña. Es necesario configurar el secreto antes de crear la cuenta.
 
-Los datos (cuentas, mapas, mensajes) se guardan en un archivo JSON. **Para que los usuarios no se borren en cada actualización, ese archivo tiene que estar en un volumen persistente**, fuera del código que se reemplaza en cada deploy.
+Los datos (cuentas, mapas, mensajes, publicaciones) se guardan en un archivo JSON local y, si definís `DATABASE_URL`, **también en un Postgres externo gratuito** (Neon, Supabase, etc.). Con `DATABASE_URL` los usuarios sobreviven a cada deploy en hostings sin disco persistente como Render free: al arrancar, el servidor restaura la base desde Postgres, y cada cambio se sincroniza allí. Si no puede conectarse, no arranca (para no empezar vacío y sobrescribir nada). Si Postgres está vacío y hay un archivo local, lo sube la primera vez.
 
-Ruta de la base, por prioridad:
+Alternativas sin Postgres: `CRIX_DATA_FILE` apuntando a un volumen persistente (por ejemplo `/data/crix_data.json`), o un volumen detectado automáticamente (`RAILWAY_VOLUME_MOUNT_PATH`, `RENDER_DISK_PATH`, `FLY_VOLUME_PATH`, `/var/data`, `/data`, `/persistent`, `/mnt/data`). Sin ninguna de las dos, el archivo junto al servidor es efímero y el log lo avisa.
 
-1. `CRIX_DATA_FILE` (recomendado), por ejemplo `/data/crix_data.json`.
-2. Un volumen detectado automáticamente: `RAILWAY_VOLUME_MOUNT_PATH`, `RENDER_DISK_PATH`, `FLY_VOLUME_PATH`, `/var/data`, `/data`, `/persistent` o `/mnt/data`.
-3. `crix_data.json` junto al servidor. **Es efímero** en Render, Railway, Heroku, Koyeb y similares: se borra en cada deploy. Al arrancar con esta ruta, el servidor avisa en el log.
+Protecciones incluidas: nunca guarda antes de cargar bien la base; un archivo corrupto se aparta como `.corrupt-<fecha>` y se restaura el último backup; backups locales en `<nombre>_backups/` y una copia anterior en Postgres (fila `id = 2`); guarda y sincroniza al recibir `SIGTERM`; y el admin puede usar `GET /api/admin/export` y `POST /api/admin/import`.
 
-Protecciones incluidas: nunca guarda antes de haber cargado bien la base; si el archivo está corrupto lo aparta como `.corrupt-<fecha>` y restaura el último backup en vez de sobrescribirlo; guarda copias en `<nombre>_backups/` (una cada 10 min, se conservan 10); guarda al recibir `SIGTERM` (lo que envía el hosting al desplegar); y el admin puede usar `GET /api/admin/export` y `POST /api/admin/import` para sacar y restaurar un respaldo completo a mano.
+**Videos y texturas también se guardan en Postgres** (tabla `crix_files`): cada archivo subido se copia ahí, y tras un deploy se restaura bajo demanda la primera vez que alguien lo pide (el disco local solo es una caché). Al arrancar, el servidor sube a Postgres cualquier archivo local que todavía no esté. Los borrados también se reflejan. Un admin puede ver el uso con `GET /api/admin/storage`.
 
-Los backups viven junto a la base: si el disco es efímero, se pierden igual. Sin almacenamiento persistente ningún cambio de código puede garantizar que las cuentas sobrevivan.
+**Capacidad:** los planes gratuitos de Postgres tienen un tope (Neon: 0,5 GB en total). Cada video ocupa lo que pesa su archivo (hasta 60 MB), así que con muchos videos ese límite se llena. Si el espacio se acaba, el log muestra `❌ NO se pudo sincronizar` y el archivo queda solo en el disco local hasta el próximo deploy. Revisá el uso con `/api/admin/storage` y, si crece, pasá a un plan con más espacio.
 
 ## Plataforma global y servidores de juego
 
