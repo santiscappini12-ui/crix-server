@@ -87,6 +87,15 @@ const rooms          = {};
 const connSockets    = {};   // socketId → { userId, username, color, mapId }
 const onlineUsers    = {};   // userId   → { socketId, username, color }
 const stats = { start: Date.now(), total: 0 };
+const calls = new Map();       // userId → { peer, caller, accepted, timer } (llamadas sonando o activas)
+function clearCall(userId, notify) {
+  const c = calls.get(userId); if (!c) return null;
+  clearTimeout(c.timer); calls.delete(userId);
+  const other = calls.get(c.peer);
+  if (other && other.peer === userId) { clearTimeout(other.timer); calls.delete(c.peer); }
+  if (notify) { const target = onlineUsers[c.peer]; if (target) io.to(target.socketId).emit(notify.event, { from:userId, reason:notify.reason }); }
+  return c;
+}
 
 function maxPlayersFor(map) { const n = Number(map?.maxPlayers); return Number.isFinite(n) ? Math.max(1, Math.min(200, Math.floor(n))) : 50; }
 function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId]); }
@@ -103,7 +112,7 @@ function normalizeRoomPart(id, source = {}) {
   const pos=source.position||{}, size=source.size||{};
   const number=(value,fallback=0,min=-10000,max=10000)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;};
   const types=['Block','Sphere','Cylinder','Wedge','TrussPart','Spawn','ImportedMesh'];
-  const materials=['SmoothPlastic','Neon','Metal','Glass','Grass','Brick','Wood'];
+  const materials=['SmoothPlastic','Plastic','Brick','Wood','WoodPlanks','Metal','DiamondPlate','Neon','Glass','Ice','Grass','Sand','Concrete','Rock','Marble','Cobblestone','Fabric'];
   const type=types.includes(source.type)?source.type:'Block';
   const part={
     id:String(id).slice(0,120), name:String(source.name||'Part').slice(0,80), type,
@@ -115,6 +124,7 @@ function normalizeRoomPart(id, source = {}) {
     anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:number(source.transparent,0,0,0.95),
     behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',
     behaviorValue:number(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),
+    textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:number(source.texScale,4,0.25,64),texTint:source.texTint===true,
   };
   if(type==='ImportedMesh'&&typeof source.meshData==='string'&&source.meshData.length<=2*1024*1024)part.meshData=source.meshData;
   return part;
@@ -330,6 +340,60 @@ function canReadMap(map, user) {
   if (privacy === 'assigned') return (map.assignedPlayers || []).includes(user.username);
   return false;
 }
+// ── Almacenamiento de videos: archivos en disco (no base64 dentro del JSON de la base) ──
+const VIDEO_DIR = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, path.extname(DATA_FILE)) + '_videos');
+const VIDEO_EXT = { 'video/mp4':'mp4', 'video/webm':'webm', 'video/ogg':'ogv' };
+const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+// Detecta el formato REAL por los primeros bytes (no confía en lo que diga el cliente).
+function sniffVideo(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0x1A && buf[1] === 0x45 && buf[2] === 0xDF && buf[3] === 0xA3) return 'video/webm';
+  if (buf.toString('latin1', 0, 4) === 'OggS') return 'video/ogg';
+  const box = buf.toString('latin1', 4, 8);
+  if (['ftyp','moov','mdat','free','wide','skip'].includes(box)) return 'video/mp4';  // MP4 / MOV / M4V / 3GP
+  return null;
+}
+function videoFilePath(video) { return video && video.file ? path.join(VIDEO_DIR, path.basename(video.file)) : null; }
+function storeVideoBuffer(video, buffer) {
+  if (!VIDEO_ID_RE.test(String(video.id))) throw new Error('Identificador de video inválido');
+  if (buffer.length > MAX_VIDEO_BYTES) throw new Error('El video supera el máximo de 60 MB');
+  const mime = sniffVideo(buffer);
+  if (!mime) throw new Error('Formato no soportado. Usá MP4, WebM u OGG.');
+  fs.mkdirSync(VIDEO_DIR, { recursive:true });
+  const oldPath = videoFilePath(video);
+  const file = `${video.id}.${VIDEO_EXT[mime]}`;
+  fs.writeFileSync(path.join(VIDEO_DIR, file), buffer);
+  if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} }
+  video.file = file; video.mime = mime; video.size = buffer.length; video.ready = true;
+  delete video.data;
+}
+function dataUrlToBuffer(value) {
+  const m = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.*)$/s.exec(String(value || ''));
+  return m ? Buffer.from(m[2], 'base64') : null;
+}
+function publicVideo(video) {
+  const { data, file, ...rest } = video;
+  return { ...rest, data: video.ready !== false ? '[data]' : null, ready: video.ready !== false };
+}
+// Migración: videos viejos guardados como base64 dentro de la base → archivos.
+(function migrateVideos() {
+  let moved = 0, failed = 0;
+  for (const video of DB.videos || []) {
+    if (typeof video.data !== 'string' || video.data === '[data]' || video.file) { if (video.file) video.ready = true; continue; }
+    try { const buf = dataUrlToBuffer(video.data); if (!buf) throw new Error('sin datos'); storeVideoBuffer(video, buf); moved++; }
+    catch (err) { failed++; video.ready = false; delete video.data; console.warn('[VIDEO] No se pudo migrar', video.id, err.message); }
+  }
+  if (moved || failed) { console.log(`[VIDEO] Migración: ${moved} a archivo, ${failed} inválidos`); saveDB(); }
+})();
+function userFromToken(token) {
+  if (!token) return null;
+  const session = DB.sessions[tokenHash(String(token))];
+  if (!session || session.expiresAt <= Date.now()) return null;
+  const user = DB.users[session.userId];
+  return user && !user.banned ? user : null;
+}
+
 function canReadVideo(video, user) {
   if ((video.privacy || 'public') === 'public') return true;
   return !!user && (video.authorId === user.id || user.isAdmin);
@@ -511,6 +575,13 @@ app.get('/api/users', (req, res) => {
   res.json({ ok:true, users: out });
 });
 
+// ── Servidores ICE para las llamadas (STUN público; TURN opcional por variables de entorno) ──
+app.get('/api/ice', requireAuth, (req, res) => {
+  const iceServers = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }];
+  if (process.env.CRIX_TURN_URL) iceServers.push({ urls:String(process.env.CRIX_TURN_URL).split(',').map(x => x.trim()).filter(Boolean), username:process.env.CRIX_TURN_USER || '', credential:process.env.CRIX_TURN_PASS || '' });
+  res.json({ ok:true, iceServers });
+});
+
 // ── Gente en línea ahora (visible para todos) ──
 app.get('/api/online', (req, res) => {
   const viewer = readSession(req);
@@ -572,6 +643,54 @@ app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
   res.status(201).json({ ok:true, instance:{ id:room.instanceId, mapId:room.mapId, startedAt:room.createdAt } });
 });
 
+// ── Texturas de los juegos: archivos en disco (el mapa solo guarda la lista de ids) ──
+const TEX_DIR = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, path.extname(DATA_FILE)) + '_textures');
+const TEX_ID_RE = /^tx_[a-z0-9]{3,40}$/, MAP_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_TEX_BYTES = 450 * 1024, MAX_TEXTURES_PER_MAP = 16;
+function sniffImage(buf) {   // formato REAL por los primeros bytes
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf.toString('latin1', 1, 4) === 'PNG') return { mime:'image/png', ext:'png' };
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return { mime:'image/jpeg', ext:'jpg' };
+  if (buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return { mime:'image/webp', ext:'webp' };
+  if (buf.toString('latin1', 0, 4) === 'GIF8') return { mime:'image/gif', ext:'gif' };
+  return null;
+}
+const TEX_MIME = { png:'image/png', jpg:'image/jpeg', webp:'image/webp', gif:'image/gif' };
+function texDir(mapId) { return path.join(TEX_DIR, mapId); }
+function texFile(mapId, tid) { try { const f = fs.readdirSync(texDir(mapId)).find(x => x.startsWith(tid + '.')); return f ? path.join(texDir(mapId), f) : null; } catch { return null; } }
+app.post('/api/maps/:id/textures', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map || !MAP_ID_RE.test(req.params.id)) return res.status(404).json({ ok:false, err:'Guardá el juego antes de subir texturas' });
+  if (map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
+  const incoming = req.body && req.body.textures;
+  if (!incoming || typeof incoming !== 'object') return res.status(400).json({ ok:false, err:'Faltan texturas' });
+  const entries = Object.entries(incoming).slice(0, 8), ids = new Set(map.textureIds || []), staged = [];
+  for (const [tid, value] of entries) {
+    if (!TEX_ID_RE.test(tid)) return res.status(400).json({ ok:false, err:'Identificador de textura inválido' });
+    const buf = dataUrlToBuffer(value);
+    if (!buf) return res.status(400).json({ ok:false, err:'Imagen inválida' });
+    if (buf.length > MAX_TEX_BYTES) return res.status(413).json({ ok:false, err:'La textura supera 450 KB' });
+    const kind = sniffImage(buf);
+    if (!kind) return res.status(400).json({ ok:false, err:'Formato de imagen no soportado (PNG, JPG, WEBP o GIF)' });
+    if (!ids.has(tid) && ids.size + staged.filter(x => !ids.has(x.tid)).length >= MAX_TEXTURES_PER_MAP) return res.status(400).json({ ok:false, err:'Máximo ' + MAX_TEXTURES_PER_MAP + ' texturas por juego' });
+    staged.push({ tid, buf, kind });
+  }
+  fs.mkdirSync(texDir(req.params.id), { recursive:true });
+  for (const { tid, buf, kind } of staged) {
+    try { const old = texFile(req.params.id, tid); if (old) fs.unlinkSync(old); } catch {}
+    fs.writeFileSync(path.join(texDir(req.params.id), `${tid}.${kind.ext}`), buf); ids.add(tid);
+  }
+  map.textureIds = [...ids]; saveDB();
+  res.json({ ok:true, textureIds: map.textureIds });
+});
+app.get('/api/maps/:id/textures/:tid', (req, res) => {
+  const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
+  if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
+  const file = texFile(req.params.id, req.params.tid); if (!file) return res.status(404).end();
+  res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
+  res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
+});
+
 // ── SAVE mapa ──
 app.post('/api/maps', (req, res) => {
   try {
@@ -582,7 +701,8 @@ app.post('/api/maps', (req, res) => {
     const old = DB.maps[m.id];
     if (old && old.authorId !== user.id && !user.isAdmin)
       return res.status(403).json({ ok:false, err:'No podés editar este juego' });
-    DB.maps[m.id] = { ...m, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username };
+    DB.maps[m.id] = { ...m, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [] };
+    delete DB.maps[m.id].textures;
     saveDB();
     io.emit('map_updated', { mapId: m.id });
     if (!old && (DB.maps[m.id].privacy || 'public') === 'public') io.emit('map_new', { mapId:m.id, name:DB.maps[m.id].name, authorName:DB.maps[m.id].authorName });
@@ -599,6 +719,7 @@ app.delete('/api/maps/:id', (req, res) => {
   if (existing.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
   delete DB.maps[req.params.id];
+  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} }
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
   res.json({ ok:true });
@@ -785,16 +906,30 @@ app.post('/api/friend-reject', (req, res) => {
 // ── VIDEOS ──
 app.get('/api/videos', (req, res) => {
   const user = readSession(req);
-  const vids = (DB.videos || []).filter(v => canReadVideo(v, user));
-  // No devolver los datos binarios en el listado (demasiado pesado)
-  const safe = vids.map(v => ({ ...v, data: v.data ? '[data]' : null }));
-  res.json({ ok: true, videos: safe });
+  const vids = (DB.videos || []).filter(v => canReadVideo(v, user) && (v.ready !== false || (user && v.authorId === user.id)));
+  res.json({ ok: true, videos: vids.map(publicVideo) });
 });
 
+// Compatibilidad con clientes viejos: devuelve el archivo como data URL (solo videos chicos).
 app.get('/api/videos/:id/data', (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
   if (!v || !canReadVideo(v, readSession(req))) return res.status(404).json({ ok: false });
-  res.json({ ok: true, data: v.data, thumb: v.thumb });
+  const file = videoFilePath(v);
+  if (!file || !fs.existsSync(file)) return res.status(404).json({ ok:false, err:'El archivo del video no está disponible' });
+  if (v.size > 25 * 1024 * 1024) return res.status(413).json({ ok:false, err:'Usá /stream para videos grandes', stream:`/api/videos/${v.id}/stream` });
+  res.json({ ok: true, data: `data:${v.mime};base64,${fs.readFileSync(file).toString('base64')}`, thumb: v.thumb });
+});
+
+// Reproducción por streaming (con soporte de rangos para adelantar/retroceder).
+// El <video> no puede enviar encabezados, por eso el token de sesión también se acepta por ?t= (solo aquí).
+app.get('/api/videos/:id/stream', (req, res) => {
+  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  const user = readSession(req) || userFromToken(req.query.t);
+  if (!v || !canReadVideo(v, user)) return res.status(404).end();
+  const file = videoFilePath(v);
+  if (!file || !fs.existsSync(file)) return res.status(404).end();
+  res.set({ 'Content-Type': v.mime || 'video/mp4', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': (v.privacy || 'public') === 'public' ? 'public, max-age=3600' : 'private, max-age=600' });
+  res.sendFile(file, { acceptRanges: true, dotfiles: 'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 
 app.post('/api/videos', (req, res) => {
@@ -803,21 +938,47 @@ app.post('/api/videos', (req, res) => {
     if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
     const v = req.body;
     if (!v || !v.id || !v.title) return res.json({ ok: false, err: 'Faltan campos' });
+    if (!VIDEO_ID_RE.test(String(v.id))) return res.status(400).json({ ok:false, err:'Identificador de video inválido' });
     DB.videos = DB.videos || [];
-    // Reemplazar si ya existe
     const idx = DB.videos.findIndex(x => x.id === v.id);
     if (idx >= 0 && DB.videos[idx].authorId !== user.id && !user.isAdmin)
       return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
-    const privacy = ['public','private'].includes(v.privacy) ? v.privacy : 'public';
     const old = idx >= 0 ? DB.videos[idx] : null;
-    const saved = { ...(old || {}), ...v, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy };
-    if (old?.data && (!v.data || v.data === '[data]')) saved.data = old.data;
+    const privacy = ['public','private'].includes(v.privacy) ? v.privacy : 'public';
+    const thumb = typeof v.thumb === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(v.thumb) && v.thumb.length <= 200000 ? v.thumb : (old?.thumb || null);
+    const saved = {
+      ...(old || {}), id:String(v.id), title:String(v.title).slice(0,120), desc:String(v.desc || '').slice(0,2000), cat:String(v.cat || 'otros').slice(0,30),
+      authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb,
+      views: old?.views || 0, likes: old?.likes || [], comments: old?.comments || [], created: old?.created || v.created || new Date().toISOString()
+    };
+    const wasReady = !!old?.ready;
+    if (typeof v.data === 'string' && v.data !== '[data]') {   // compatibilidad: archivo embebido en base64
+      const buf = dataUrlToBuffer(v.data);
+      if (!buf) return res.status(400).json({ ok:false, err:'Archivo de video inválido' });
+      try { storeVideoBuffer(saved, buf); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
+    } else if (!old) saved.ready = false;                       // el archivo llega después con PUT /file
     if (idx >= 0) DB.videos[idx] = saved; else DB.videos.push(saved);
     saveDB();
-    if (saved.privacy === 'public')
-      io.emit('video_new', { id: saved.id, title: saved.title, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
-    res.json({ ok: true });
+    if (saved.ready && !wasReady && saved.privacy === 'public') io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
+    res.json({ ok: true, ready: !!saved.ready });
   } catch(e) { res.json({ ok: false, err: e.message }); }
+});
+
+// Subida binaria del archivo (sin base64: más rápido y sin inflar 33 %).
+app.put('/api/videos/:id/file', express.raw({ type: () => true, limit: MAX_VIDEO_BYTES + 1024 }), (req, res) => {
+  try {
+    const user = readSession(req);
+    if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
+    const video = (DB.videos || []).find(x => x.id === req.params.id);
+    if (!video) return res.status(404).json({ ok:false, err:'Primero creá el video' });
+    if (video.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
+    if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ ok:false, err:'Archivo vacío' });
+    const wasReady = !!video.ready;
+    try { storeVideoBuffer(video, req.body); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
+    saveDB();
+    if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
+    res.json({ ok:true, size:video.size, mime:video.mime });
+  } catch (e) { res.status(500).json({ ok:false, err:e.message }); }
 });
 
 app.post('/api/videos/:id/like', (req, res) => {
@@ -863,6 +1024,7 @@ app.delete('/api/videos/:id', (req, res) => {
   if (video.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este video' });
   DB.videos = DB.videos.filter(v => v.id !== req.params.id);
+  { const f = videoFilePath(video); if (f) { try { fs.unlinkSync(f); } catch {} } }
   saveDB();
   if ((video.privacy || 'public') === 'public') io.emit('video_deleted', { id:req.params.id });
   res.json({ ok:true });
@@ -958,20 +1120,50 @@ setInterval(() => {
 io.on('connection', socket => {
   stats.total++;
 
-  // Señalización de llamadas: se enruta por la presencia real del usuario autenticado.
-  const callTarget = to => onlineUsers[String(to || '')];
-  socket.on('call_invite', ({ to, type }) => {
-    const me = socket.data.user, target = callTarget(to); if (!me || !target) return;
+  // ── Llamadas de voz y video (señalización WebRTC) ──
+  // El audio y el video van directo entre las dos personas (cifrado DTLS-SRTP); el servidor solo
+  // retransmite la negociación (SDP e ICE) y lleva el estado: sonando, ocupado, aceptada, terminada.
+  socket.on('call_invite', ({ to, type } = {}) => {
+    const me = socket.data.user; to = String(to || ''); if (!me || !to || to === me.id) return;
+    const target = onlineUsers[to];
+    if (!target || !DB.users[to] || DB.users[to].banned) return socket.emit('call_unavailable', { from:to, reason:'offline' });
+    if (calls.has(me.id)) return socket.emit('call_unavailable', { from:to, reason:'self_busy' });
+    if (calls.has(to)) return socket.emit('call_busy', { from:to });
+    const timer = setTimeout(() => {
+      const c = calls.get(me.id); if (!c || c.accepted) return;
+      clearCall(me.id, { event:'call_end', reason:'timeout' });
+      const mine = onlineUsers[me.id]; if (mine) io.to(mine.socketId).emit('call_end', { from:to, reason:'timeout' });
+    }, 45000);
+    calls.set(me.id, { peer:to, caller:true, accepted:false, timer });
+    calls.set(to, { peer:me.id, caller:false, accepted:false, timer });
     io.to(target.socketId).emit('call_invite', { from:me.id, fromName:me.username, type: type === 'video' ? 'video' : 'audio' });
   });
-  socket.on('call_accept', ({ to }) => {
-    const me = socket.data.user, target = callTarget(to); if (!me || !target) return;
-    io.to(target.socketId).emit('call_accept', { from:me.id });
+  socket.on('call_accept', ({ to } = {}) => {
+    const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
+    if (!c || c.peer !== to || c.caller || c.accepted) return;
+    clearTimeout(c.timer); c.accepted = true; const other = calls.get(to); if (other) other.accepted = true;
+    const target = onlineUsers[to]; if (target) io.to(target.socketId).emit('call_accept', { from:me.id });
   });
-  socket.on('call_end', ({ to }) => {
-    const me = socket.data.user, target = callTarget(to); if (!me || !target) return;
-    io.to(target.socketId).emit('call_end', { from:me.id });
+  socket.on('call_decline', ({ to } = {}) => {
+    const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
+    if (!c || c.peer !== to || c.caller || c.accepted) return;
+    clearCall(me.id, { event:'call_decline' });
   });
+  socket.on('call_end', ({ to } = {}) => {
+    const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
+    if (!c || c.peer !== to) return;
+    clearCall(me.id, { event:'call_end', reason:'hangup' });
+  });
+  socket.on('call_signal', ({ to, kind, sdp, candidate } = {}) => {
+    const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
+    if (!c || c.peer !== to || !c.accepted) return;
+    if (!['offer','answer','ice'].includes(kind)) return;
+    if (kind !== 'ice' && (typeof sdp !== 'string' || sdp.length > 60000)) return;
+    if (kind === 'ice' && (candidate !== null && (typeof candidate !== 'object' || JSON.stringify(candidate).length > 4000))) return;
+    const target = onlineUsers[to]; if (!target) return;
+    io.to(target.socketId).emit('call_signal', { from:me.id, kind, sdp: kind === 'ice' ? undefined : sdp, candidate: kind === 'ice' ? candidate : undefined });
+  });
+
   // El chat privado solo se almacena y notifica mediante la API E2EE.
   // No se reenvían eventos `msg` antiguos que pudieran contener texto plano.
   socket.on('user_online', ({ userId, username, color }) => {
@@ -1096,6 +1288,7 @@ io.on('connection', socket => {
     if (meta?.userId) {
       const presence = onlineUsers[meta.userId];
       if (presence?.socketId === socket.id) {
+        clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
         delete onlineUsers[meta.userId];
         if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
         io.emit('online_update', { userId:meta.userId, online:false });
