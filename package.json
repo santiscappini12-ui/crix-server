@@ -7,13 +7,13 @@
     "node": ">=22.0.0 <23.0.0"
   },
   "scripts": {
-    "start": "node --no-node-snapshot server.js",
-    "dev": "node --no-node-snapshot --watch server.js"
+    "start": "node --no-node-snapshot start.js",
+    "dev": "node --no-node-snapshot --watch start.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1156.0",
     "express": "^5.2.1",
     "isolated-vm": "^5.0.4",
-    "pg": "^8.23.1",
     "socket.io": "^4.8.3"
   }
 }
