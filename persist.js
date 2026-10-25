@@ -1,8 +1,21 @@
 'use strict';
-// Persistencia externa de Crix: respalda la base y los medios en un bucket compatible con S3
-// y los restaura al arrancar. Variables: CRIX_S3_BUCKET, CRIX_S3_ACCESS_KEY_ID,
-// CRIX_S3_SECRET_ACCESS_KEY, CRIX_S3_ENDPOINT, CRIX_S3_REGION, CRIX_S3_PREFIX (opcional).
-// Sin ellas, todo funciona como antes (solo disco local).
+// ══════════════════════════════════════════════════════════════════
+// Persistencia externa de Crix.
+//
+// Render (plan gratis) borra el disco local en cada deploy/reinicio. Este módulo
+// guarda una copia de la base de datos y de los medios (videos, texturas) en un
+// bucket compatible con S3 (Backblaze B2, Cloudflare R2, Supabase Storage, etc.)
+// y la restaura al arrancar. El disco local sigue siendo la fuente que usa el
+// servidor; el bucket es el respaldo duradero.
+//
+// Variables de entorno:
+//   CRIX_S3_BUCKET, CRIX_S3_ACCESS_KEY_ID, CRIX_S3_SECRET_ACCESS_KEY  (obligatorias)
+//   CRIX_S3_ENDPOINT   p. ej. https://s3.us-west-004.backblazeb2.com
+//   CRIX_S3_REGION     (por defecto "auto"; en B2 es la región, p. ej. us-west-004)
+//   CRIX_S3_PREFIX     carpeta dentro del bucket (opcional)
+//   CRIX_PERSIST_DIR   alternativa para pruebas: usa una carpeta local como "bucket"
+// Sin ninguna de ellas, todo funciona como antes (solo disco local).
+// ══════════════════════════════════════════════════════════════════
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
