@@ -1,0 +1,4 @@
+# Listas de hashes de organizaciones: NO se suben a GitHub (sus acuerdos lo prohíben). Van al bucket: moderation/hashlists/
+moderation/hashlists/*
+!moderation/hashlists/.gitkeep
+node_modules/
