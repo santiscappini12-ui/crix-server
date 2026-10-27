@@ -7,6 +7,8 @@ const https    = require('https');
 const crypto   = require('crypto');
 const { fork } = require('node:child_process');
 const persist  = require('./persist');
+const guard    = require('./media-guard');
+const mediaDirect = require('./media-direct');
 
 if (persist.enabled && !persist.restored) {
   console.error('[PERSIST] Hay almacenamiento externo configurado: arrancá con "npm start" (start.js) para restaurar los datos antes de iniciar el servidor.');
@@ -20,6 +22,9 @@ const io     = new Server(server, {
   pingTimeout: 20000, pingInterval: 10000,
 });
 app.use(express.json({ limit: '50mb' }));
+mediaDirect.init();
+guard.startAutoReload(persist);
+console.log(mediaDirect.direct() ? '[MEDIA] Subida directa al bucket ACTIVA: los medios no pasan por este servidor' : '[MEDIA] Sin bucket S3: los medios pasan por el servidor (solo desarrollo)');
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = persist.DATA_FILE;
@@ -28,7 +33,7 @@ const DATA_FILE = persist.DATA_FILE;
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
 // a un disco persistente montado por el proveedor de alojamiento.
 // ══════════════════════════════════════════════
-let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, _v: 0 };
+let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, moderation: { incidents: [] }, _v: 0 };
 
 function loadDB() {
   try {
@@ -37,7 +42,7 @@ function loadDB() {
       const parsed = JSON.parse(raw);
       DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
-      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {};
+      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {}; DB.moderation = DB.moderation || { incidents: [] };
       // Los mensajes anteriores al cifrado E2EE no se pueden proteger retroactivamente.
       // Eliminarlos evita volver a servir o conservar conversaciones en texto plano.
       let legacyMessagesRemoved = 0;
@@ -429,6 +434,48 @@ io.use((socket, next) => {
   next();
 });
 
+
+// ══════════════════════════════════════════════
+// Moderación de contenido ilegal (firmas + listas de hashes). Sin filtros de palabras ni censura de opinión:
+// solo material ilegal conocido y archivos que no son lo que dicen ser.
+// ══════════════════════════════════════════════
+function recordIncident(user, source, info) {
+  DB.moderation = DB.moderation || { incidents: [] };
+  const inc = { id: crypto.randomBytes(6).toString('hex'), t: Date.now(), userId: user?.id || null, username: user?.username || null, source,
+    sha256: info.sha256 || info.hash || null, peerId: info.peerId || null, alg: info.alg || null, list: info.list || null, label: info.label || info.signature || null, reviewed: false };
+  DB.moderation.incidents.unshift(inc); if (DB.moderation.incidents.length > 2000) DB.moderation.incidents.length = 2000;
+  console.warn(`[GUARD] Bloqueado (${source}) usuario=${inc.userId} lista=${inc.list} etiqueta=${inc.label} sha256=${inc.sha256}`);
+  return inc;
+}
+// Coincidencia con lista de hashes: se corta la subida y, salvo CRIX_ON_MATCH=block, la cuenta pierde la posibilidad de subir medios.
+function blockUpload(user, res, source, r) {
+  if (r.blocked) {
+    recordIncident(user, source, { ...r.blocked, sha256: r.sha256 });
+    if (user && process.env.CRIX_ON_MATCH !== 'block') user.mediaBanned = true;
+    if (user && process.env.CRIX_ON_MATCH === 'ban') user.banned = true;
+    saveDB();
+    return res.status(451).json({ ok:false, err:'Este contenido coincide con material ilegal conocido y fue bloqueado.', blocked:true });
+  }
+  return res.status(r.status || 400).json({ ok:false, err:r.err || 'Archivo rechazado' });
+}
+// Para rutas que todavía reciben bytes (modo local / compatibilidad): firma + hashes.
+async function scanBuffer(user, buf, kind, source) {
+  const v = guard.verifyKind(buf, kind); if (!v.ok) return { status:415, err:v.err || 'Formato no permitido' };
+  const info = guard.hashBuffer(buf), hit = await guard.checkHashes(info, buf);
+  return hit ? { status:451, blocked:hit, sha256:info.sha256 } : null;
+}
+// Cualquier JSON que traiga archivos embebidos (data:...;base64) se escanea igual.
+app.use(async (req, res, next) => {
+  try {
+    if (req.method !== 'POST' || !req.body || typeof req.body !== 'object' || req.path.startsWith('/api/convs/') || req.path.startsWith('/api/e2ee/')) return next();
+    const hits = await guard.scanDataUris(req.body);
+    if (!hits.length) return next();
+    const user = readSession(req), h = hits[0];
+    if (h.hit) return blockUpload(user, res, 'inline:' + req.path, { blocked:h.hit, sha256:h.sha256 });
+    return res.status(415).json({ ok:false, err:`Un archivo adjunto no es un medio válido (${h.bad.mime}).` });
+  } catch (e) { next(); }
+});
+
 // ══════════════════════════════════════════════
 // HTTP — archivos estáticos
 // ══════════════════════════════════════════════
@@ -551,9 +598,11 @@ app.post('/api/user/:id', (req, res) => {
     const u = DB.users[req.params.id];
     if (!u) return res.json({ ok:false });
     if (req.body.avatar !== undefined && req.body.avatar !== '' &&
-        (typeof req.body.avatar !== 'string' || req.body.avatar.length > 180000 ||
-         !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(req.body.avatar)))
+        (typeof req.body.avatar !== 'string' ||
+         !(/^\/m\/[0-9a-f]{64}\.(?:jpg|png|webp)$/.test(req.body.avatar) ||
+           (req.body.avatar.length <= 180000 && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(req.body.avatar)))))
       return res.status(400).json({ ok:false, err:'La foto debe ser JPG, PNG o WebP y no superar el límite permitido' });
+    if (req.body.avatar && u.mediaBanned) return res.status(403).json({ ok:false, err:'Tu cuenta no puede subir medios' });
     const allowed = ['bio','color','games','visits','following','liked','onlineAt','avatar'];
     if (actor.isAdmin) allowed.push('banned');
     allowed.forEach(k => { if (req.body[k] !== undefined) u[k] = req.body[k]; });
@@ -663,6 +712,88 @@ app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
   res.status(201).json({ ok:true, instance:{ id:room.instanceId, mapId:room.mapId, startedAt:room.createdAt } });
 });
 
+
+// ══════════════════════════════════════════════
+// Subida directa de medios (presign → PUT al bucket → commit con verificación)
+// ══════════════════════════════════════════════
+app.post('/api/media/presign', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.kind === 'video') { const v = (DB.videos || []).find(x => x.id === b.ref); if (!v) return res.status(404).json({ ok:false, err:'Primero creá el video' }); if (v.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este contenido' }); }
+    if (b.kind === 'texture') { const m = DB.maps[b.ref]; if (!m) return res.status(404).json({ ok:false, err:'Guardá el juego antes de subir texturas' }); if (m.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este juego' }); }
+    const r = await mediaDirect.presign(req.user, b);
+    if (r.status !== 200) return r.blocked ? blockUpload(req.user, res, 'presign', r) : res.status(r.status).json({ ok:false, err:r.err });
+    res.json({ ok:true, mode:r.mode, uploadId:r.uploadId, url:r.url, headers:r.headers });
+  } catch (e) { res.status(500).json({ ok:false, err:e.message }); }
+});
+// Solo modo local (sin bucket): el archivo llega acá. Con bucket S3 el navegador sube directo y esta ruta no se usa.
+app.put('/api/media/:uploadId/blob', requireAuth, express.raw({ type: () => true, limit: 61 * 1024 * 1024 }), async (req, res) => {
+  if (mediaDirect.direct()) return res.status(409).json({ ok:false, err:'Subí directo al almacenamiento' });
+  const r = await mediaDirect.receiveLocal(req.user, req.params.uploadId, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0));
+  res.status(r.status).json({ ok:r.status === 200, err:r.err });
+});
+// Imágenes sueltas (fotos de perfil, miniaturas, posts, imágenes de GUI): se guardan por su SHA-256 → /m/<hash>.<ext>
+app.post('/api/media/commit', requireAuth, async (req, res) => {
+  try {
+    const r = await mediaDirect.commit(req.user, String(req.body?.uploadId || ''), (sig, info) => mediaDirect.mediaKey(info.sha256, sig.ext), { kind:'image' });
+    if (r.status !== 200) return r.blocked ? blockUpload(req.user, res, 'image', r) : res.status(r.status).json({ ok:false, err:r.err });
+    if (!mediaDirect.direct()) await persist.putFile(r.key, mediaDirect.localPath(r.key));
+    res.json({ ok:true, url:'/m/' + r.key.slice('media/'.length), sha256:r.sha256, mime:r.mime, size:r.size });
+  } catch (e) { res.status(500).json({ ok:false, err:e.message }); }
+});
+app.get('/m/:file', async (req, res) => {
+  const f = req.params.file;
+  if (!mediaDirect.MEDIA_KEY_RE.test(f)) return res.status(404).end();
+  if (guard.checkSha256Only(f.slice(0, 64))) return res.status(451).end();      // si la lista se actualiza, el bloqueo rige también para lo ya subido
+  const key = 'media/' + f;
+  if (mediaDirect.direct()) {
+    const url = await mediaDirect.readUrl(key).catch(() => null); if (!url) return res.status(404).end();
+    res.set('Cache-Control', 'public, max-age=1800'); return res.redirect(302, url);
+  }
+  const file = await persist.ensureLocal(key, mediaDirect.localPath(key)) ? mediaDirect.localPath(key) : null; if (!file) return res.status(404).end();
+  res.set({ 'X-Content-Type-Options':'nosniff', 'Cache-Control':'public, max-age=86400' });
+  res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
+});
+
+// ── Chequeo de hashes para el chat E2EE ──
+// El servidor no puede ver los adjuntos cifrados. El cliente calcula el SHA-256 del archivo ANTES de cifrarlo (y el
+// receptor al abrirlo) y consulta acá. Solo viaja el hash, nunca el contenido ni la clave.
+const checkRate = new Map();
+app.post('/api/moderation/check', requireAuth, (req, res) => {
+  const now = Date.now(), e = checkRate.get(req.user.id) || { n:0, t:now };
+  if (now - e.t > 60e3) { e.n = 0; e.t = now; } e.n++; checkRate.set(req.user.id, e);
+  if (e.n > 120) return res.status(429).json({ ok:false, err:'Demasiadas consultas' });
+  const hashes = (Array.isArray(req.body?.hashes) ? req.body.hashes : []).filter(h => /^[0-9a-f]{64}$/i.test(String(h))).slice(0, 20).map(h => String(h).toLowerCase());
+  const context = req.body?.context === 'receive' ? 'receive' : 'send', peer = String(req.body?.peer || '').slice(0, 80);
+  const blocked = [];
+  for (const h of hashes) {
+    const hit = guard.checkSha256Only(h); if (!hit) continue;
+    blocked.push(h);
+    recordIncident(req.user, 'e2ee-' + context, { ...hit, sha256:h, peerId: context === 'receive' ? peer : null });   // en 'receive' el usuario es quien lo recibió; el emisor declarado no está verificado
+    if (context === 'send' && process.env.CRIX_ON_MATCH !== 'block') req.user.mediaBanned = true;
+  }
+  if (blocked.length) saveDB();
+  res.json({ ok:true, blocked });
+});
+
+// ── Administración de moderación ──
+app.get('/api/admin/moderation', requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok:true, lists:guard.stats(), incidents:(DB.moderation?.incidents || []).slice(0, 300) });
+});
+app.post('/api/admin/moderation/:id/review', requireAuth, requireAdmin, (req, res) => {
+  const inc = (DB.moderation?.incidents || []).find(x => x.id === req.params.id); if (!inc) return res.status(404).json({ ok:false });
+  inc.reviewed = true; if (req.body?.unban && inc.userId && DB.users[inc.userId]) delete DB.users[inc.userId].mediaBanned;
+  saveDB(); res.json({ ok:true });
+});
+// Cargar una lista de hashes obtenida de una organización (queda guardada en el bucket y sobrevive a los deploys).
+app.post('/api/admin/moderation/hashlist', requireAuth, requireAdmin, async (req, res) => {
+  const name = String(req.body?.name || '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 60), text = String(req.body?.text || '');
+  if (!name || !text) return res.status(400).json({ ok:false, err:'Faltan nombre o contenido' });
+  const n = guard.setList('bucket:' + name + '.txt', text);
+  await persist.putKey(`moderation/hashlists/${name}.txt`, Buffer.from(text, 'utf8'), 'text/plain').catch(e => console.warn('[GUARD] No se pudo guardar la lista en el bucket:', e.message));
+  res.json({ ok:true, hashes:n, stats:guard.stats() });
+});
+
 // ── Texturas de los juegos: archivos en disco (el mapa solo guarda la lista de ids) ──
 const TEX_DIR = persist.TEX_DIR;
 const TEX_ID_RE = /^tx_[a-z0-9]{3,40}$/, MAP_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -682,6 +813,7 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
   const map = DB.maps[req.params.id];
   if (!map || !MAP_ID_RE.test(req.params.id)) return res.status(404).json({ ok:false, err:'Guardá el juego antes de subir texturas' });
   if (map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
+  if (mediaDirect.direct()) return res.status(409).json({ ok:false, err:'Actualizá la página: las texturas ahora se suben directo al almacenamiento' });
   const incoming = req.body && req.body.textures;
   if (!incoming || typeof incoming !== 'object') return res.status(400).json({ ok:false, err:'Faltan texturas' });
   const entries = Object.entries(incoming).slice(0, 8), ids = new Set(map.textureIds || []), staged = [];
@@ -692,6 +824,7 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
     if (buf.length > MAX_TEX_BYTES) return res.status(413).json({ ok:false, err:'La textura supera 450 KB' });
     const kind = sniffImage(buf);
     if (!kind) return res.status(400).json({ ok:false, err:'Formato de imagen no soportado (PNG, JPG, WEBP o GIF)' });
+    const blocked = await scanBuffer(req.user, buf, 'image', 'texture'); if (blocked) return blockUpload(req.user, res, 'texture', blocked);
     staged.push({ tid, buf, kind });
   }
   fs.mkdirSync(texDir(req.params.id), { recursive:true });
@@ -706,9 +839,36 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
   map.textureIds = [...ids]; saveDB();
   res.json({ ok:true, textureIds: map.textureIds });
 });
+
+app.post('/api/maps/:id/textures/commit', requireAuth, async (req, res) => {
+  try {
+    const map = DB.maps[req.params.id], tid = String(req.body?.tid || '');
+    if (!map || !MAP_ID_RE.test(req.params.id)) return res.status(404).json({ ok:false, err:'Guardá el juego antes de subir texturas' });
+    if (map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
+    if (!TEX_ID_RE.test(tid)) return res.status(400).json({ ok:false, err:'Identificador de textura inválido' });
+    const r = await mediaDirect.commit(req.user, String(req.body?.uploadId || ''), sig => `textures/${req.params.id}/${tid}.${sig.ext}`, { kind:'texture', ref:req.params.id });
+    if (r.status !== 200) return r.blocked ? blockUpload(req.user, res, 'texture', r) : res.status(r.status).json({ ok:false, err:r.err });
+    map.texFiles = map.texFiles || {}; map.texHashes = map.texHashes || {};
+    const oldName = map.texFiles[tid], name = `${tid}.${r.ext}`;
+    if (oldName && oldName !== name) { mediaDirect.removeKey(`textures/${req.params.id}/${oldName}`); if (!mediaDirect.direct()) persist.delKey(`textures/${req.params.id}/${oldName}`); }
+    if (!mediaDirect.direct()) await persist.putFile(r.key, mediaDirect.localPath(r.key));
+    map.texFiles[tid] = name; map.texHashes[tid] = r.sha256;
+    map.textureIds = [...new Set([...(map.textureIds || []), tid])]; saveDB();
+    res.json({ ok:true, textureIds:map.textureIds });
+  } catch (e) { res.status(500).json({ ok:false, err:e.message }); }
+});
 app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
+  const hh = map.texHashes && map.texHashes[req.params.tid]; if (hh && guard.checkSha256Only(hh)) return res.status(451).end();
+  if (mediaDirect.direct()) {
+    let name = map.texFiles && map.texFiles[req.params.tid];
+    if (!name) { const f = await persist.listKeys(`textures/${req.params.id}/${req.params.tid}.`).catch(() => []); name = f[0] && f[0].key.split('/').pop(); }   // texturas anteriores a la subida directa
+    if (!name) return res.status(404).end();
+    const url = await mediaDirect.readUrl(`textures/${req.params.id}/${name}`, { privateAccess:(map.privacy || 'public') !== 'public' }).catch(() => null); if (!url) return res.status(404).end();
+    res.set('Cache-Control', (map.privacy || 'public') === 'public' ? 'public, max-age=1800' : 'private, no-store');
+    return res.redirect(302, url);
+  }
   const file = texFile(req.params.id, req.params.tid) || await persist.fetchTexture(req.params.id, req.params.tid); if (!file) return res.status(404).end();
   res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
@@ -724,7 +884,7 @@ app.post('/api/maps', (req, res) => {
     const old = DB.maps[m.id];
     if (old && old.authorId !== user.id && !user.isAdmin)
       return res.status(403).json({ ok:false, err:'No podés editar este juego' });
-    DB.maps[m.id] = { ...m, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [] };
+    DB.maps[m.id] = { ...m, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], texFiles: old?.texFiles || {}, texHashes: old?.texHashes || {} };
     delete DB.maps[m.id].textures;
     saveDB();
     io.emit('map_updated', { mapId: m.id });
@@ -949,6 +1109,13 @@ app.get('/api/videos/:id/stream', async (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
   const user = readSession(req) || userFromToken(req.query.t);
   if (!v || !canReadVideo(v, user)) return res.status(404).end();
+  if (v.sha256 && guard.checkSha256Only(v.sha256)) return res.status(451).end();   // lista actualizada después de subirlo
+  if (mediaDirect.direct() && v.file) {
+    const url = await mediaDirect.readUrl('videos/' + path.basename(v.file), { privateAccess:(v.privacy || 'public') !== 'public' }).catch(() => null);
+    if (!url) return res.status(404).end();
+    res.set('Cache-Control', (v.privacy || 'public') === 'public' ? 'public, max-age=1800' : 'private, no-store');
+    return res.redirect(302, url);                                                  // los bytes salen del bucket, no de este servidor
+  }
   const file = await videoLocalFile(v);
   if (!file) return res.status(404).end();
   res.set({ 'Content-Type': v.mime || 'video/mp4', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': (v.privacy || 'public') === 'public' ? 'public, max-age=3600' : 'private, max-age=600' });
@@ -968,7 +1135,7 @@ app.post('/api/videos', async (req, res) => {
       return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
     const old = idx >= 0 ? DB.videos[idx] : null;
     const privacy = ['public','private'].includes(v.privacy) ? v.privacy : 'public';
-    const thumb = typeof v.thumb === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(v.thumb) && v.thumb.length <= 200000 ? v.thumb : (old?.thumb || null);
+    const thumb = typeof v.thumb === 'string' && (/^\/m\/[0-9a-f]{64}\.(?:jpg|png|webp)$/.test(v.thumb) || (/^data:image\/(jpeg|png|webp);base64,/.test(v.thumb) && v.thumb.length <= 200000)) ? v.thumb : (old?.thumb || null);
     const saved = {
       ...(old || {}), id:String(v.id), title:String(v.title).slice(0,120), desc:String(v.desc || '').slice(0,2000), cat:String(v.cat || 'otros').slice(0,30),
       authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb,
@@ -976,8 +1143,10 @@ app.post('/api/videos', async (req, res) => {
     };
     const wasReady = !!old?.ready;
     if (typeof v.data === 'string' && v.data !== '[data]') {   // compatibilidad: archivo embebido en base64
+      if (mediaDirect.direct()) return res.status(409).json({ ok:false, err:'Actualizá la página: los videos ahora se suben directo al almacenamiento' });
       const buf = dataUrlToBuffer(v.data);
       if (!buf) return res.status(400).json({ ok:false, err:'Archivo de video inválido' });
+      const blocked = await scanBuffer(user, buf, 'video', 'video-inline'); if (blocked) return blockUpload(user, res, 'video-inline', blocked);
       let upload; try { upload = storeVideoBuffer(saved, buf); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
       await upload;
     } else if (!old) saved.ready = false;                       // el archivo llega después con PUT /file
@@ -988,7 +1157,26 @@ app.post('/api/videos', async (req, res) => {
   } catch(e) { res.json({ ok: false, err: e.message }); }
 });
 
-// Subida binaria del archivo (sin base64: más rápido y sin inflar 33 %).
+
+// El navegador ya subió el archivo directo al bucket: acá se verifica y se publica.
+app.post('/api/videos/:id/commit', requireAuth, async (req, res) => {
+  try {
+    const video = (DB.videos || []).find(x => x.id === req.params.id);
+    if (!video) return res.status(404).json({ ok:false, err:'Primero creá el video' });
+    if (video.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
+    const r = await mediaDirect.commit(req.user, String(req.body?.uploadId || ''), sig => `videos/${video.id}.${sig.ext}`, { kind:'video', ref:video.id });
+    if (r.status !== 200) return r.blocked ? blockUpload(req.user, res, 'video', r) : res.status(r.status).json({ ok:false, err:r.err });
+    const wasReady = !!video.ready, oldFile = video.file, file = path.basename(r.key);
+    if (oldFile && oldFile !== file) { mediaDirect.removeKey('videos/' + path.basename(oldFile)); if (!mediaDirect.direct()) persist.delKey('videos/' + path.basename(oldFile)); }
+    if (!mediaDirect.direct()) await persist.putFile(r.key, mediaDirect.localPath(r.key));
+    video.file = file; video.mime = r.mime; video.size = r.size; video.sha256 = r.sha256; video.ready = true; delete video.data;
+    saveDB();
+    if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
+    res.json({ ok:true, size:video.size, mime:video.mime });
+  } catch (e) { res.status(500).json({ ok:false, err:e.message }); }
+});
+
+// Subida binaria del archivo por el servidor (solo modo local / compatibilidad; con bucket queda cerrada).
 app.put('/api/videos/:id/file', express.raw({ type: () => true, limit: MAX_VIDEO_BYTES + 1024 }), async (req, res) => {
   try {
     const user = readSession(req);
@@ -996,7 +1184,10 @@ app.put('/api/videos/:id/file', express.raw({ type: () => true, limit: MAX_VIDEO
     const video = (DB.videos || []).find(x => x.id === req.params.id);
     if (!video) return res.status(404).json({ ok:false, err:'Primero creá el video' });
     if (video.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
+    if (mediaDirect.direct()) return res.status(409).json({ ok:false, err:'Actualizá la página: los videos ahora se suben directo al almacenamiento' });
     if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ ok:false, err:'Archivo vacío' });
+    const blocked = await scanBuffer(user, req.body, 'video', 'video-put'); if (blocked) return blockUpload(user, res, 'video-put', blocked);
+    video.sha256 = guard.hashBuffer(req.body).sha256;
     const wasReady = !!video.ready;
     let upload; try { upload = storeVideoBuffer(video, req.body); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
     await upload;
