@@ -67,6 +67,7 @@ function s3Driver() {
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
   });
+  s3ctx = { client, S3, bucket, K, unK };
   return {
     name: `S3 (${bucket}${prefix ? '/' + prefix : ''})`,
     async get(key) {
@@ -115,7 +116,7 @@ function dirDriver(root) {   // pruebas locales: una carpeta hace de bucket
   };
 }
 
-let driver = null;
+let driver = null, s3ctx = null;
 if (env.CRIX_S3_BUCKET) {
   if (env.CRIX_S3_ACCESS_KEY_ID && env.CRIX_S3_SECRET_ACCESS_KEY) driver = s3Driver();
   else console.warn('[PERSIST] Falta CRIX_S3_ACCESS_KEY_ID o CRIX_S3_SECRET_ACCESS_KEY: el almacenamiento externo queda desactivado');
@@ -274,4 +275,9 @@ module.exports = {
   get enabled() { return !!driver; },
   get restored() { return restored; },
   restore, saveDb, putFile, delKey, delPrefix, ensureLocal, fetchTexture, flush,
+  // Acceso para la subida directa y la moderación (solo con bucket S3 real).
+  get s3() { return s3ctx; },
+  getKey: key => driver ? driver.get(key) : Promise.resolve(null),
+  putKey: (key, body, type) => driver ? driver.put(key, body, type) : Promise.resolve(),
+  listKeys: pfx => driver ? driver.list(pfx) : Promise.resolve([]),
 };

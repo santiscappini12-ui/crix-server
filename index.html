@@ -949,12 +949,86 @@ async function apiRequest(url, options = {}) {
   const token = options.token !== undefined ? options.token : DB.get('token');
   if (token) headers.Authorization = 'Bearer ' + token;
   const init = { method: options.method || 'GET', headers };
-  if (options.body !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(options.body); }
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    // Imágenes embebidas (miniaturas, GUI, posts, fotos…) → se suben directo al almacenamiento y viaja solo su URL.
+    const body = (init.method === 'POST' && options.body && typeof options.body === 'object' && !_MEDIA_SKIP.test(url)) ? await offloadDataUris(options.body) : options.body;
+    init.body = JSON.stringify(body);
+  }
   const response = await fetch(url, init);
   let data = {};
   try { data = await response.json(); } catch {}
   if (!response.ok || data.ok === false) { const err = new Error(data.err || 'No se pudo conectar con Crix'); err.status = response.status; err.payload = data; throw err; }
   return data;
+}
+
+// ═══ Medios: subida directa al almacenamiento (no pasan por el servidor) ═══
+// 1) el servidor autoriza y da una URL firmada  2) el navegador sube el archivo directo al bucket
+// 3) el servidor lo verifica (firma real + listas de hashes de material ilegal) y lo publica.
+const _MEDIA_SKIP = /^\/api\/(convs|e2ee|media|moderation)(\/|$)/;
+async function sha256Hex(data) {
+  const buf = (typeof Blob !== 'undefined' && data instanceof Blob) ? await data.arrayBuffer() : data;
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function mediaPut(p, blob, mime, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest(); xhr.open('PUT', p.url);
+    if (p.mode === 'server') xhr.setRequestHeader('Authorization', 'Bearer ' + DB.get('token'));
+    const headers = { 'Content-Type': mime, ...(p.headers || {}) };
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    if (onProgress) xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100)); };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error('No se pudo subir el archivo (' + xhr.status + ')'));
+    xhr.onerror = () => {
+      if (p.mode !== 'direct') return reject(new Error('Sin conexión con el servidor'));
+      // En una subida directa esto casi siempre es el CORS del bucket. Si el administrador habilitó el reenvío, se reintenta por el servidor.
+      const fail = () => reject(new Error('No se pudo subir al almacenamiento: el bucket no autoriza este sitio (CORS). Avisale al administrador.'));
+      fetch('/api/media/' + encodeURIComponent(p.uploadId) + '/blob', { method:'PUT', headers:{ Authorization:'Bearer ' + DB.get('token'), 'Content-Type': mime }, body: blob })
+        .then(r => r.ok ? resolve() : fail()).catch(fail);
+    };
+    xhr.send(blob);
+  });
+}
+async function mediaUpload(kind, ref, blob, mime, onProgress, hash) {
+  mime = mime || blob.type || 'application/octet-stream';
+  hash = hash || await sha256Hex(blob);
+  const p = await apiRequest('/api/media/presign', { method:'POST', body:{ kind, ref: ref || undefined, size: blob.size, mime, sha256: hash } });
+  await mediaPut(p, blob, mime, onProgress);
+  return p.uploadId;
+}
+const _imgUploadCache = new Map();
+async function uploadImageBlob(blob) {   // → '/m/<sha256>.<ext>'
+  const hash = await sha256Hex(blob); if (_imgUploadCache.has(hash)) return _imgUploadCache.get(hash);
+  const uploadId = await mediaUpload('image', null, blob, blob.type || 'image/png', null, hash);
+  const r = await apiRequest('/api/media/commit', { method:'POST', body:{ uploadId } });
+  _imgUploadCache.set(hash, r.url); return r.url;
+}
+async function offloadDataUris(v, depth = 0) {
+  if (typeof v === 'string') {
+    if (v.length > 1024 && /^data:image\/(?:png|jpeg|webp|gif);base64,/.test(v)) return uploadImageBlob(await (await fetch(v)).blob());
+    return v;
+  }
+  if (depth > 8 || !v || typeof v !== 'object') return v;
+  if (Array.isArray(v)) { const out = []; for (const x of v) out.push(await offloadDataUris(x, depth + 1)); return out; }
+  const out = {}; for (const k of Object.keys(v)) out[k] = await offloadDataUris(v[k], depth + 1); return out;
+}
+// Chat E2EE: el servidor no ve los adjuntos, así que se verifica el hash en el dispositivo (antes de cifrar al enviar y
+// al abrir lo recibido). Al servidor viaja solo el SHA-256, nunca el contenido ni las claves.
+const _e2eeSeen = new Map();
+async function e2eeAttachmentHash(payload) {
+  const d = payload && (typeof payload.data === 'string' ? payload.data : (typeof payload.audio === 'string' ? payload.audio : ''));
+  if (!d || !d.startsWith('data:')) return null;
+  const i = d.indexOf(','); if (i < 0) return null;
+  const bin = atob(d.slice(i + 1)), bytes = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+  return sha256Hex(bytes.buffer);
+}
+async function e2eeHashBlocked(hash, context, peer) {
+  const r = await apiRequest('/api/moderation/check', { method:'POST', body:{ hashes:[hash], context, peer: peer || undefined } });
+  return (r.blocked || []).includes(hash);
+}
+async function e2eeIncomingBlocked(id, content, peer) {
+  if (_e2eeSeen.has(id)) return _e2eeSeen.get(id);
+  try { const h = await e2eeAttachmentHash(content); const bad = h ? await e2eeHashBlocked(h, 'receive', peer) : false; _e2eeSeen.set(id, bad); return bad; }
+  catch { return false; }
 }
 function getUsers()  { return DB.get('users')  || {}; }
 function setUsers(u) {
@@ -1237,6 +1311,7 @@ async function refreshCloudContent() {
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
 function profileAvatarSrc(user) {
   const src = user && typeof user.avatar === 'string' ? user.avatar : '';
+  if (/^\/m\/[0-9a-f]{64}\.(?:jpg|png|webp)$/.test(src)) return src;
   return src.length <= 180000 && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(src) ? src : '';
 }
 function avatarInnerHtml(user) {
@@ -1279,8 +1354,9 @@ async function uploadProfileAvatar(event) {
     ctx.drawImage(image, (image.width - cropWidth) / 2, (image.height - cropHeight) / 2, cropWidth, cropHeight, 0, 0, size, size);
     const avatar = canvas.toDataURL('image/jpeg', 0.78);
     if (avatar.length > 180000) { showToast('La foto quedó demasiado pesada; probá con otra imagen'); return; }
-    await apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:{ avatar } });
-    ME.avatar = avatar;
+    const avatarUrl = await uploadImageBlob(await (await fetch(avatar)).blob());   // directo al almacenamiento
+    await apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:{ avatar: avatarUrl } });
+    ME.avatar = avatarUrl;
     const users = getUsers(); users[ME.id] = ME; DB.set('users', users);
     updateOwnAvatar(); renderProfile(ME.id);
     showToast('✅ Foto de perfil actualizada');
@@ -1710,7 +1786,9 @@ async function renderConv(cid,userId) {
     let content;
     try{content=await decryptChatMessage(cid,message);}catch{content=null;}
     let body='';
-    if(!content)body=`<div class="mb ${cls}">🔒 Mensaje cifrado. Desbloqueá tu clave o verificá que la cuenta emisora conserve sus claves.</div>`;
+    let blockedMedia=false;if(content&&(content.type==='image'||content.type==='file'||content.type==='audio'))blockedMedia=await e2eeIncomingBlocked(message.id,content,message.from);
+    if(blockedMedia)body=`<div class="mb ${cls}">🚫 Contenido bloqueado: coincide con material ilegal conocido.</div>`;
+    else if(!content)body=`<div class="mb ${cls}">🔒 Mensaje cifrado. Desbloqueá tu clave o verificá que la cuenta emisora conserve sus claves.</div>`;
     else if(content.type==='audio')body=`<div class="mb ${cls}" style="padding:8px 12px;display:flex;align-items:center;gap:8px">🎤<audio controls src="${htmlAttr(content.audio||content.data)}" style="height:26px;max-width:170px"></audio></div>`;
     else if(content.type==='file')body=`<div class="mb ${cls}">📎 <a href="${htmlAttr(content.data)}" download="${htmlAttr(content.filename)}" style="color:var(--acc)">${esc(content.filename||'Archivo')}</a></div>`;
     else if(content.type==='image')body=`<div class="mb ${cls}" style="padding:4px"><img src="${htmlAttr(content.data)}" alt="Imagen cifrada" style="max-width:210px;border-radius:8px;display:block"></div>`;
@@ -1725,6 +1803,11 @@ function msgKeydown(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sen
 function autoResize(t) { t.style.height='';t.style.height=Math.min(t.scrollHeight,110)+'px'; }
 async function pushMsg(cid,msg) {
   const recipientId=cid.split('_').find(id=>id!==ME.id);if(!recipientId)throw new Error('Conversación inválida');
+  const attachmentHash=await e2eeAttachmentHash(msg);   // verificación en el dispositivo, antes de cifrar
+  if(attachmentHash){
+    let blocked;try{blocked=await e2eeHashBlocked(attachmentHash,'send');}catch{throw new Error('No se pudo verificar el adjunto. Probá de nuevo.');}
+    if(blocked)throw new Error('Este archivo coincide con material ilegal conocido y no se puede enviar.');
+  }
   const encrypted=await encryptChatMessage(cid,msg,recipientId);
   await apiRequest('/api/convs/'+encodeURIComponent(cid),{method:'POST',body:{msg:encrypted}});
   const convs=getConvs();convs[cid]=convs[cid]||[];if(!convs[cid].some(item=>item.id===encrypted.id))convs[cid].push(encrypted);setConvs(convs);
@@ -3249,7 +3332,7 @@ function guiUpdateExtras(el, d) {
     if (label) { label.textContent = guiTemplate(d.text); label.style.cssText = 'position:relative;color:#fff;text-shadow:0 1px 2px #000'; }
   } else if (d.type === 'ImageLabel') {
     const img = el.querySelector('img'), src = String(d.image || '');
-    if (img) { if (/^data:image\/(png|jpeg|webp|gif);base64,/.test(src)) { if (img.getAttribute('src') !== src) img.src = src; } else img.removeAttribute('src'); }
+    if (img) { if (/^data:image\/(png|jpeg|webp|gif);base64,/.test(src) || /^\/m\/[0-9a-f]{64}\.(?:png|jpg|webp|gif)$/.test(src)) { if (img.getAttribute('src') !== src) img.src = src; } else img.removeAttribute('src'); }
   }
 }
 function guiMakeElement(e, edit) {
@@ -3665,17 +3748,11 @@ function uvProgress(pct) {
   box.style.display = 'block'; document.getElementById('uv-progress-bar').style.width = pct + '%';
   document.getElementById('uv-progress-txt').textContent = pct >= 100 ? 'Procesando…' : 'Subiendo… ' + pct + ' %';
 }
-function uploadVideoFile(id, file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('PUT', '/api/videos/' + encodeURIComponent(id) + '/file');
-    xhr.setRequestHeader('Authorization', 'Bearer ' + DB.get('token'));
-    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
-    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100)); };
-    xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch {} (xhr.status >= 200 && xhr.status < 300 && j.ok) ? resolve(j) : reject(new Error(j.err || ('Error ' + xhr.status))); };
-    xhr.onerror = () => reject(new Error('Sin conexión con el servidor'));
-    xhr.send(file);
-  });
+async function uploadVideoFile(id, file, onProgress) {
+  // El archivo va directo al almacenamiento; el servidor solo verifica y publica.
+  const uploadId = await mediaUpload('video', id, file, file.type || 'video/mp4', onProgress);
+  onProgress(100);
+  return apiRequest('/api/videos/' + encodeURIComponent(id) + '/commit', { method:'POST', body:{ uploadId } });
 }
 function makeVideoThumb(file) {
   return new Promise(resolve => {
@@ -4003,6 +4080,7 @@ function texLibSet(id, src) {
     entry.img.onerror = () => { entry.failed = true; end(); };
     setTimeout(end, 6000);
   });
+  entry.img.crossOrigin = 'anonymous';   // las texturas se sirven desde el bucket (otro origen): WebGL exige CORS
   entry.img.src = src; return entry.promise;
 }
 function registerMapTextures(m) {
@@ -4025,7 +4103,12 @@ async function stPushTextures(attempt) {
   const m = getMaps()[mapId], pending = Object.entries(stTexData).filter(([id]) => !(m && m.textureIds || []).includes(id)).slice(0, 4);
   if (!pending.length) return;
   try {
-    const r = await apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/textures', { method:'POST', body:{ textures:Object.fromEntries(pending) } });
+    let r = null;
+    for (const [tid, url] of pending) {   // cada textura sube directo al almacenamiento
+      const blob = await (await fetch(url)).blob();
+      const uploadId = await mediaUpload('texture', mapId, blob, blob.type || 'image/png');
+      r = await apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/textures/commit', { method:'POST', body:{ uploadId, tid } });
+    }
     const cur = getMaps(); if (cur[mapId]) { cur[mapId].textureIds = r.textureIds; DB.set('maps', cur); }
     if (Object.keys(stTexData).some(id => !r.textureIds.includes(id))) stPushTextures();
   } catch (err) {
