@@ -162,28 +162,3 @@ Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y
 | `GET /status` | Consultar el estado del servidor |
 
 Solo se publican los archivos del cliente (`index.html`, `service-worker.js`, `manifest.webmanifest`, `crix-icon.svg`); el código del servidor ya no se sirve por HTTP. El registro y el login tienen límite de intentos por IP. Las rutas de escritura requieren una sesión Bearer; las operaciones administrativas también comprueban el rol en el servidor.
-
-## Medios sin pasar por Render + detección de material ilegal
-
-**Subida directa.** Videos, texturas, fotos de perfil, miniaturas e imágenes de posts/GUI/mapas se suben desde el
-navegador directo al bucket con una URL firmada (`/api/media/presign` → PUT al bucket → `/api/media/commit`).
-La reproducción también sale del bucket: `/api/videos/:id/stream`, `/api/maps/:id/textures/:tid` y `/m/<sha256>.<ext>`
-responden con un 302 a una URL firmada. Render solo guarda metadatos. Requiere:
-
-1. Variables `CRIX_S3_*` cargadas (ver persist.js).
-2. CORS del bucket: `CRIX_ORIGIN=https://tu-app.onrender.com npm run setup-cors` (o pegar el JSON que imprime en el panel de Backblaze).
-
-Sin bucket (desarrollo local) todo funciona igual pero los bytes pasan por el servidor.
-
-**Verificación (media-guard.js)**: firma real del archivo (un .exe/.html/.zip disfrazado de imagen o video se rechaza) y
-comparación de MD5/SHA-1/SHA-256 con listas de hashes. En `commit` el servidor lee el objeto en streaming (no lo guarda en disco),
-lo verifica y recién entonces lo mueve a su ubicación final; si coincide, lo borra, registra el incidente (solo hash, usuario, hora)
-y la cuenta pierde la posibilidad de subir medios (`CRIX_ON_MATCH=block` solo bloquea; `ban` suspende la cuenta).
-Cualquier JSON que traiga archivos `data:` se escanea igual. El chat E2EE calcula el SHA-256 del adjunto en el dispositivo
-(antes de cifrar y al abrir lo recibido) y consulta `/api/moderation/check`; el servidor nunca ve el contenido.
-
-**Las listas no vienen incluidas**: las entregan organizaciones a quienes se registran (NCMEC, IWF, GIFCT, Project Arachnid / C3P,
-Thorn Safer, Google CSAI Match, Tech Coalition Lantern). Una vez que las tengas: subilas al bucket en `moderation/hashlists/*.txt`
-(un hash por línea, opcional etiqueta), o cargalas con `POST /api/admin/moderation/hashlist {name, text}` siendo admin, o definí
-`CRIX_HASHLIST_URLS`. Se recargan cada 6 h. Para hashes perceptuales o servicios externos: `CRIX_SCAN_WEBHOOK` (ver media-guard.js).
-Panel: `GET /api/admin/moderation` (incidentes y listas cargadas).
