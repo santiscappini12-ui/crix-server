@@ -631,6 +631,16 @@ app.post('/api/push/subscribe', requireAuth, (req, res) => {
   const result = push.subscribe(req.user.id, req.body?.subscription, req.get('user-agent'));
   res.status(result.ok ? 200 : 400).json(result);
 });
+app.get('/api/push/status', requireAuth, (req, res) => {
+  res.json({ ok:true, ready:push.ready, devices:(DB.push?.[req.user.id] || []).length });
+});
+app.post('/api/push/test', requireAuth, async (req, res) => {
+  const devices = (DB.push?.[req.user.id] || []).length;
+  if (!push.ready) return res.status(503).json({ ok:false, err:'El servidor no tiene push configurado' });
+  if (!devices) return res.status(409).json({ ok:false, err:'Este dispositivo no está suscrito todavía' });
+  const sent = await push.send(req.user.id, { type:'test', title:'Crix', body:'🔔 Así van a sonar tus avisos', tag:'crix-test', url:'/' }, { ttl:60, urgency:'high' });
+  res.json({ ok:true, devices, sent });
+});
 app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
   push.unsubscribe(req.user.id, typeof req.body?.endpoint === 'string' ? req.body.endpoint : '');
   res.json({ ok:true });
@@ -1378,6 +1388,12 @@ io.on('connection', socket => {
         const ringing = calls.get(meta.userId);
         const keepRinging = ringing && !ringing.caller && !ringing.accepted && push.has(meta.userId);
         if (!keepRinging) clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
+        else {
+          // La app pasó a segundo plano y se cortó el socket sin avisar visibilidad: el teléfono tiene que sonar ahora.
+          const caller = DB.users[ringing.peer];
+          push.send(meta.userId, { type:'call', from:ringing.peer, fromName:caller?.username || 'Alguien', callType:ringing.type || 'audio',
+            tag:'call-' + ringing.peer, url:'/?n=call&u=' + encodeURIComponent(ringing.peer) }, { ttl:40, urgency:'high', topic:'call' + String(ringing.peer).slice(0,20) }).catch(() => {});
+        }
         delete onlineUsers[meta.userId];
         if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
         io.emit('online_update', { userId:meta.userId, online:false });

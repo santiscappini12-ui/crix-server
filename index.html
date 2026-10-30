@@ -726,6 +726,15 @@ input,select,textarea{font-family:var(--font);}
         SOLICITUDES <span id="friend-req-badge" style="background:var(--red);color:#fff;border-radius:10px;font-size:9px;padding:1px 6px;display:none"></span>
       </div>
       <div id="friend-requests-list"></div>
+      <div id="notif-panel" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text2)">
+        <div style="font-weight:700;margin-bottom:6px">🔔 NOTIFICACIONES</div>
+        <div id="notif-status" style="line-height:1.5;margin-bottom:6px">…</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-p" style="padding:5px 10px;font-size:11px" onclick="enableNotifications().then(notifStatusRender)">Activar</button>
+          <button class="btn" style="padding:5px 10px;font-size:11px;background:var(--bg3);color:var(--text)" onclick="testNotification()">Probar</button>
+          <button class="btn" style="padding:5px 10px;font-size:11px;background:var(--bg3);color:var(--text)" onclick="toggleSound();notifStatusRender()">Sonido</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="msg-main">
@@ -2958,6 +2967,31 @@ function titleAlert(text) { stopTitleAlert(); let on = false; _titleTimer = setI
 function stopTitleAlert() { clearInterval(_titleTimer); _titleTimer = null; document.title = _baseTitle; }
 function setAppBadge(n) { try { if (n > 0) navigator.setAppBadge && navigator.setAppBadge(n); else navigator.clearAppBadge && navigator.clearAppBadge(); } catch {} }
 // ── Aviso para activar notificaciones / instalar la app ──
+async function notifStatusRender() {
+  const el = document.getElementById('notif-status'); if (!el) return;
+  const rows = [];
+  const ok = t => '✅ ' + t, no = t => '❌ ' + t;
+  rows.push(location.protocol === 'https:' || location.hostname === 'localhost' ? ok('Conexión segura') : no('Falta HTTPS (sin HTTPS no hay push)'));
+  if (isIOSDevice() && !isStandalone()) rows.push(no('En iPhone hay que instalarla: Compartir → Agregar a inicio'));
+  else rows.push(isStandalone() ? ok('Abierta como app instalada') : '• Abierta en el navegador (instalarla ayuda en el celular)');
+  if (!('Notification' in window)) rows.push(no('Este navegador no admite notificaciones'));
+  else rows.push(Notification.permission === 'granted' ? ok('Permiso concedido') : Notification.permission === 'denied' ? no('Permiso bloqueado: activalo en los ajustes del sitio') : no('Permiso sin pedir: tocá Activar'));
+  let reg = null, sub = null;
+  try { reg = await Promise.race([swReady(), new Promise(r => setTimeout(() => r(null), 2000))]); sub = reg && await reg.pushManager.getSubscription(); } catch {}
+  rows.push(reg ? ok('Service worker activo') : no('Service worker sin registrar'));
+  rows.push(sub ? ok('Suscripción de este dispositivo creada') : no('Sin suscripción push en este dispositivo'));
+  try { const st = await apiRequest('/api/push/status'); rows.push(st.devices ? ok('Servidor: ' + st.devices + ' dispositivo(s) registrado(s)') : no('Servidor: ningún dispositivo registrado')); } catch { rows.push(no('No se pudo consultar al servidor')); }
+  rows.push(soundOn() ? ok('Sonidos dentro de la app activados') : '• Sonidos dentro de la app silenciados');
+  el.innerHTML = rows.map(r => '<div>' + esc(r) + '</div>').join('');
+}
+async function testNotification() {
+  await pushSync();
+  try {
+    const r = await apiRequest('/api/push/test', { method: 'POST' });
+    showToast(r.sent ? '📨 Enviada: salí de Crix (o bloqueá la pantalla) y debería sonar' : '⚠️ El servidor no pudo entregarla');
+  } catch (e) { showToast('⚠️ ' + e.message); }
+  notifStatusRender();
+}
 function notifBannerHide() { const b = document.getElementById('notif-prompt'); if (b) b.remove(); }
 function notifBannerShow() {
   if (!ME || document.getElementById('notif-prompt')) return;
@@ -3008,7 +3042,7 @@ function applyPendingCall(from) {
   if (p.action === 'accept') callAccept(); else if (p.action === 'decline') callHangup('');
 }
 function notifAfterLogin() {
-  pushSync();
+  pushSync().then(notifStatusRender);
   setTimeout(notifBannerShow, 4000);
   if (_pendingNotif) setTimeout(() => { const m = _pendingNotif; _pendingNotif = null; handleNotifAction(m); }, 900);
 }
@@ -3150,6 +3184,8 @@ netConnect();
 const _goTabCloud = goTab;
 goTab = function(tab, extra) { _goTabCloud(tab, extra); if (CLOUD_READY) refreshCloudContent(); };
 setInterval(() => { if (CLOUD_READY) refreshCloudContent(); }, 60000);
+const _goTabNotif = goTab;
+goTab = function(tab, extra) { _goTabNotif(tab, extra); if (tab === 'msg') notifStatusRender(); };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch(err => console.warn('[PWA] No se pudo instalar el caché:', err.message));
 
 // ═══ Anclaje y física en Crix Hub ═══
