@@ -28,14 +28,14 @@ const DATA_FILE = persist.DATA_FILE;
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
 // a un disco persistente montado por el proveedor de alojamiento.
 // ══════════════════════════════════════════════
-let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, _v: 0 };
+let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, push: {}, _v: 0 };
 
 function loadDB() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf8');
       const parsed = JSON.parse(raw);
-      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, _v:0, ...parsed };
+      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, push:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
       DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {};
       // Los mensajes anteriores al cifrado E2EE no se pueden proteger retroactivamente.
@@ -92,6 +92,9 @@ function saveDB() {
 }
 
 loadDB();
+// Notificaciones push (mensajes, llamadas y solicitudes con la app cerrada)
+const push = require('./push')({ getDB: () => DB, saveDB });
+push.init();
 // Guardar cada 10 segundos para no perder datos
 setInterval(saveDB, 10000);
 
@@ -102,13 +105,31 @@ const rooms          = {};
 const connSockets    = {};   // socketId → { userId, username, color, mapId }
 const onlineUsers    = {};   // userId   → { socketId, username, color }
 const stats = { start: Date.now(), total: 0 };
-const calls = new Map();       // userId → { peer, caller, accepted, timer } (llamadas sonando o activas)
+const calls = new Map();       // userId → { peer, caller, accepted, type, timer } (llamadas sonando o activas)
+// ¿Hace falta mandar push? Solo si la persona no tiene Crix abierto y a la vista en algún dispositivo.
+function needsPush(userId) {
+  const o = onlineUsers[userId];
+  return push.has(userId) && !(o && o.visible === true);
+}
+function notifyPush(userId, payload, options) {
+  if (!userId || !needsPush(userId)) return;
+  push.send(userId, payload, options).catch(() => {});
+}
 function clearCall(userId, notify) {
   const c = calls.get(userId); if (!c) return null;
   clearTimeout(c.timer); calls.delete(userId);
   const other = calls.get(c.peer);
   if (other && other.peer === userId) { clearTimeout(other.timer); calls.delete(c.peer); }
   if (notify) { const target = onlineUsers[c.peer]; if (target) io.to(target.socketId).emit(notify.event, { from:userId, reason:notify.reason }); }
+  // Si la llamada no llegó a atenderse y la cortó/perdió quien llamaba, se cancela el timbre en los
+  // dispositivos de quien recibía y queda un aviso de llamada perdida.
+  if (!c.accepted && c.caller && push.has(c.peer)) {
+    const caller = DB.users[userId];
+    push.send(c.peer, {
+      type:'call_cancel', missed:true, from:userId, fromName:caller?.username || 'Alguien',
+      callType:c.type || 'audio', tag:'call-' + userId, url:'/?n=missed&u=' + encodeURIComponent(userId)
+    }, { ttl:600, urgency:'high', topic:'call' + String(userId).slice(0,20) }).catch(() => {});
+  }
   return c;
 }
 
@@ -441,9 +462,15 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg'];
+const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg',
+  '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get(PUBLIC_FILES, (req, res) => res.sendFile(path.join(__dirname, req.path)));
+app.get(PUBLIC_FILES, (req, res) => {
+  // El service worker y el manifiesto no deben quedar en caché para que las actualizaciones lleguen rápido.
+  if (req.path === '/service-worker.js' || req.path === '/manifest.webmanifest') res.set('Cache-Control', 'no-cache');
+  if (req.path === '/service-worker.js') res.set('Service-Worker-Allowed', '/');
+  res.sendFile(path.join(__dirname, req.path));
+});
 
 // ── Límite de intentos de acceso por IP ──
 const authAttempts = new Map();
@@ -596,6 +623,18 @@ app.get('/api/users', (req, res) => {
 });
 
 // ── Servidores ICE para las llamadas (STUN público; TURN opcional por variables de entorno) ──
+app.get('/api/push/key', requireAuth, (req, res) => {
+  if (!push.ready) return res.status(503).json({ ok:false, err:'Las notificaciones push no están disponibles' });
+  res.json({ ok:true, key:push.publicKey });
+});
+app.post('/api/push/subscribe', requireAuth, (req, res) => {
+  const result = push.subscribe(req.user.id, req.body?.subscription, req.get('user-agent'));
+  res.status(result.ok ? 200 : 400).json(result);
+});
+app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
+  push.unsubscribe(req.user.id, typeof req.body?.endpoint === 'string' ? req.body.endpoint : '');
+  res.json({ ok:true });
+});
 app.get('/api/ice', requireAuth, (req, res) => {
   const iceServers = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }];
   if (process.env.CRIX_TURN_URL) iceServers.push({ urls:String(process.env.CRIX_TURN_URL).split(',').map(x => x.trim()).filter(Boolean), username:process.env.CRIX_TURN_USER || '', credential:process.env.CRIX_TURN_PASS || '' });
@@ -855,6 +894,11 @@ app.post('/api/convs/:convId', (req, res) => {
     convId.split('_').forEach(uid => {
       const o = onlineUsers[uid];
       if (o) io.to(o.socketId).emit('new_private_msg', { convId, msg:encryptedMessage });
+      // El contenido va cifrado de punta a punta: el aviso no puede incluir el texto.
+      if (uid !== user.id) notifyPush(uid, {
+        type:'message', from:user.id, fromName:user.username, convId,
+        tag:'msg-' + convId, url:'/?n=message&u=' + encodeURIComponent(user.id)
+      }, { ttl:24 * 3600, topic:'msg' + String(user.id).slice(0,24) });
     });
     res.json({ ok:true });
   } catch(e) { res.json({ ok:false, err:e.message }); }
@@ -880,6 +924,7 @@ app.post('/api/friend-request', (req, res) => {
     // Notificar en tiempo real si está online
     const toOnline = onlineUsers[toId];
     if (toOnline) io.to(toOnline.socketId).emit('friend_request', { from:from.id, fromName:from.username });
+    notifyPush(toId, { type:'friend_request', from:from.id, fromName:from.username, tag:'friend-' + from.id, url:'/?n=friend_request' }, { ttl:7 * 24 * 3600 });
     res.json({ok:true});
   } catch(e) { res.json({ok:false,err:e.message}); }
 });
@@ -905,6 +950,7 @@ app.post('/api/friend-accept', (req, res) => {
     // Notificar a ambos
     const fromOnline = onlineUsers[fromId];
     if (fromOnline) io.to(fromOnline.socketId).emit('friend_accepted', { from:to.id, fromName:to.username });
+    notifyPush(fromId, { type:'friend_accepted', from:to.id, fromName:to.username, tag:'friend-ok-' + to.id, url:'/?n=friend_accepted&u=' + encodeURIComponent(to.id) }, { ttl:7 * 24 * 3600 });
     io.emit('user_updated', {userId:fromId}); io.emit('user_updated', {userId:toId});
     res.json({ok:true});
   } catch(e) { res.json({ok:false,err:e.message}); }
@@ -1151,7 +1197,7 @@ io.on('connection', socket => {
   socket.on('call_invite', ({ to, type } = {}) => {
     const me = socket.data.user; to = String(to || ''); if (!me || !to || to === me.id) return;
     const target = onlineUsers[to];
-    if (!target || !DB.users[to] || DB.users[to].banned) return socket.emit('call_unavailable', { from:to, reason:'offline' });
+    if (!DB.users[to] || DB.users[to].banned || (!target && !push.has(to))) return socket.emit('call_unavailable', { from:to, reason:'offline' });
     if (calls.has(me.id)) return socket.emit('call_unavailable', { from:to, reason:'self_busy' });
     if (calls.has(to)) return socket.emit('call_busy', { from:to });
     const timer = setTimeout(() => {
@@ -1159,9 +1205,15 @@ io.on('connection', socket => {
       clearCall(me.id, { event:'call_end', reason:'timeout' });
       const mine = onlineUsers[me.id]; if (mine) io.to(mine.socketId).emit('call_end', { from:to, reason:'timeout' });
     }, 45000);
-    calls.set(me.id, { peer:to, caller:true, accepted:false, timer });
-    calls.set(to, { peer:me.id, caller:false, accepted:false, timer });
-    io.to(target.socketId).emit('call_invite', { from:me.id, fromName:me.username, type: type === 'video' ? 'video' : 'audio' });
+    const callType = type === 'video' ? 'video' : 'audio';
+    calls.set(me.id, { peer:to, caller:true, accepted:false, type:callType, timer });
+    calls.set(to, { peer:me.id, caller:false, accepted:false, type:callType, timer });
+    if (target) io.to(target.socketId).emit('call_invite', { from:me.id, fromName:me.username, type:callType });
+    // Si la persona no tiene Crix abierto, el teléfono/PC suena igual con una notificación de llamada.
+    notifyPush(to, {
+      type:'call', from:me.id, fromName:me.username, callType, tag:'call-' + me.id,
+      url:'/?n=call&u=' + encodeURIComponent(me.id)
+    }, { ttl:45, urgency:'high', topic:'call' + String(me.id).slice(0,20) });
   });
   socket.on('call_accept', ({ to } = {}) => {
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
@@ -1200,6 +1252,16 @@ io.on('connection', socket => {
     DB.users[user.id].onlineAt = Date.now();
     io.emit('online_update', { userId:user.id, online:true });
     emitPresence(user.id);
+    // Si alguien está llamando mientras la app estaba cerrada, el timbre aparece apenas se conecta.
+    const pending = calls.get(user.id);
+    if (pending && !pending.caller && !pending.accepted) {
+      socket.emit('call_invite', { from:pending.peer, fromName:DB.users[pending.peer]?.username || 'Alguien', type:pending.type || 'audio' });
+    }
+  });
+  // El cliente avisa si Crix está a la vista: si lo está, no se manda push (ya ve y escucha el aviso dentro de la app).
+  socket.on('app_visibility', ({ visible } = {}) => {
+    const me = socket.data.user; if (!me) return;
+    const o = onlineUsers[me.id]; if (o && o.socketId === socket.id) o.visible = visible === true;
   });
 
   socket.on('join_game', data => {
@@ -1313,7 +1375,9 @@ io.on('connection', socket => {
     if (meta?.userId) {
       const presence = onlineUsers[meta.userId];
       if (presence?.socketId === socket.id) {
-        clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
+        const ringing = calls.get(meta.userId);
+        const keepRinging = ringing && !ringing.caller && !ringing.accepted && push.has(meta.userId);
+        if (!keepRinging) clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
         delete onlineUsers[meta.userId];
         if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
         io.emit('online_update', { userId:meta.userId, online:false });

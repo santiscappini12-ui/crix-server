@@ -8,6 +8,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/crix-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Crix">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Crix — Plataforma de Juegos</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
@@ -1744,7 +1747,94 @@ function toggleMute() { callToggleMute(); }
 function toggleCam() { callToggleCam(); }
 let stScene, stCamera, stRenderer; let stParts = [], stScripts = []; let selPart = null, selOutline = null, gizmoArrows = []; let stTool = 'sel'; let stMapId = null, stInited = false, stPlaytesting = false; let stCamTheta = Math.PI/4, stCamPhi = 0.4, stCamDist = 35, stCamTarget = new THREE.Vector3(); let stDrag = false, stLX = 0, stLY = 0; let gizmoDragging = false, gizmoAxis = null, gizmoStart = new THREE.Vector3(), gizmoLastAngle = 0, gizmoStartRotation = new THREE.Vector3(), gizmoRotationDelta = 0; let stSnap = 1, stUndoStack = [], stRedoStack = [], stHistoryMapId = null, stHistoryApplying = false;
 function initStudio() { if (!stInited) { stInited = true; _setupStRenderer(); _setupStInput(); _stLoop(); } loadMyMap(); }
-function _setupStRenderer() { stScene = new THREE.Scene(); stScene.background = new THREE.Color(0x0d1020); stScene.fog = new THREE.FogExp2(0x0d1020, 0.007); const wrap = document.getElementById('stu-canvas-wrap'); stCamera = new THREE.PerspectiveCamera(60, wrap.clientWidth/wrap.clientHeight, 0.1, 1000); stRenderer = new THREE.WebGLRenderer({antialias:true}); stRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); stRenderer.shadowMap.enabled = true; wrap.appendChild(stRenderer.domElement); stScene.add(new THREE.AmbientLight(0xffffff, 0.55)); const sun = new THREE.DirectionalLight(0xffffff, 0.85); sun.position.set(40,60,30); sun.castShadow = true; stScene.add(sun); const grid = new THREE.GridHelper(200, 50, 0x1a2035, 0x111828); stScene.add(grid); new ResizeObserver(() => { stCamera.aspect = wrap.clientWidth/wrap.clientHeight; stCamera.updateProjectionMatrix(); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); }).observe(wrap); }
+// ═══ Iluminación y sombras compartidas (editor y juego) ═══
+// La luz del sol es direccional con sombras que siguen a la cámara/jugador: la cámara de sombras por defecto
+// de Three.js solo cubre 10×10 unidades, por eso antes casi no se veían sombras.
+const GFX_MOBILE = /Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || Math.min(innerWidth, innerHeight) < 600;
+const LIGHTING_DEFAULTS = { ambient:'#ffeedd', brightness:1.0, sunIntensity:1.0, sunElevation:55, sunAzimuth:35, shadows:true,
+  fog:true, fogColor:'#87ceeb', fogDensity:0.004, bloom:false, blur:false, sunRays:false, colorBrightness:1, colorContrast:0, colorSaturation:1 };
+function normalizeLighting(saved) {
+  const L = { ...LIGHTING_DEFAULTS, ...(saved && typeof saved === 'object' ? saved : {}) };
+  // Los mapas guardados con los valores por defecto antiguos (ambiente azul oscuro y niebla densa) pasan a los nuevos.
+  if (saved && saved.ambient === '#334466' && Number(saved.fogDensity) === 0.007) { L.ambient = LIGHTING_DEFAULTS.ambient; L.fogDensity = LIGHTING_DEFAULTS.fogDensity; }
+  const num = (v, d, a, b) => { v = Number(v); return Number.isFinite(v) ? Math.max(a, Math.min(b, v)) : d; };
+  L.brightness = num(L.brightness, 1, 0, 3); L.sunIntensity = num(L.sunIntensity, 1, 0, 2);
+  L.sunElevation = num(L.sunElevation, 55, 5, 89); L.sunAzimuth = num(L.sunAzimuth, 35, -3600, 3600);
+  L.fogDensity = num(L.fogDensity, 0.004, 0, 0.1); L.shadows = L.shadows !== false;
+  return L;
+}
+let gRig = null, stRig = null;
+function createLightRig(scene, renderer, L, opts) {
+  opts = opts || {};
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  const rig = {
+    scene, renderer, extent: opts.extent || 36, mapSize: opts.mapSize || 2048, dir: new THREE.Vector3(0, 1, 0),
+    hemi: new THREE.HemisphereLight(0xffffff, 0x555566, 0.4), amb: new THREE.AmbientLight(0xffffff, 0.18),
+    sun: new THREE.DirectionalLight(0xffffff, 0.8),
+    _r: new THREE.Vector3(), _u: new THREE.Vector3(), _f: new THREE.Vector3(), _up: new THREE.Vector3()
+  };
+  const sh = rig.sun.shadow;
+  sh.mapSize.set(rig.mapSize, rig.mapSize); sh.bias = -0.0004; sh.normalBias = 0.04;
+  scene.add(rig.hemi, rig.amb, rig.sun, rig.sun.target);
+  applyLightRig(rig, L);
+  return rig;
+}
+function disposeLightRig(rig) {
+  if (!rig) return;
+  try { if (rig.sun.shadow.map) rig.sun.shadow.map.dispose(); rig.scene.remove(rig.hemi, rig.amb, rig.sun, rig.sun.target); } catch {}
+}
+function applyLightRig(rig, L) {
+  if (!rig) return;
+  const B = L.brightness, el = L.sunElevation * Math.PI / 180, az = L.sunAzimuth * Math.PI / 180;
+  rig.dir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)).normalize();
+  // Al atardecer (sol bajo) la luz se vuelve cálida y pierde fuerza; el relleno mantiene visible el resto.
+  const warm = Math.max(0, Math.min(1, (28 - L.sunElevation) / 28));
+  rig.sun.color.setRGB(1, 1 - 0.28 * warm, 1 - 0.55 * warm);
+  rig.sun.intensity = 0.82 * B * L.sunIntensity * (1 - 0.35 * warm);
+  const amb = new THREE.Color(L.ambient), sky = new THREE.Color(L.fogColor || '#87ceeb').lerp(new THREE.Color(0xffffff), 0.45);
+  rig.amb.color.copy(amb); rig.amb.intensity = 0.2 * B;
+  rig.hemi.color.copy(sky); rig.hemi.groundColor.copy(amb).multiplyScalar(0.45); rig.hemi.intensity = 0.42 * B;
+  rig.sun.castShadow = L.shadows !== false;
+  const sh = rig.sun.shadow, ext = rig.extent, dist = ext * 2.6, cam = sh.camera;
+  cam.left = -ext; cam.right = ext; cam.top = ext; cam.bottom = -ext; cam.near = 1; cam.far = dist + ext * 2.2;
+  cam.updateProjectionMatrix();
+  rig._dist = dist;
+  if (rig._focus) updateLightRigFocus(rig, rig._focus); else updateLightRigFocus(rig, rig.sun.target.position);
+}
+// Mantiene el área con sombras alrededor de quien mira; el desplazamiento se ajusta a la rejilla del mapa de sombras
+// para que los bordes no "titilen" al moverse.
+function updateLightRigFocus(rig, pos) {
+  if (!rig) return;
+  const d = rig.dir, up = rig._up.set(0, Math.abs(d.y) > 0.99 ? 0 : 1, Math.abs(d.y) > 0.99 ? 1 : 0);
+  const r = rig._r.crossVectors(up, d).normalize(), u = rig._u.crossVectors(d, r).normalize();
+  const texel = (2 * rig.extent) / rig.mapSize;
+  const pr = Math.round(pos.dot(r) / texel) * texel, pu = Math.round(pos.dot(u) / texel) * texel, pd = pos.dot(d);
+  const f = rig._f.set(0, 0, 0).addScaledVector(r, pr).addScaledVector(u, pu).addScaledVector(d, pd);
+  rig._focus = rig._focus || new THREE.Vector3(); rig._focus.copy(pos);
+  rig.sun.target.position.copy(f);
+  rig.sun.position.copy(f).addScaledVector(d, rig._dist || rig.extent * 2.6);
+  rig.sun.target.updateMatrixWorld();
+}
+// Cielo, niebla y corrección de color de la pantalla (brillo, contraste y saturación).
+function applyLightingToScene(scene, L, canvas) {
+  scene.fog = L.fog ? new THREE.FogExp2(new THREE.Color(L.fogColor), L.fogDensity) : null;
+  scene.background = new THREE.Color(L.fogColor || '#87ceeb');
+  if (canvas) {
+    const b = Math.max(0, Number(L.colorBrightness)), c = 1 + Number(L.colorContrast), s = Math.max(0, Number(L.colorSaturation));
+    const neutral = Math.abs(b - 1) < 0.01 && Math.abs(c - 1) < 0.01 && Math.abs(s - 1) < 0.01;
+    canvas.style.filter = neutral ? '' : 'brightness(' + b + ') contrast(' + c + ') saturate(' + s + ')';
+  }
+}
+// Las piezas translúcidas o de alambre no proyectan sombra; el resto sí y las recibe.
+function setShadowFlags(mesh) {
+  if (!mesh || !mesh.isMesh) return;
+  const m = mesh.material;
+  mesh.receiveShadow = true;
+  mesh.castShadow = !(m && ((m.transparent && m.opacity < 0.6) || m.wireframe));
+}
+function shadowAllMeshes(root) { root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); }
+function _setupStRenderer() { stScene = new THREE.Scene(); stScene.background = new THREE.Color(0x0d1020); stScene.fog = new THREE.FogExp2(0x0d1020, 0.007); const wrap = document.getElementById('stu-canvas-wrap'); stCamera = new THREE.PerspectiveCamera(60, wrap.clientWidth/wrap.clientHeight, 0.1, 1000); stRenderer = new THREE.WebGLRenderer({antialias:true}); stRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); wrap.appendChild(stRenderer.domElement); stRig = createLightRig(stScene, stRenderer, stLighting, { extent: GFX_MOBILE ? 50 : 70, mapSize: GFX_MOBILE ? 1024 : 2048 }); applyLightingToScene(stScene, stLighting, stRenderer.domElement); const grid = new THREE.GridHelper(200, 50, 0x1a2035, 0x111828); stScene.add(grid); new ResizeObserver(() => { stCamera.aspect = wrap.clientWidth/wrap.clientHeight; stCamera.updateProjectionMatrix(); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); }).observe(wrap); }
 function _setupStInput() { const el = stRenderer.domElement; el.addEventListener('mousedown', e => { if (e.button === 1 || e.button === 2) { stDrag = true; stLX = e.clientX; stLY = e.clientY; } if (e.button === 0) onStClick(e); }); window.addEventListener('mouseup', () => { const wasDragging = gizmoDragging; stDrag = false; gizmoDragging = false; if (wasDragging && selPart) { updateGizmoPos(); renderProps(selPart); } }); window.addEventListener('mousemove', e => { if (gizmoDragging && selPart) onGizmoDrag(e); if (stDrag) { stCamTheta -= (e.clientX - stLX) * 0.01; stCamPhi = Math.max(0.05, Math.min(Math.PI/2.1, stCamPhi + (e.clientY - stLY) * 0.01)); stLX = e.clientX; stLY = e.clientY; } }); el.addEventListener('wheel', e => { stCamDist = Math.max(3, Math.min(200, stCamDist + e.deltaY * 0.07)); e.preventDefault(); }, {passive:false}); el.addEventListener('contextmenu', e => e.preventDefault()); let panDrag = false, px = 0, py = 0; el.addEventListener('mousedown', e => { if (e.shiftKey) { panDrag = true; px = e.clientX; py = e.clientY; } }); window.addEventListener('mouseup', () => panDrag = false); window.addEventListener('mousemove', e => { if (!panDrag) return; const r = new THREE.Vector3(); stCamera.getWorldDirection(r); const up = new THREE.Vector3(0,1,0); r.cross(up).normalize(); stCamTarget.addScaledVector(r, -(e.clientX-px)*0.05); stCamTarget.y += (e.clientY-py)*0.05; px = e.clientX; py = e.clientY; }); document.addEventListener('keydown', studioShortcuts); }
 function onStClick(e) { if (gizmoDragging) return; const wrap=document.getElementById('stu-canvas-wrap'), rect=wrap.getBoundingClientRect(), mouse=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1), ray=new THREE.Raycaster(); ray.setFromCamera(mouse,stCamera); if(gizmoArrows.length){const ghits=ray.intersectObjects(gizmoArrows,false);if(ghits.length){recordStudioHistory();gizmoDragging=true;gizmoAxis=ghits[0].object.userData.axis;gizmoStart.copy(ghits[0].point);gizmoStartRotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0);gizmoRotationDelta=0;gizmoLastAngle=rotationPointerAngle(gizmoAxis,gizmoStart,selPart.mesh.position);return;}} const meshes=stParts.map(p=>p.mesh).filter(Boolean),hits=ray.intersectObjects(meshes,true); if(hits.length){const root=hits[0].object.userData.studioRoot||hits[0].object;selectPart(stParts.find(p=>p.mesh===root||p.mesh===hits[0].object));}else deselect(); }
 function rotationPointerAngle(axis, point, center) { const v=point.clone().sub(center); return axis==='x'?Math.atan2(v.y,v.z):axis==='y'?Math.atan2(v.x,v.z):Math.atan2(v.y,v.x); }
@@ -1754,7 +1844,7 @@ function onGizmoDrag(e) { if(!selPart||!gizmoAxis)return; const wrap=document.ge
     else if(stTool==='scl'){const key='s'+gizmoAxis,dimension=Math.max(0.1,snapStudioValue(selPart.data[key]+delta[axisIndex]*2,stSnap));const ratio=dimension/Math.max(0.1,selPart.data[key]);selPart.data[key]=dimension;selPart.mesh.scale[axisIndex]*=ratio;updateSelectionOutline();} gizmoStart.copy(hitPt);}
   updateGizmoPos();renderProps(selPart); }
 function snapStudioValue(value,step) { return step>0?Math.round(value/step)*step:value; }
-function _stLoop() { requestAnimationFrame(_stLoop); if (!stRenderer) return; const cx = stCamTarget.x + stCamDist*Math.sin(stCamTheta)*Math.cos(stCamPhi); const cy = stCamTarget.y + stCamDist*Math.sin(stCamPhi); const cz = stCamTarget.z + stCamDist*Math.cos(stCamTheta)*Math.cos(stCamPhi); stCamera.position.set(cx, cy, cz); stCamera.lookAt(stCamTarget); if(typeof stepEditorPhysics==='function')stepEditorPhysics(); if(selOutline&&selPart)updateSelectionOutline(); stRenderer.render(stScene, stCamera); }
+function _stLoop() { requestAnimationFrame(_stLoop); if (!stRenderer) return; const cx = stCamTarget.x + stCamDist*Math.sin(stCamTheta)*Math.cos(stCamPhi); const cy = stCamTarget.y + stCamDist*Math.sin(stCamPhi); const cz = stCamTarget.z + stCamDist*Math.cos(stCamTheta)*Math.cos(stCamPhi); stCamera.position.set(cx, cy, cz); stCamera.lookAt(stCamTarget); if(typeof stepEditorPhysics==='function')stepEditorPhysics(); if(selOutline&&selPart)updateSelectionOutline(); if(stRig)updateLightRigFocus(stRig, stCamTarget); stRenderer.render(stScene, stCamera); }
 function studioSnapshot() { const maps = getMaps(), map = maps[stMapId]; if (!map) return ''; return JSON.stringify({ name:map.name||'', parts:stParts.map(p=>({...p.data})), scripts:stScripts.map(s=>({...s})), lighting:{...stLighting} }); }
 function updateHubHistoryButtons() { const undo=document.getElementById('hub-undo'), redo=document.getElementById('hub-redo'); if(undo)undo.disabled=!stUndoStack.length; if(redo)redo.disabled=!stRedoStack.length; }
 function recordStudioHistory() { if(stHistoryApplying||!stMapId)return; const snap=studioSnapshot(); if(!snap||snap.length>12000000||stUndoStack[stUndoStack.length-1]===snap)return; stUndoStack.push(snap);let size=stUndoStack.reduce((sum,item)=>sum+item.length,0);while(stUndoStack.length>20||size>12000000){size-=stUndoStack.shift().length;}stRedoStack=[];updateHubHistoryButtons(); }
@@ -1764,12 +1854,12 @@ function studioRedo() { if(!stRedoStack.length)return; const current=studioSnaps
 function setStudioProjectName(value) { const name=String(value||'').trim().slice(0,80)||'Proyecto sin nombre'; const maps=getMaps(), map=maps[stMapId]; if(!map)return; if(name===map.name)return; recordStudioHistory(); map.name=name; setMaps(maps); const input=document.getElementById('hub-project-name'); if(input)input.value=name; updateStStatus(); }
 function studioShortcuts(e) { if(!document.getElementById('s-studio')?.classList.contains('active'))return; const overlay=document.getElementById('code-overlay'); if(overlay?.classList.contains('open')||document.getElementById('gui-overlay')?.classList.contains('open'))return; const tag=document.activeElement?.tagName; if(['INPUT','TEXTAREA','SELECT'].includes(tag)||document.activeElement?.isContentEditable)return; if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();stuSave();return;} if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?studioRedo():studioUndo();return;} if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();studioRedo();return;} if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();stuDelete();return;} if(e.key.toLowerCase()==='f'&&selPart){stCamTarget.copy(selPart.mesh.position);stCamDist=Math.max(8,Math.min(stCamDist,20));} }
 function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = nextId('map'); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', privacy:'public', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; if(stHistoryMapId!==stMapId){stHistoryMapId=stMapId;stUndoStack=[];stRedoStack=[];updateHubHistoryButtons();} const title=document.getElementById('hub-project-name'); if(title)title.value=m.name||'Proyecto sin nombre'; stScripts = m.scripts || []; stSettings = {...(m.settings||{})}; stGuis = JSON.parse(JSON.stringify(m.guis||[])); stTexNames = {...(m.textureNames||{})}; registerMapTextures(m);
-  if (m.lighting) stLighting = {...stLighting, ...m.lighting};
+  stLighting = normalizeLighting(m.lighting);
   clearSt(); (m.parts||[]).forEach(d => addPartMesh({...d})); refreshExplorer();
   setTimeout(applyLighting, 100);
 }
 function clearSt() { stParts.forEach(p => p.mesh && stScene.remove(p.mesh)); stParts = []; if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; }
-function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,2,1,0,3,2, 3,5,2,3,4,5, 0,4,3, 1,5,2,0,4,1, 1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); applyPartUVs(geo, d, sx, sy, sz); const mat = buildPartMaterial(d); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); mesh.castShadow = true; mesh.receiveShadow = true; return mesh; }
+function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,1,2,0,2,3, 3,2,5,3,5,4, 0,3,4, 1,5,2, 0,4,1,1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo = geo.toNonIndexed(); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); applyPartUVs(geo, d, sx, sy, sz); const mat = buildPartMaterial(d); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); setShadowFlags(mesh); return mesh; }
 function makeHumanoidRig(d) { const root=new THREE.Group(),bodyMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.color||'#cc6644')}),skinMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.skinColor||'#f0bf98')});root.position.set(d.x||0,d.y||0,d.z||0);root.rotation.set(d.rx||0,d.ry||0,d.rz||0);root.scale.set(d.sx||1,(d.sy||2.6)/2.6,d.sz||1);const addBox=(size,material,position,parent=root)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.position.set(...position);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;};addBox([0.92,1.15,0.48],bodyMat,[0,1.32,0]);const head=new THREE.Mesh(new THREE.SphereGeometry(0.37,16,12),skinMat);head.position.set(0,2.2,0);head.castShadow=true;root.add(head);const armL=new THREE.Group(),armR=new THREE.Group(),legL=new THREE.Group(),legR=new THREE.Group();armL.position.set(-0.58,1.78,0);armR.position.set(0.58,1.78,0);legL.position.set(-0.24,0.78,0);legR.position.set(0.24,0.78,0);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armL);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armR);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legL);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legR);root.add(armL,armR,legL,legR);root.userData.rig={armL,armR,legL,legR};root.traverse(child=>child.userData.studioRoot=root);return root; }
 function addPartMesh(d) { if(d.anchored===undefined)d.anchored=true; if(d.canCollide===undefined)d.canCollide=true; const mesh=d.isNPC?makeHumanoidRig(d):makeMesh(d); stScene.add(mesh); const entry = {data:d, mesh}; stParts.push(entry); return entry; }
 async function importObjModel(event) { const input=event.target,file=input.files&&input.files[0];input.value='';if(!file)return;if(file.size>2*1024*1024){showToast('El OBJ no puede superar 2 MB');return;}try{const text=await file.text(),vertices=[],positions=[];for(const raw of text.split(/\r?\n/)){const line=raw.trim();if(line.startsWith('v ')){const values=line.slice(2).trim().split(/\s+/).slice(0,3).map(Number);if(values.length===3&&values.every(Number.isFinite))vertices.push(values);}else if(line.startsWith('f ')){const face=line.slice(2).trim().split(/\s+/).map(token=>{const rawIndex=parseInt(token.split('/')[0],10);return rawIndex<0?vertices.length+rawIndex:rawIndex-1;});if(face.length<3||face.some(index=>index<0||index>=vertices.length))continue;for(let i=1;i<face.length-1;i++)for(const index of [face[0],face[i],face[i+1]])positions.push(...vertices[index]);if(positions.length>180000)throw new Error('El modelo supera el límite de 60.000 vértices');}}if(positions.length<9)throw new Error('El OBJ no contiene caras triangulables');const mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];for(let i=0;i<positions.length;i+=3)for(let axis=0;axis<3;axis++){mins[axis]=Math.min(mins[axis],positions[i+axis]);maxs[axis]=Math.max(maxs[axis],positions[i+axis]);}const center=mins.map((value,axis)=>(value+maxs[axis])/2),extent=Math.max(...maxs.map((value,axis)=>value-mins[axis]));if(!extent)throw new Error('El modelo no tiene tamaño');const normalized=new Float32Array(positions.length);for(let i=0;i<positions.length;i++)normalized[i]=(positions[i]-center[i%3])*4/extent;const bytes=new Uint8Array(normalized.buffer);let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));const data={id:'model'+Date.now(),type:'ImportedMesh',name:file.name.replace(/\.obj$/i,'').slice(0,80)||'Modelo OBJ',x:stCamTarget.x,y:stCamTarget.y,z:stCamTarget.z,sx:4,sy:4,sz:4,rx:0,ry:0,rz:0,color:'#d7deed',material:'SmoothPlastic',anchored:true,canCollide:true,transparent:0,meshData:btoa(binary)};recordStudioHistory();const entry=addPartMesh(data);refreshExplorer();selectPart(entry);updateStStatus();showToast('🧩 Modelo OBJ importado. La geometría se guardará con el proyecto.');}catch(err){showToast(err.message||'No se pudo importar el OBJ');} }
@@ -1817,7 +1907,7 @@ const FOLDERS = [
   {id:'StarterGui',icon:'🖼',label:'GUI (interfaces)',isGui:true},
   {id:'GameSettings',icon:'⚙️',label:'Configuración del juego',isSettings:true},
 ];
-let stLighting = {ambient:'#334466',brightness:1.0,fog:true,fogColor:'#87ceeb',fogDensity:0.007,bloom:false,blur:false,sunRays:false,colorBrightness:1,colorContrast:0,colorSaturation:1};
+let stLighting = normalizeLighting();
 function refreshExplorer() {
   const el = document.getElementById('explorer'); let html2 = '';
   const query=(document.getElementById('hub-explorer-search')?.value||'').trim().toLowerCase();
@@ -1877,6 +1967,10 @@ function openLightingProps() {
     '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--yellow);background:var(--bg3);border-bottom:1px solid var(--border)">LIGHTING</div>'+
     '<div class="prop-row"><div class="prop-lbl">Luz Ambiente</div><input type="color" value="'+L.ambient+'" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);cursor:pointer" onchange="stLighting.ambient=this.value;applyLighting()"></div>'+
     '<div class="prop-row"><div class="prop-lbl">Brillo (0-3)</div><input class="prop-inp" type="number" value="'+L.brightness+'" step="0.1" min="0" max="3" onchange="stLighting.brightness=parseFloat(this.value);applyLighting()"></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Intensidad del sol (0-2)</div><input class="prop-inp" type="number" value="'+L.sunIntensity+'" step="0.1" min="0" max="2" onchange="stLighting.sunIntensity=parseFloat(this.value);applyLighting()"></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Altura del sol (5-90°)</div><input class="prop-inp" type="number" value="'+L.sunElevation+'" step="5" min="5" max="90" onchange="stLighting.sunElevation=parseFloat(this.value);applyLighting()"></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Dirección del sol (0-360°)</div><input class="prop-inp" type="number" value="'+L.sunAzimuth+'" step="15" onchange="stLighting.sunAzimuth=parseFloat(this.value);applyLighting()"></div>'+
+    '<div class="prop-row"><div class="tgl-row" onclick="stLighting.shadows=!stLighting.shadows;this.querySelector(\'.tgl\').classList.toggle(\'on\',stLighting.shadows);applyLighting()"><div class="tgl '+(L.shadows?'on':'')+'" ><div class="tgl-k"></div></div><span class="tgl-lbl">Sombras</span></div></div>'+
     '<div class="prop-row"><div class="tgl-row" onclick="stLighting.fog=!stLighting.fog;this.querySelector(\'.tgl\').classList.toggle(\'on\',stLighting.fog);applyLighting()"><div class="tgl '+(L.fog?'on':'')+'" ><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Niebla</span></div></div>'+
     '<div class="prop-row"><div class="prop-lbl">Color Cielo/Niebla</div><input type="color" value="'+L.fogColor+'" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);cursor:pointer" onchange="stLighting.fogColor=this.value;applyLighting()"></div>'+
     '<div class="prop-row"><div class="prop-lbl">Densidad Niebla (0-0.1)</div><input class="prop-inp" type="number" value="'+L.fogDensity+'" step="0.001" min="0" max="0.1" onchange="stLighting.fogDensity=parseFloat(this.value);applyLighting()"></div>'+
@@ -1891,9 +1985,9 @@ function openLightingProps() {
 
 function applyLighting() {
   if (!stScene) return;
-  stScene.traverse(o => { if (o.isAmbientLight) { o.color.set(stLighting.ambient); o.intensity = stLighting.brightness * 0.55; } });
-  stScene.fog = stLighting.fog ? new THREE.FogExp2(stLighting.fogColor, stLighting.fogDensity) : null;
-  stScene.background = new THREE.Color(stLighting.fogColor || '#0d1020');
+  stLighting = normalizeLighting(stLighting);
+  applyLightRig(stRig, stLighting);
+  applyLightingToScene(stScene, stLighting, stRenderer && stRenderer.domElement);
   if (stMapId) { const maps=getMaps(); if(maps[stMapId]){maps[stMapId].lighting=JSON.parse(JSON.stringify(stLighting));setMaps(maps);} }
 }
 function toggleFolder(el) { el.classList.toggle('open'); }
@@ -2148,11 +2242,11 @@ function playMap(mapId) {
   if(runtimePhysicsHandle)clearInterval(runtimePhysicsHandle);runtimePhysicsHandle=setInterval(_stepScriptParts,16);
   document.getElementById('g-map-name').textContent = m.name;
 }
-function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); gRenderer.shadowMap.enabled = true; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
+function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); gRenderer.shadowMap.enabled = true; gRenderer.shadowMap.type = THREE.PCFSoftShadowMap; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
 function _loadMap(m) {
   const toRemove=[]; gScene.traverse(object=>{if(object!==gScene)toRemove.push(object);});toRemove.forEach(object=>gScene.remove(object));
   gColliders=[];gNPCs=[];runtimeObjects.clear();networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];gPlayer=null;
-  gScene.add(new THREE.AmbientLight(0xffeedd,0.55));const sun=new THREE.DirectionalLight(0xffffff,0.88);sun.position.set(40,70,30);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);gScene.add(sun);
+  disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:2048});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
   const parts=m.parts||[];runtimeWorkspaceBase=scriptPartsSnapshot(parts).filter(part=>part.type==='Spawn'||part.isNPC);let spawn={x:0,y:3,z:0};
   parts.forEach((part,index)=>{
     if(part.type==='Spawn'){spawn={x:part.x||0,y:(part.y||0)+(part.sy||0.4)/2,z:part.z||0};return;}
@@ -2162,8 +2256,8 @@ function _loadMap(m) {
   _spawnPlayer(spawn);gSpawnPos={x:spawn.x,y:spawn.y,z:spawn.z};resetGameState(m);if(typeof buildGameGui==='function')buildGameGui(m);gCamTheta=0;gCamPhi=0.45;gChatMsgs=[];document.getElementById('g-chat-msgs').innerHTML='';addGMsg(`Bienvenido a ${m.name}`,'sys');
 }
 function _stepScriptParts() { const serverPhysics=netServerScriptsActive&&netConnected;for(const object of runtimeObjects.values()){if(object.data.anchored||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
-function _spawnPlayer(pos) { const g = new THREE.Group(); const c = new THREE.Color(ME.color||'#5b8def'); const bMat = new THREE.MeshPhongMaterial({color:c}); const sMat = new THREE.MeshPhongMaterial({color:0xffdbac}); const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45,1.10,0.45),bMat); lL.position.set(-0.27, 0.55, 0); const lR = lL.clone(); lR.position.set( 0.27, 0.55, 0); const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55),bMat); torso.position.set(0, 1.70, 0); const head = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.70,0.70),sMat); head.position.set(0, 2.75, 0); const eyeM = new THREE.MeshPhongMaterial({color:0x111111}); const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeM); eL.position.set(-0.17, 2.78, 0.36); const eR = eL.clone(); eR.position.set( 0.17, 2.78, 0.36); const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40,1.10,0.40),bMat); aL.position.set(-0.72, 1.70, 0); const aR = aL.clone(); aR.position.set( 0.72, 1.70, 0); g.add(lL,lR,torso,head,eL,eR,aL,aR); g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = {aL,aR,lL,lR}; gVelY = 0; gOnGround = false; gTargetRY = 0; }
-function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; gAnimT += 0.016; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } _prevPos.copy(gPlayer.position); const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; if (moving) { const dir = new THREE.Vector3(mx,0,mz).normalize().applyAxisAngle(new THREE.Vector3(0,1,0), gCamTheta); gPlayer.position.x += dir.x * G_SPD; gPlayer.position.z += dir.z * G_SPD; gTargetRY = Math.atan2(dir.x, dir.z); } let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * 0.2; gVelY -= G_GRAV; gPlayer.position.y += gVelY; gOnGround = false; for (const col of gColliders) { col.box.setFromObject(col.mesh); const feet = gPlayer.position.y; const head = feet + AV_H; const pBox = new THREE.Box3( new THREE.Vector3(gPlayer.position.x - AV_HW, feet, gPlayer.position.z - AV_HD), new THREE.Vector3(gPlayer.position.x + AV_HW, head, gPlayer.position.z + AV_HD) ); if (!pBox.intersectsBox(col.box)) continue; const overY = Math.min(head, col.box.max.y) - Math.max(feet, col.box.min.y); const overX = Math.min(gPlayer.position.x+AV_HW, col.box.max.x) - Math.max(gPlayer.position.x-AV_HW, col.box.min.x); const overZ = Math.min(gPlayer.position.z+AV_HD, col.box.max.z) - Math.max(gPlayer.position.z-AV_HD, col.box.min.z); if (overY <= overX && overY <= overZ) { if (gVelY <= 0 && feet < col.box.max.y && head > col.box.max.y) { gPlayer.position.y = col.box.max.y; gVelY = 0; gOnGround = true; } else if (gVelY > 0 && head > col.box.min.y && feet < col.box.min.y) { gPlayer.position.y = col.box.min.y - AV_H; gVelY = 0; } } else { gPlayer.position.x = _prevPos.x; gPlayer.position.z = _prevPos.z; } } _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y=t;const rig=npc.mesh.userData.rig;if(rig){const swing=Math.sin(t*3)*0.45;rig.armL.rotation.x=swing;rig.armR.rotation.x=-swing;rig.legL.rotation.x=-swing;rig.legR.rotation.x=swing;} }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); gRenderer.render(gScene, gCamera); }
+function _spawnPlayer(pos) { const g = new THREE.Group(); const c = new THREE.Color(ME.color||'#5b8def'); const bMat = new THREE.MeshPhongMaterial({color:c}); const sMat = new THREE.MeshPhongMaterial({color:0xffdbac}); const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45,1.10,0.45),bMat); lL.position.set(-0.27, 0.55, 0); const lR = lL.clone(); lR.position.set( 0.27, 0.55, 0); const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55),bMat); torso.position.set(0, 1.70, 0); const head = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.70,0.70),sMat); head.position.set(0, 2.75, 0); const eyeM = new THREE.MeshPhongMaterial({color:0x111111}); const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeM); eL.position.set(-0.17, 2.78, 0.36); const eR = eL.clone(); eR.position.set( 0.17, 2.78, 0.36); const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40,1.10,0.40),bMat); aL.position.set(-0.72, 1.70, 0); const aR = aL.clone(); aR.position.set( 0.72, 1.70, 0); g.add(lL,lR,torso,head,eL,eR,aL,aR); shadowAllMeshes(g); g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = {aL,aR,lL,lR}; gVelY = 0; gOnGround = false; gTargetRY = 0; }
+function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; gAnimT += 0.016; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } _prevPos.copy(gPlayer.position); const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; if (moving) { const dir = new THREE.Vector3(mx,0,mz).normalize().applyAxisAngle(new THREE.Vector3(0,1,0), gCamTheta); gPlayer.position.x += dir.x * G_SPD; gPlayer.position.z += dir.z * G_SPD; gTargetRY = Math.atan2(dir.x, dir.z); } let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * 0.2; gVelY -= G_GRAV; gPlayer.position.y += gVelY; gOnGround = false; for (const col of gColliders) { col.box.setFromObject(col.mesh); const feet = gPlayer.position.y; const head = feet + AV_H; const pBox = new THREE.Box3( new THREE.Vector3(gPlayer.position.x - AV_HW, feet, gPlayer.position.z - AV_HD), new THREE.Vector3(gPlayer.position.x + AV_HW, head, gPlayer.position.z + AV_HD) ); if (!pBox.intersectsBox(col.box)) continue; const overY = Math.min(head, col.box.max.y) - Math.max(feet, col.box.min.y); const overX = Math.min(gPlayer.position.x+AV_HW, col.box.max.x) - Math.max(gPlayer.position.x-AV_HW, col.box.min.x); const overZ = Math.min(gPlayer.position.z+AV_HD, col.box.max.z) - Math.max(gPlayer.position.z-AV_HD, col.box.min.z); if (overY <= overX && overY <= overZ) { if (gVelY <= 0 && feet < col.box.max.y && head > col.box.max.y) { gPlayer.position.y = col.box.max.y; gVelY = 0; gOnGround = true; } else if (gVelY > 0 && head > col.box.min.y && feet < col.box.min.y) { gPlayer.position.y = col.box.min.y - AV_H; gVelY = 0; } } else { gPlayer.position.x = _prevPos.x; gPlayer.position.z = _prevPos.z; } } _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y=t;const rig=npc.mesh.userData.rig;if(rig){const swing=Math.sin(t*3)*0.45;rig.armL.rotation.x=swing;rig.armR.rotation.x=-swing;rig.legL.rotation.x=-swing;rig.legR.rotation.x=swing;} }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
 function _setupGameInput() { window.addEventListener('keydown', e => { if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return; gKeys[e.code] = true; if (e.code === 'Space') { e.preventDefault(); _tryJump(); } if (e.code === 'Escape') exitGame(); }); window.addEventListener('keyup', e => delete gKeys[e.code]); let cDrag = false, cx2=0, cy2=0; window.addEventListener('mousedown', e => { if (e.button===2 && document.getElementById('s-game').classList.contains('active')) { cDrag=true; cx2=e.clientX; cy2=e.clientY; } }); window.addEventListener('mouseup', e => { if (e.button===2) cDrag=false; }); window.addEventListener('mousemove', e => { if (!cDrag) return; gCamTheta -= (e.clientX-cx2)*0.01; gCamPhi = Math.max(0.08, Math.min(Math.PI/2.1, gCamPhi+(e.clientY-cy2)*0.01)); cx2=e.clientX; cy2=e.clientY; }); window.addEventListener('wheel', e => { if (document.getElementById('s-game').classList.contains('active')) gCamDist = Math.max(5,Math.min(60,gCamDist+e.deltaY*0.05)); }, {passive:true}); window.oncontextmenu = e => { if (document.getElementById('s-game').classList.contains('active')) e.preventDefault(); }; }
 function _tryJump() { if (gOnGround) { gVelY = G_JUMP; gOnGround = false; } }
 function _setupMob() { const base = document.getElementById('joy-base'); const knob = document.getElementById('joy-knob'); const jBtn = document.getElementById('jump-btn'); const R = 42; let jId = null; base.addEventListener('touchstart', e=>{e.preventDefault();jId=e.changedTouches[0].identifier;},{passive:false}); base.addEventListener('touchmove', e=>{ e.preventDefault(); let t=null; for(let i=0;i<e.changedTouches.length;i++) if(e.changedTouches[i].identifier===jId) t=e.changedTouches[i]; if(!t)return; const r=base.getBoundingClientRect(); let dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2); const dist=Math.hypot(dx,dy); if(dist>R){dx=dx/dist*R;dy=dy/dist*R;} knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; joyPos={x:dx/R,y:dy/R}; },{passive:false}); const rst=()=>{knob.style.transform='translate(-50%,-50%)';joyPos={x:0,y:0};jId=null;}; base.addEventListener('touchend',e=>{e.preventDefault();rst();},{passive:false}); jBtn.addEventListener('touchstart',e=>{e.preventDefault();_tryJump();},{passive:false}); const cv=gRenderer.domElement; let ctId=null,ccx=0,ccy=0; cv.addEventListener('touchstart',e=>{ctId=e.changedTouches[0].identifier;ccx=e.changedTouches[0].clientX;ccy=e.changedTouches[0].clientY;},{passive:false}); cv.addEventListener('touchmove',e=>{ e.preventDefault(); for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(t.identifier===ctId){gCamTheta-=(t.clientX-ccx)*0.007;gCamPhi=Math.max(0.08,Math.min(Math.PI/2.1,gCamPhi+(t.clientY-ccy)*0.007));ccx=t.clientX;ccy=t.clientY;}} },{passive:false}); cv.addEventListener('touchend',()=>ctId=null); }
@@ -2178,7 +2272,7 @@ function netConnect() {
   const serverUrl=window.location.origin;
   try{socket=io(serverUrl,{auth:{token:DB.get('token')},transports:['websocket','polling'],reconnection:true,reconnectionDelay:1500,reconnectionAttempts:10});}
   catch(error){console.warn('[NET] Socket.IO no disponible — modo offline');return;}
-  socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME)socket.emit('user_online',{userId:ME.id});if(netCurrentMapId)netJoinGame(netCurrentMapId);});
+  socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
   socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();});
   socket.on('connect_error',()=>{netConnected=false;updateNetPill('🟡','Sin servidor');});
   socket.on('room_state',({players=[],chat=[],runtimeParts=[],worldChanges=[],removedParts=[],scriptRuntime})=>{
@@ -2204,17 +2298,25 @@ function netConnect() {
     if(!msg?.e2ee||msg.e2ee.v!==1)return;
     const convs = getConvs();
     convs[convId] = convs[convId] || [];
-    if (!convs[convId].find(function(m){return m.id===msg.id;})) {
+    const isNew = !convs[convId].find(function(m){return m.id===msg.id;});
+    if (isNew) {
       convs[convId].push(msg);
       setConvs(convs);
     }
+    const mine = ME && msg.from === ME.id;
     if (window._activeConvId === convId) {
       renderConv(convId, window._activeChatUserId);
-    } else {
+      if (isNew && !mine) {
+        playSfx(document.visibilityState === 'visible' ? 'soft' : 'message');
+        if (document.visibilityState !== 'visible') { titleAlert('💬 Mensaje nuevo'); sendBrowserNotif('Mensaje cifrado', 'Abrí Crix para descifrarlo.', { tag: 'msg-' + convId }); }
+      }
+    } else if (isNew && !mine) {
       const users = getUsers();
       const sender = users[msg.from] || { username: '?' };
       showToast('\u{1F4AC} Nuevo mensaje cifrado de ' + sender.username);
-      sendBrowserNotif('Mensaje cifrado de ' + sender.username, 'Abrí Crix para descifrarlo.');
+      playSfx('message');
+      if (document.visibilityState !== 'visible') titleAlert('💬 ' + sender.username + ' te escribió');
+      sendBrowserNotif('Mensaje cifrado de ' + sender.username, 'Abrí Crix para descifrarlo.', { tag: 'msg-' + convId });
       checkNotifs();
     }
   });
@@ -2239,7 +2341,7 @@ function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTi
 function netSendChat(text) { if (!socket || !netConnected) return false; socket.emit('game_chat', { text }); return true; }
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
 function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const group = _buildAvatar(playerData.color || '#f97316'); group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, parts: group.userData.parts, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false }; }
-function _buildAvatar(color) { const g = new THREE.Group(); const bodyM = new THREE.MeshPhongMaterial({ color: new THREE.Color(color) }); const skinM = new THREE.MeshPhongMaterial({ color: 0xffdbac }); const torso = new THREE.Mesh(new THREE.BoxGeometry(1, 1.3, 0.55), bodyM); torso.position.y = 0.65; const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), skinM); head.position.y = 1.65; const aL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.15, 0.42), bodyM); aL.position.set(-0.73, 0.575, 0); const aR = aL.clone(); aR.position.x = 0.73; const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.15, 0.45), bodyM); lL.position.set(-0.27, -0.575, 0); const lR = lL.clone(); lR.position.x = 0.27; g.add(torso, head, aL, aR, lL, lR); g.userData.parts = { aL, aR, lL, lR }; return g; }
+function _buildAvatar(color) { const g = new THREE.Group(); const bodyM = new THREE.MeshPhongMaterial({ color: new THREE.Color(color) }); const skinM = new THREE.MeshPhongMaterial({ color: 0xffdbac }); const torso = new THREE.Mesh(new THREE.BoxGeometry(1, 1.3, 0.55), bodyM); torso.position.y = 0.65; const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), skinM); head.position.y = 1.65; const aL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.15, 0.42), bodyM); aL.position.set(-0.73, 0.575, 0); const aR = aL.clone(); aR.position.x = 0.73; const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.15, 0.45), bodyM); lL.position.set(-0.27, -0.575, 0); const lR = lL.clone(); lR.position.x = 0.27; g.add(torso, head, aL, aR, lL, lR); shadowAllMeshes(g); g.userData.parts = { aL, aR, lL, lR }; return g; }
 function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
 function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); }); remotePlayers = {}; }
 function netUpdateRemotes() { const LERP = 0.18; for (const rp of Object.values(remotePlayers)) { rp.group.position.lerp(rp.targetPos, LERP); let diff = rp.targetRY - rp.group.rotation.y; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; rp.group.rotation.y += diff * LERP; const { aL, aR, lL, lR } = rp.parts; if (rp.moving) { const sw = rp.anim; aL.rotation.x = sw; aR.rotation.x = -sw; lL.rotation.x = -sw; lR.rotation.x = sw; } else { aL.rotation.x = aR.rotation.x = lL.rotation.x = lR.rotation.x = 0; } } }
@@ -2676,6 +2778,7 @@ function checkNotifs() {
   const total = reqs.length + unread;
   const badge = document.getElementById('notif-badge');
   if (badge) { badge.textContent = total || ''; badge.style.display = total ? '' : 'none'; }
+  setAppBadge(total);
   renderFriendRequests();
 }
 // ════════════════════════════════════════════════════════════════
@@ -2761,30 +2864,160 @@ function findUserProfile(name) {
   return Object.values(users).find(u => u.username && u.username.toLowerCase() === name.toLowerCase());
 }
 // ════════════════════════════════════════════════════════════════
-// SISTEMA DE NOTIFICACIONES DEL NAVEGADOR
+// SISTEMA DE NOTIFICACIONES (push de la PWA + avisos dentro de la app + sonidos)
 // ════════════════════════════════════════════════════════════════
-let _notifPermission = false;
-function initBrowserNotifs() {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted') { _notifPermission = true; return; }
-  if (Notification.permission !== 'denied') {
-    Notification.requestPermission().then(perm => {
-      _notifPermission = perm === 'granted';
-    });
-  }
+let _notifPermission = ('Notification' in window) && Notification.permission === 'granted';
+let _pushActive = false, _swReg = null, _deferredInstall = null, _pendingNotif = null, _pendingCall = null;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const isIOSDevice = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+function b64ToU8(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
 }
-function sendBrowserNotif(title, body, icon) {
-  if (!_notifPermission || document.visibilityState === 'visible') return;
+async function swReady() {
+  if (_swReg) return _swReg;
+  if (!('serviceWorker' in navigator)) return null;
+  try { _swReg = await navigator.serviceWorker.ready; } catch {}
+  return _swReg;
+}
+// Registra (o renueva) la suscripción push de este dispositivo en el servidor.
+async function pushSync() {
+  if (!pushSupported() || Notification.permission !== 'granted' || !ME || !DB.get('token') || lsGet('crix_push_off') === '1') return false;
   try {
-    const n = new Notification(title, {
-      body, icon: icon || '/favicon.ico',
-      badge: '/favicon.ico',
-      tag: 'crix-msg'
-    });
-    n.onclick = () => { window.focus(); n.close(); };
-    setTimeout(() => n.close(), 5000);
-  } catch(e) {}
+    const reg = await swReady(); if (!reg) return false;
+    const { key } = await apiRequest('/api/push/key');
+    const appKey = b64ToU8(key);
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      const cur = sub.options && sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+      if (cur && (cur.length !== appKey.length || cur.some((v, i) => v !== appKey[i]))) { await sub.unsubscribe(); sub = null; }
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+    await apiRequest('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+    _pushActive = true; return true;
+  } catch (e) { console.warn('[PUSH]', e.message); _pushActive = false; return false; }
 }
+// Se llama desde un botón (iOS exige un toque del usuario para pedir permiso).
+async function enableNotifications() {
+  if (!('Notification' in window)) { showToast('Este navegador no admite notificaciones'); return false; }
+  if (isIOSDevice() && !isStandalone()) { showToast('En iPhone/iPad: Compartir → Agregar a inicio y abrí Crix desde su ícono'); return false; }
+  lsSet('crix_push_off', null); sfxCtx();
+  let perm = Notification.permission;
+  if (perm === 'default') { try { perm = await Notification.requestPermission(); } catch { perm = Notification.permission; } }
+  _notifPermission = perm === 'granted';
+  if (perm === 'denied') { showToast('Las notificaciones están bloqueadas: activalas en los ajustes del sitio'); notifBannerHide(); return false; }
+  if (!_notifPermission) return false;
+  const ok = await pushSync();
+  showToast(ok ? '🔔 Listo: te avisamos de llamadas y mensajes aunque cierres Crix' : '🔔 Avisos activados mientras Crix esté abierto');
+  playSfx('message'); notifBannerHide(); return true;
+}
+async function disableNotifications() {
+  lsSet('crix_push_off', '1'); _pushActive = false;
+  try {
+    const reg = await swReady(), sub = reg && await reg.pushManager.getSubscription();
+    if (sub) { await apiRequest('/api/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => {}); await sub.unsubscribe(); }
+  } catch {}
+  showToast('🔕 Notificaciones push desactivadas en este dispositivo');
+}
+function initBrowserNotifs() { notifAfterLogin(); }
+function sendBrowserNotif(title, body, opts) {
+  // Con push activo, el aviso lo manda el servidor (evita duplicados).
+  if (_pushActive || !_notifPermission || document.visibilityState === 'visible') return;
+  const o = Object.assign({ body, icon: '/icons/icon-192.png', badge: '/icons/badge-72.png', tag: 'crix-msg', renotify: true, vibrate: [200, 100, 200] }, opts && typeof opts === 'object' ? opts : {});
+  if (_swReg && _swReg.showNotification) _swReg.showNotification(title, o).catch(() => {});
+  else { try { const n = new Notification(title, o); n.onclick = () => { window.focus(); n.close(); }; setTimeout(() => n.close(), 6000); } catch {} }
+}
+// ── Sonidos ──
+let _sfx = null;
+function sfxCtx() {
+  try { _sfx = _sfx || new (window.AudioContext || window.webkitAudioContext)(); if (_sfx.state === 'suspended') _sfx.resume(); } catch {}
+  return _sfx;
+}
+['pointerdown', 'keydown', 'touchend'].forEach(ev => window.addEventListener(ev, () => { if (!_sfx || _sfx.state !== 'running') sfxCtx(); }, { passive: true }));
+const soundOn = () => lsGet('crix_sound') !== 'off';
+function toggleSound() { lsSet('crix_sound', soundOn() ? 'off' : 'on'); showToast(soundOn() ? '🔔 Sonidos activados' : '🔕 Sonidos silenciados'); playSfx('soft'); }
+function sfxTone(c, f, start, dur, vol, type) {
+  const t = c.currentTime + start, o = c.createOscillator(), g = c.createGain();
+  o.type = type || 'sine'; o.frequency.setValueAtTime(f, t);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + dur + 0.05);
+}
+function playSfx(kind) {
+  if (!soundOn()) return;
+  const c = sfxCtx(); if (!c || c.state !== 'running') return;
+  if (kind === 'message') { sfxTone(c, 880, 0, .18, .2); sfxTone(c, 1318, .12, .32, .18); }
+  else if (kind === 'soft') sfxTone(c, 740, 0, .12, .08);
+  else if (kind === 'friend') { sfxTone(c, 660, 0, .15, .17); sfxTone(c, 880, .12, .15, .17); sfxTone(c, 1100, .24, .32, .16); }
+}
+// ── Título parpadeante e insignia del ícono ──
+let _baseTitle = document.title, _titleTimer = null;
+function titleAlert(text) { stopTitleAlert(); let on = false; _titleTimer = setInterval(() => { document.title = (on = !on) ? text : _baseTitle; }, 1000); }
+function stopTitleAlert() { clearInterval(_titleTimer); _titleTimer = null; document.title = _baseTitle; }
+function setAppBadge(n) { try { if (n > 0) navigator.setAppBadge && navigator.setAppBadge(n); else navigator.clearAppBadge && navigator.clearAppBadge(); } catch {} }
+// ── Aviso para activar notificaciones / instalar la app ──
+function notifBannerHide() { const b = document.getElementById('notif-prompt'); if (b) b.remove(); }
+function notifBannerShow() {
+  if (!ME || document.getElementById('notif-prompt')) return;
+  const ios = isIOSDevice() && !isStandalone();
+  const canAsk = 'Notification' in window && Notification.permission === 'default' && !ios;
+  const canInstall = !!_deferredInstall && !isStandalone();
+  if (!canAsk && !canInstall && !ios) return;
+  if (Date.now() < Number(lsGet('crix_prompt_until') || 0)) return;
+  const b = document.createElement('div'); b.id = 'notif-prompt';
+  b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:9998;width:min(440px,94vw);background:var(--bg2);border:1px solid var(--acc);border-radius:14px;padding:12px 14px;box-shadow:0 10px 36px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:10px;font-size:12.5px';
+  const txt = ios ? '📲 Para recibir llamadas y mensajes en iPhone/iPad, tocá <b>Compartir</b> → <b>Agregar a inicio</b> y abrí Crix desde el ícono.'
+    : canAsk ? '🔔 Activá las notificaciones para que <b>suene el teléfono</b> cuando te llamen o te escriban, aunque Crix esté cerrado.'
+    : '📲 Instalá Crix como aplicación.';
+  b.innerHTML = '<div style="line-height:1.45">' + txt + '</div><div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"></div>';
+  const row = b.lastChild, mk = (label, cls, fn) => { const x = document.createElement('button'); x.className = 'btn ' + cls; x.style.cssText = 'padding:7px 13px;font-size:12px'; x.textContent = label; x.onclick = fn; row.appendChild(x); };
+  mk('Ahora no', '', () => { lsSet('crix_prompt_until', String(Date.now() + 3 * 86400000)); notifBannerHide(); });
+  if (canInstall) mk('Instalar app', canAsk ? '' : 'btn-p', async () => { const p = _deferredInstall; _deferredInstall = null; notifBannerHide(); try { p.prompt(); await p.userChoice; } catch {} });
+  if (canAsk) mk('Activar', 'btn-p', () => enableNotifications());
+  document.body.appendChild(b);
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _deferredInstall = e; if (ME) setTimeout(notifBannerShow, 3000); });
+window.addEventListener('appinstalled', () => { _deferredInstall = null; notifBannerHide(); });
+// ── Visibilidad: el servidor solo manda push si Crix no está a la vista ──
+function reportVisibility() { if (typeof socket !== 'undefined' && socket && socket.connected) socket.emit('app_visibility', { visible: document.visibilityState === 'visible' }); }
+document.addEventListener('visibilitychange', () => { reportVisibility(); if (document.visibilityState === 'visible' && !(typeof _callState !== 'undefined' && _callState && _callState.status === 'incoming')) stopTitleAlert(); });
+window.addEventListener('pagehide', () => { try { socket && socket.emit('app_visibility', { visible: false }); } catch {} });
+// ── Abrir la app desde una notificación ──
+(function parseLaunch() {
+  const q = new URLSearchParams(location.search), n = q.get('n'); if (!n) return;
+  _pendingNotif = { type: n, from: q.get('u') || '', action: q.get('a') || '' };
+  try { history.replaceState(null, '', location.pathname + location.hash); } catch {}
+})();
+function handleNotifAction(m) {
+  if (!m) return;
+  if (!ME) { _pendingNotif = m; return; }
+  const from = String(m.from || '');
+  if (m.type === 'call') {
+    const st = typeof _callState !== 'undefined' ? _callState : null;
+    if (st && st.status === 'incoming' && st.peerId === from) {
+      if (m.action === 'accept') callAccept(); else if (m.action === 'decline') callHangup('');
+    } else _pendingCall = { from, action: m.action || '', exp: Date.now() + 50000 };
+  } else if ((m.type === 'message' || m.type === 'missed') && from) openConvWith(from);
+  else if (m.type === 'friend_request' || m.type === 'friend_accepted') goTab('msg');
+}
+function applyPendingCall(from) {
+  const p = _pendingCall; if (!p || p.from !== from || Date.now() > p.exp) return;
+  _pendingCall = null;
+  if (p.action === 'accept') callAccept(); else if (p.action === 'decline') callHangup('');
+}
+function notifAfterLogin() {
+  pushSync();
+  setTimeout(notifBannerShow, 4000);
+  if (_pendingNotif) setTimeout(() => { const m = _pendingNotif; _pendingNotif = null; handleNotifAction(m); }, 900);
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+  const d = e.data || {};
+  if (d.crixNotif) handleNotifAction(d);
+  if (d.crixResubscribe) pushSync();
+});
+// ════════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════════
 // MENSAJES DE AUDIO (grabación de voz)
 // ════════════════════════════════════════════════════════════════
@@ -2873,18 +3106,19 @@ function initCallSocketEvents() {
   socket.on('friend_request', ({ from, fromName }) => {
     refreshCloudContent().then(() => {
       renderFriendRequests();
-      showToast('👋 ' + fromName + ' quiere ser tu amigo');
+      showToast('👋 ' + fromName + ' quiere ser tu amigo'); playSfx('friend');
       sendBrowserNotif('Nueva solicitud de amistad', fromName + ' quiere ser tu amigo en Crix');
       checkNotifs();
     });
   });
   socket.on('friend_accepted', ({ from, fromName }) => {
     refreshCloudContent();
-    showToast('🎉 ' + fromName + ' aceptó tu solicitud de amistad');
+    showToast('🎉 ' + fromName + ' aceptó tu solicitud de amistad'); playSfx('friend');
     sendBrowserNotif('Solicitud aceptada', fromName + ' ahora es tu amigo en Crix');
     renderProfile(ME.id);
   });
   callInitSignaling();
+  if (socket.connected && ME) { socket.emit('user_online', { userId: ME.id }); reportVisibility(); }
 }
 // ════════════════════════════════════════════════════════════════
 // RENDERIZADO DE MENSAJES CON SOPORTE AUDIO
@@ -3731,18 +3965,21 @@ async function callGetMedia(type) {
   }
 }
 function callTone(kind) {
-  clearInterval(_toneTimer); _toneTimer = null; if (!kind) return;
-  try { _toneCtx = _toneCtx || new (window.AudioContext || window.webkitAudioContext)(); if (_toneCtx.state === 'suspended') _toneCtx.resume(); } catch { return; }
-  const beep = (freq, dur) => { try { const o = _toneCtx.createOscillator(), g = _toneCtx.createGain(); o.frequency.value = freq; g.gain.value = kind === 'ring' ? 0.12 : 0.06; o.connect(g); g.connect(_toneCtx.destination); o.start(); o.stop(_toneCtx.currentTime + dur); } catch {} };
-  const pattern = () => { if (kind === 'ring') { beep(880, 0.25); setTimeout(() => beep(660, 0.25), 300); } else beep(440, 0.9); };
-  pattern(); _toneTimer = setInterval(pattern, kind === 'ring' ? 2000 : 3000);
+  clearInterval(_toneTimer); _toneTimer = null; stopTitleAlert(); if (!kind) return;
+  const c = sfxCtx(); if (!c) return;
+  // El timbre de una llamada entrante suena siempre, aunque los demás sonidos estén silenciados.
+  const pattern = () => {
+    if (c.state !== 'running') { try { c.resume(); } catch {} }
+    if (kind === 'ring') { for (let k = 0; k < 2; k++) { sfxTone(c, 1046, k * .5, .38, .24); sfxTone(c, 784, k * .5, .38, .24); sfxTone(c, 523, k * .5, .38, .12, 'triangle'); } }
+    else sfxTone(c, 440, 0, .9, .07);
+  };
+  pattern(); _toneTimer = setInterval(pattern, kind === 'ring' ? 2400 : 3000);
 }
 async function callStart(peerId, type) {
   if (!ME || !peerId || peerId === ME.id) return;
   const peer = (getUsers() || {})[peerId]; if (!peer) { showToast('Usuario no encontrado'); return; }
   if (_callState) { showToast('Ya estás en una llamada'); return; }
   if (!socket || !socket.connected) { showToast('Sin conexión con el servidor'); return; }
-  if (!peer.online) { showToast(peer.username + ' no está en línea'); return; }
   const st = _callState = { peerId, type: type === 'video' ? 'video' : 'audio', role:'caller', status:'calling', pendingIce:[], gen:++_callGen };
   callRender();
   try { st.local = await callGetMedia(st.type); }
@@ -3852,9 +4089,10 @@ function callInitSignaling() {
   socket.on('call_invite', ({ from, fromName, type }) => {
     if (_callState) { socket.emit('call_decline', { to: from }); return; }
     const st = _callState = { peerId: from, peerName: fromName, type: type === 'video' ? 'video' : 'audio', role:'callee', status:'incoming', pendingIce:[], gen:++_callGen };
-    callRender(); callTone('ring');
+    callRender(); callTone('ring'); titleAlert('📞 ' + fromName + ' te llama');
     try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch {}
-    sendBrowserNotif(fromName + ' te llama', st.type === 'video' ? '📹 Videollamada entrante' : '📞 Llamada de voz entrante');
+    sendBrowserNotif(fromName + ' te llama', st.type === 'video' ? '📹 Videollamada entrante' : '📞 Llamada de voz entrante', { tag: 'call-' + from, requireInteraction: true, vibrate: [400, 200, 400, 200, 400] });
+    applyPendingCall(from);
     st.ringTimer = setTimeout(() => { if (_callState === st && st.status === 'incoming') { callHangup(''); showToast('Llamada perdida de ' + fromName); } }, 46000);
   });
   socket.on('call_accept', async ({ from }) => {
@@ -3982,7 +4220,7 @@ function buildPartMaterial(d) {
 }
 function updatePartAppearance(entry) {
   const mesh = entry && entry.mesh; if (!mesh || !mesh.isMesh || (entry.data && entry.data.isNPC)) return;
-  const old = mesh.material; mesh.material = buildPartMaterial(entry.data);
+  const old = mesh.material; mesh.material = buildPartMaterial(entry.data); setShadowFlags(mesh);
   if (old && old.dispose) { if (old.userData && old.userData.customTex) old.userData.customTex.dispose(); old.dispose(); }
 }
 function refreshTexturedMeshes(id) {

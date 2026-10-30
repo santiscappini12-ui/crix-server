@@ -3,17 +3,18 @@
   "name": "Crix — Juegos y creación",
   "short_name": "Crix",
   "description": "Jugá, publicá juegos y creá con Crix.",
+  "lang": "es",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#080a0f",
   "theme_color": "#080a0f",
+  "categories": ["games", "social", "entertainment"],
   "icons": [
-    {
-      "src": "/crix-icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
-    }
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/crix-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

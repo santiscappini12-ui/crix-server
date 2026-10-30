@@ -50,6 +50,22 @@ Configuración (ejemplo con Backblaze B2; sirve cualquier servicio compatible co
 
 El bucket no tiene tope fijo: el costo crece solo con lo que se almacena. Sin estas variables Crix funciona como antes, solo con disco local.
 
+## Notificaciones (PWA)
+
+Al instalar Crix como aplicación (o desde el navegador) aparece un aviso para **activar las notificaciones**. Con ellas activas, el teléfono o la PC **suena y vibra** cuando alguien te llama (con botones *Contestar* / *Rechazar*), te escribe o te manda una solicitud de amistad, aunque Crix esté cerrado o en segundo plano. Funciona con Web Push (VAPID) a través del service worker.
+
+- El servidor solo manda push si la persona **no** tiene Crix a la vista, así que no hay avisos dobles.
+- Los avisos de mensajes no incluyen el texto (el chat es E2EE): dicen quién escribió.
+- Una llamada sigue sonando hasta 45 s con la app cerrada; si se corta queda un aviso de **llamada perdida**. Al abrir la app desde el aviso, el timbre aparece de inmediato.
+- Dentro de la app hay sonido de mensaje y de solicitud de amistad, timbre de llamada más fuerte, título parpadeante e insignia numérica en el ícono instalado. `toggleSound()` silencia los sonidos (la llamada entrante siempre suena).
+- **iPhone/iPad**: el push solo funciona con la app instalada (*Compartir → Agregar a inicio*, iOS 16.4 o superior).
+- Claves: se generan solas y se guardan en la base. Opcionalmente fijalas con `CRIX_VAPID_PUBLIC_KEY`, `CRIX_VAPID_PRIVATE_KEY` y `CRIX_VAPID_SUBJECT` (por ejemplo `mailto:vos@dominio.com`). Si cambian, los dispositivos se vuelven a suscribir al abrir la app.
+- Requiere HTTPS (o `localhost`). Rutas: `GET /api/push/key`, `POST /api/push/subscribe`, `POST /api/push/unsubscribe`.
+
+## Iluminación y sombras
+
+El sol proyecta sombras que **siguen al jugador** (o a la cámara del editor) con una cámara de sombras amplia y ajustada a la rejilla del mapa de sombras para que no titilen; las piezas translúcidas y de alambre no proyectan sombra y los avatares sí. El juego ahora usa la configuración de **Lighting** del editor (antes se ignoraba): ambiente, brillo, niebla, color de cielo, brillo/contraste/saturación y los nuevos controles *Intensidad*, *Altura* y *Dirección* del sol y el interruptor *Sombras*. Las cuñas (Wedge) tenían tres caras invertidas y ahora se ven completas con sombreado plano. Bloom, Blur y SunRays siguen siendo marcadores.
+
 ## Plataforma global y servidores de juego
 
 La plataforma es **global**: cuentas, perfiles, juegos, videos y publicaciones los ve todo el mundo, estén en el servidor o instancia que estén. Cada vez que alguien sube un video, publica en los Foros, publica un juego o se registra, el servidor lo avisa por Socket.IO a todos los conectados y sus pantallas se actualizan sin recargar. Cada vez que alguien toca **Jugar**, Crix crea una instancia de partida separada con su propio identificador; los jugadores de una instancia no se mezclan con los de otra. La presencia (qué juego e instancia está jugando cada persona) es pública para los juegos públicos: la home tiene una sección **En línea ahora**, y tanto ahí como en el perfil y en la búsqueda aparece **Unirme** para entrar al servidor exacto de **cualquier persona**, sea amiga o no (`POST /api/join-user/:id`; el servidor comprueba que exista, que tengas acceso al juego y que haya lugar). En la ficha de un juego también se listan sus servidores activos. Las partidas de juegos no públicos solo revelan su presencia a personas autorizadas. Cada juego puede fijar su máximo de jugadores por servidor (por defecto 50).
