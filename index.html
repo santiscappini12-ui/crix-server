@@ -2301,7 +2301,7 @@ function netConnect() {
   socket.on('player_joined',playerData=>{spawnRemote(playerData);addGMsg(`→ ${playerData.username} entró`,'sys');updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('player_moved',({socketId,x,y,z,ry,anim,moving})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.targetRY=ry;rp.anim=anim;rp.moving=moving;});
   socket.on('player_left',({socketId})=>{const rp=remotePlayers[socketId];if(rp){if(gScene)gScene.remove(rp.group);addGMsg(`← ${rp.data.username} salió`,'sys');delete remotePlayers[socketId];}updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
-  socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id)addGMsg(`${username}: ${text}`,'chat');});
+  socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});
   socket.on('pong_res',ts=>{const ping=Date.now()-ts,pill=document.getElementById('g-net-pill');if(pill)pill.textContent=`🟢 ${Object.keys(remotePlayers).length+1}p · ${ping}ms`;});
   socket.on('new_private_msg', function({ convId, msg }) {
     if(!msg?.e2ee||msg.e2ee.v!==1)return;
@@ -2316,15 +2316,15 @@ function netConnect() {
     if (window._activeConvId === convId) {
       renderConv(convId, window._activeChatUserId);
       if (isNew && !mine) {
-        playSfx(document.visibilityState === 'visible' ? 'soft' : 'message');
-        if (document.visibilityState !== 'visible') { titleAlert('💬 Mensaje nuevo'); sendBrowserNotif('Mensaje cifrado', 'Abrí Crix para descifrarlo.', { tag: 'msg-' + convId }); }
+        playSfx('message');
+        if (!appInView()) { titleAlert('💬 Mensaje nuevo'); sendBrowserNotif('Mensaje cifrado', 'Abrí Crix para descifrarlo.', { tag: 'msg-' + convId }); }
       }
     } else if (isNew && !mine) {
       const users = getUsers();
       const sender = users[msg.from] || { username: '?' };
       showToast('\u{1F4AC} Nuevo mensaje cifrado de ' + sender.username);
       playSfx('message');
-      if (document.visibilityState !== 'visible') titleAlert('💬 ' + sender.username + ' te escribió');
+      if (!appInView()) titleAlert('💬 ' + sender.username + ' te escribió');
       sendBrowserNotif('Mensaje cifrado de ' + sender.username, 'Abrí Crix para descifrarlo.', { tag: 'msg-' + convId });
       checkNotifs();
     }
@@ -2906,7 +2906,7 @@ async function pushSync() {
     }
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
     await apiRequest('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
-    _pushActive = true; return true;
+    _pushActive = true; _pushEndpoint = sub.endpoint; reportVisibility(); return true;
   } catch (e) { console.warn('[PUSH]', e.message); _pushActive = false; return false; }
 }
 // Se llama desde un botón (iOS exige un toque del usuario para pedir permiso).
@@ -2934,7 +2934,7 @@ async function disableNotifications() {
 function initBrowserNotifs() { notifAfterLogin(); }
 function sendBrowserNotif(title, body, opts) {
   // Con push activo, el aviso lo manda el servidor (evita duplicados).
-  if (_pushActive || !_notifPermission || document.visibilityState === 'visible') return;
+  if (_pushActive || !_notifPermission || appInView()) return;
   const o = Object.assign({ body, icon: '/icons/icon-192.png', badge: '/icons/badge-72.png', tag: 'crix-msg', renotify: true, vibrate: [200, 100, 200] }, opts && typeof opts === 'object' ? opts : {});
   if (_swReg && _swReg.showNotification) _swReg.showNotification(title, o).catch(() => {});
   else { try { const n = new Notification(title, o); n.onclick = () => { window.focus(); n.close(); }; setTimeout(() => n.close(), 6000); } catch {} }
@@ -2947,6 +2947,7 @@ function sfxCtx() {
 }
 ['pointerdown', 'keydown', 'touchend'].forEach(ev => window.addEventListener(ev, () => { if (!_sfx || _sfx.state !== 'running') sfxCtx(); }, { passive: true }));
 const soundOn = () => lsGet('crix_sound') !== 'off';
+const appInView = () => document.visibilityState === 'visible' && (typeof document.hasFocus !== 'function' || document.hasFocus());
 function toggleSound() { lsSet('crix_sound', soundOn() ? 'off' : 'on'); showToast(soundOn() ? '🔔 Sonidos activados' : '🔕 Sonidos silenciados'); playSfx('soft'); }
 function sfxTone(c, f, start, dur, vol, type) {
   const t = c.currentTime + start, o = c.createOscillator(), g = c.createGain();
@@ -2959,6 +2960,7 @@ function playSfx(kind) {
   const c = sfxCtx(); if (!c || c.state !== 'running') return;
   if (kind === 'message') { sfxTone(c, 880, 0, .18, .2); sfxTone(c, 1318, .12, .32, .18); }
   else if (kind === 'soft') sfxTone(c, 740, 0, .12, .08);
+  else if (kind === 'chat') { sfxTone(c, 988, 0, .1, .1); sfxTone(c, 1175, .08, .14, .09); }
   else if (kind === 'friend') { sfxTone(c, 660, 0, .15, .17); sfxTone(c, 880, .12, .15, .17); sfxTone(c, 1100, .24, .32, .16); }
 }
 // ── Título parpadeante e insignia del ícono ──
@@ -2980,7 +2982,7 @@ async function notifStatusRender() {
   try { reg = await Promise.race([swReady(), new Promise(r => setTimeout(() => r(null), 2000))]); sub = reg && await reg.pushManager.getSubscription(); } catch {}
   rows.push(reg ? ok('Service worker activo') : no('Service worker sin registrar'));
   rows.push(sub ? ok('Suscripción de este dispositivo creada') : no('Sin suscripción push en este dispositivo'));
-  try { const st = await apiRequest('/api/push/status'); rows.push(st.devices ? ok('Servidor: ' + st.devices + ' dispositivo(s) registrado(s)') : no('Servidor: ningún dispositivo registrado')); } catch { rows.push(no('No se pudo consultar al servidor')); }
+  try { const st = await apiRequest('/api/push/status'); rows.push(st.devices ? ok('Servidor: ' + st.devices + ' dispositivo(s) registrado(s)') : no('Servidor: ningún dispositivo registrado')); if (st.lastError) rows.push(no('Último error al enviar (' + st.lastError.host + '): ' + st.lastError.code + ' ' + st.lastError.body)); } catch { rows.push(no('No se pudo consultar al servidor')); }
   rows.push(soundOn() ? ok('Sonidos dentro de la app activados') : '• Sonidos dentro de la app silenciados');
   el.innerHTML = rows.map(r => '<div>' + esc(r) + '</div>').join('');
 }
@@ -2988,7 +2990,7 @@ async function testNotification() {
   await pushSync();
   try {
     const r = await apiRequest('/api/push/test', { method: 'POST' });
-    showToast(r.sent ? '📨 Enviada: salí de Crix (o bloqueá la pantalla) y debería sonar' : '⚠️ El servidor no pudo entregarla');
+    showToast(r.sent ? '📨 Enviada: salí de Crix (o bloqueá la pantalla) y debería sonar' : '⚠️ El servidor no pudo entregarla' + (r.lastError ? ' (' + r.lastError.code + ')' : ''), 6000);
   } catch (e) { showToast('⚠️ ' + e.message); }
   notifStatusRender();
 }
@@ -3015,9 +3017,12 @@ function notifBannerShow() {
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _deferredInstall = e; if (ME) setTimeout(notifBannerShow, 3000); });
 window.addEventListener('appinstalled', () => { _deferredInstall = null; notifBannerHide(); });
 // ── Visibilidad: el servidor solo manda push si Crix no está a la vista ──
-function reportVisibility() { if (typeof socket !== 'undefined' && socket && socket.connected) socket.emit('app_visibility', { visible: document.visibilityState === 'visible' }); }
-document.addEventListener('visibilitychange', () => { reportVisibility(); if (document.visibilityState === 'visible' && !(typeof _callState !== 'undefined' && _callState && _callState.status === 'incoming')) stopTitleAlert(); });
-window.addEventListener('pagehide', () => { try { socket && socket.emit('app_visibility', { visible: false }); } catch {} });
+let _pushEndpoint = '';
+function reportVisibility() { if (typeof socket !== 'undefined' && socket && socket.connected) socket.emit('app_visibility', { visible: appInView(), endpoint: _pushEndpoint }); }
+window.addEventListener('focus', () => { reportVisibility(); if (!(typeof _callState !== 'undefined' && _callState && _callState.status === 'incoming')) stopTitleAlert(); });
+window.addEventListener('blur', reportVisibility);
+document.addEventListener('visibilitychange', () => { reportVisibility(); if (appInView() && !(typeof _callState !== 'undefined' && _callState && _callState.status === 'incoming')) stopTitleAlert(); });
+window.addEventListener('pagehide', () => { try { socket && socket.emit('app_visibility', { visible: false, endpoint: _pushEndpoint }); } catch {} });
 // ── Abrir la app desde una notificación ──
 (function parseLaunch() {
   const q = new URLSearchParams(location.search), n = q.get('n'); if (!n) return;

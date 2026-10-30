@@ -107,13 +107,21 @@ const onlineUsers    = {};   // userId   → { socketId, username, color }
 const stats = { start: Date.now(), total: 0 };
 const calls = new Map();       // userId → { peer, caller, accepted, type, timer } (llamadas sonando o activas)
 // ¿Hace falta mandar push? Solo si la persona no tiene Crix abierto y a la vista en algún dispositivo.
+// La decisión es por dispositivo: solo se omite el push a los dispositivos que tienen Crix a la vista en este
+// momento. Otro dispositivo de la misma cuenta (por ejemplo el iPhone con la PC abierta) igual recibe el aviso.
+function visibleEndpoints(userId) {
+  const set = new Set();
+  for (const meta of Object.values(connSockets)) if (meta.userId === userId && meta.visible === true && meta.endpoint) set.add(meta.endpoint);
+  return set;
+}
 function needsPush(userId) {
-  const o = onlineUsers[userId];
-  return push.has(userId) && !(o && o.visible === true);
+  if (!push.has(userId)) return false;
+  const skip = visibleEndpoints(userId);
+  return !skip.size || (DB.push?.[userId] || []).some(sub => !skip.has(sub.endpoint));
 }
 function notifyPush(userId, payload, options) {
   if (!userId || !needsPush(userId)) return;
-  push.send(userId, payload, options).catch(() => {});
+  push.send(userId, payload, { ...(options || {}), excludeEndpoints: visibleEndpoints(userId) }).catch(() => {});
 }
 function clearCall(userId, notify) {
   const c = calls.get(userId); if (!c) return null;
@@ -628,18 +636,20 @@ app.get('/api/push/key', requireAuth, (req, res) => {
   res.json({ ok:true, key:push.publicKey });
 });
 app.post('/api/push/subscribe', requireAuth, (req, res) => {
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || '').split(',')[0].trim();
+  if (proto === 'https' && req.get('host')) push.setSubject('https://' + req.get('host'));
   const result = push.subscribe(req.user.id, req.body?.subscription, req.get('user-agent'));
   res.status(result.ok ? 200 : 400).json(result);
 });
 app.get('/api/push/status', requireAuth, (req, res) => {
-  res.json({ ok:true, ready:push.ready, devices:(DB.push?.[req.user.id] || []).length });
+  res.json({ ok:true, ready:push.ready, devices:(DB.push?.[req.user.id] || []).length, lastError:push.lastError });
 });
 app.post('/api/push/test', requireAuth, async (req, res) => {
   const devices = (DB.push?.[req.user.id] || []).length;
   if (!push.ready) return res.status(503).json({ ok:false, err:'El servidor no tiene push configurado' });
   if (!devices) return res.status(409).json({ ok:false, err:'Este dispositivo no está suscrito todavía' });
   const sent = await push.send(req.user.id, { type:'test', title:'Crix', body:'🔔 Así van a sonar tus avisos', tag:'crix-test', url:'/' }, { ttl:60, urgency:'high' });
-  res.json({ ok:true, devices, sent });
+  res.json({ ok:true, devices, sent, lastError:push.lastError });
 });
 app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
   push.unsubscribe(req.user.id, typeof req.body?.endpoint === 'string' ? req.body.endpoint : '');
@@ -1269,9 +1279,10 @@ io.on('connection', socket => {
     }
   });
   // El cliente avisa si Crix está a la vista: si lo está, no se manda push (ya ve y escucha el aviso dentro de la app).
-  socket.on('app_visibility', ({ visible } = {}) => {
+  socket.on('app_visibility', ({ visible, endpoint } = {}) => {
     const me = socket.data.user; if (!me) return;
-    const o = onlineUsers[me.id]; if (o && o.socketId === socket.id) o.visible = visible === true;
+    connSockets[socket.id] = { ...(connSockets[socket.id] || {}), userId:me.id, visible: visible === true,
+      endpoint: typeof endpoint === 'string' && endpoint.length < 1000 ? endpoint : '' };
   });
 
   socket.on('join_game', data => {

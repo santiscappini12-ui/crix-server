@@ -10,7 +10,7 @@ const MAX_SUBS_PER_USER = 10;
 
 module.exports = function createPush({ getDB, saveDB }) {
   let ready = false;
-  let publicKey = '';
+  let publicKey = '', privateKey = '', lastError = null;
 
   function init() {
     const DB = getDB();
@@ -25,15 +25,25 @@ module.exports = function createPush({ getDB, saveDB }) {
       }
       pub = DB.pushKeys.publicKey; priv = DB.pushKeys.privateKey;
     }
-    const subject = process.env.CRIX_VAPID_SUBJECT || 'mailto:admin@crix.local';
+    publicKey = pub; privateKey = priv;
+    // Apple (iPhone/iPad) rechaza claves VAPID con un contacto falso. Se usa CRIX_VAPID_SUBJECT si existe; si no,
+    // la dirección https del propio sitio, que se aprende en la primera suscripción y se guarda.
+    const subject = process.env.CRIX_VAPID_SUBJECT || DB.pushSubject || 'mailto:admin@crix.local';
     try {
       webpush.setVapidDetails(subject, pub, priv);
-      publicKey = pub; ready = true;
+      ready = true;
     } catch (err) {
       console.error('[PUSH] Claves VAPID inválidas, las notificaciones push quedan desactivadas:', err.message);
     }
   }
 
+  function setSubject(origin) {
+    if (!ready || process.env.CRIX_VAPID_SUBJECT) return;
+    if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(origin || '') || /localhost|127\.0\.0\.1/i.test(origin)) return;
+    const DB = getDB();
+    if (DB.pushSubject === origin) return;
+    try { webpush.setVapidDetails(origin, publicKey, privateKey); DB.pushSubject = origin; saveDB(); console.log('[PUSH] Contacto VAPID:', origin); } catch {}
+  }
   function list(userId) {
     const DB = getDB();
     return Array.isArray(DB.push?.[userId]) ? DB.push[userId] : [];
@@ -81,7 +91,8 @@ module.exports = function createPush({ getDB, saveDB }) {
   // Envía una notificación a todos los dispositivos de una cuenta. Nunca lanza errores.
   async function send(userId, payload, options = {}) {
     if (!ready) return 0;
-    const subs = list(userId);
+    const skip = options.excludeEndpoints;
+    const subs = list(userId).filter(sub => !(skip && skip.has(sub.endpoint)));
     if (!subs.length) return 0;
     const body = JSON.stringify(payload);
     const opts = { TTL: options.ttl ?? 60 * 60, urgency: options.urgency || 'normal' };
@@ -90,15 +101,16 @@ module.exports = function createPush({ getDB, saveDB }) {
     await Promise.all(subs.map(async sub => {
       try {
         await webpush.sendNotification(sub, body, opts);
-        sent++;
+        sent++; lastError = null;
       } catch (err) {
+        lastError = { code: err && err.statusCode || 0, body: String(err && (err.body || err.message) || '').slice(0, 200), host: (() => { try { return new URL(sub.endpoint).host; } catch { return ''; } })(), at: Date.now() };
         // 404/410: la suscripción ya no existe (se desinstaló la app o se revocó el permiso).
         if (err && (err.statusCode === 404 || err.statusCode === 410)) unsubscribe(userId, sub.endpoint);
-        else console.warn('[PUSH] No se pudo enviar:', err && (err.statusCode || err.message));
+        else console.warn('[PUSH] No se pudo enviar:', err && (err.statusCode || err.message), err && err.body ? String(err.body).slice(0, 200) : '');
       }
     }));
     return sent;
   }
 
-  return { init, get publicKey() { return publicKey; }, get ready() { return ready; }, has, subscribe, unsubscribe, send };
+  return { init, get publicKey() { return publicKey; }, get ready() { return ready; }, has, subscribe, unsubscribe, send, setSubject, get lastError() { return lastError; } };
 };
