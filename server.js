@@ -109,9 +109,16 @@ const calls = new Map();       // userId → { peer, caller, accepted, type, tim
 // ¿Hace falta mandar push? Solo si la persona no tiene Crix abierto y a la vista en algún dispositivo.
 // La decisión es por dispositivo: solo se omite el push a los dispositivos que tienen Crix a la vista en este
 // momento. Otro dispositivo de la misma cuenta (por ejemplo el iPhone con la PC abierta) igual recibe el aviso.
+// Un "visible" solo vale si se renovó hace poco (el cliente lo reenvía cada 10 s mientras está a la vista).
+// Si cierran la PWA y el socket queda colgado hasta el ping timeout (iPhone/PC), el estado viejo no puede
+// seguir tapando el push: pasados VIS_FRESH_MS se considera que la app ya no está a la vista.
+const VIS_FRESH_MS = 25000;
+const RING_EVERY_MS = 5000, RING_MAX_REPEATS = 8;   // timbre repetido por push mientras la llamada suena
 function visibleEndpoints(userId) {
-  const set = new Set();
-  for (const meta of Object.values(connSockets)) if (meta.userId === userId && meta.visible === true && meta.endpoint) set.add(meta.endpoint);
+  const set = new Set(), now = Date.now();
+  for (const meta of Object.values(connSockets)) {
+    if (meta.userId === userId && meta.visible === true && meta.endpoint && now - (meta.visAt || 0) < VIS_FRESH_MS) set.add(meta.endpoint);
+  }
   return set;
 }
 function needsPush(userId) {
@@ -125,9 +132,9 @@ function notifyPush(userId, payload, options) {
 }
 function clearCall(userId, notify) {
   const c = calls.get(userId); if (!c) return null;
-  clearTimeout(c.timer); calls.delete(userId);
+  clearTimeout(c.timer); clearInterval(c.ring); calls.delete(userId);
   const other = calls.get(c.peer);
-  if (other && other.peer === userId) { clearTimeout(other.timer); calls.delete(c.peer); }
+  if (other && other.peer === userId) { clearTimeout(other.timer); clearInterval(other.ring); calls.delete(c.peer); }
   if (notify) { const target = onlineUsers[c.peer]; if (target) io.to(target.socketId).emit(notify.event, { from:userId, reason:notify.reason }); }
   // Si la llamada no llegó a atenderse y la cortó/perdió quien llamaba, se cancela el timbre en los
   // dispositivos de quien recibía y queda un aviso de llamada perdida.
@@ -1230,15 +1237,27 @@ io.on('connection', socket => {
     calls.set(to, { peer:me.id, caller:false, accepted:false, type:callType, timer });
     if (target) io.to(target.socketId).emit('call_invite', { from:me.id, fromName:me.username, type:callType });
     // Si la persona no tiene Crix abierto, el teléfono/PC suena igual con una notificación de llamada.
-    notifyPush(to, {
-      type:'call', from:me.id, fromName:me.username, callType, tag:'call-' + me.id,
-      url:'/?n=call&u=' + encodeURIComponent(me.id)
-    }, { ttl:45, urgency:'high', topic:'call' + String(me.id).slice(0,20) });
+    // Con la app cerrada solo puede sonar la notificación del sistema (el service worker no reproduce audio),
+    // así que se repite cada pocos segundos con el mismo tag (renotify) para que funcione como timbre.
+    // Cada repetición vuelve a evaluar qué dispositivos tienen Crix a la vista; se corta al contestar,
+    // rechazar, colgar o vencer (clearCall).
+    const ringPayload = { type:'call', from:me.id, fromName:me.username, callType, tag:'call-' + me.id,
+      url:'/?n=call&u=' + encodeURIComponent(me.id) };
+    const ringTopic = 'call' + String(me.id).slice(0,20);
+    notifyPush(to, ringPayload, { ttl:45, urgency:'high', topic:ringTopic });
+    const calleeEntry = calls.get(to);
+    if (calleeEntry && push.has(to)) {
+      let repeats = 0;
+      calleeEntry.ring = setInterval(() => {
+        if (calls.get(to) !== calleeEntry || calleeEntry.accepted || ++repeats > RING_MAX_REPEATS) { clearInterval(calleeEntry.ring); return; }
+        notifyPush(to, ringPayload, { ttl:10, urgency:'high', topic:ringTopic });
+      }, RING_EVERY_MS);
+    }
   });
   socket.on('call_accept', ({ to } = {}) => {
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
     if (!c || c.peer !== to || c.caller || c.accepted) return;
-    clearTimeout(c.timer); c.accepted = true; const other = calls.get(to); if (other) other.accepted = true;
+    clearTimeout(c.timer); clearInterval(c.ring); c.accepted = true; const other = calls.get(to); if (other) other.accepted = true;
     const target = onlineUsers[to]; if (target) io.to(target.socketId).emit('call_accept', { from:me.id });
   });
   socket.on('call_decline', ({ to } = {}) => {
@@ -1281,7 +1300,7 @@ io.on('connection', socket => {
   // El cliente avisa si Crix está a la vista: si lo está, no se manda push (ya ve y escucha el aviso dentro de la app).
   socket.on('app_visibility', ({ visible, endpoint } = {}) => {
     const me = socket.data.user; if (!me) return;
-    connSockets[socket.id] = { ...(connSockets[socket.id] || {}), userId:me.id, visible: visible === true,
+    connSockets[socket.id] = { ...(connSockets[socket.id] || {}), userId:me.id, visible: visible === true, visAt: Date.now(),
       endpoint: typeof endpoint === 'string' && endpoint.length < 1000 ? endpoint : '' };
   });
 

@@ -3021,6 +3021,8 @@ let _pushEndpoint = '';
 function reportVisibility() { if (typeof socket !== 'undefined' && socket && socket.connected) socket.emit('app_visibility', { visible: appInView(), endpoint: _pushEndpoint }); }
 window.addEventListener('focus', () => { reportVisibility(); if (!(typeof _callState !== 'undefined' && _callState && _callState.status === 'incoming')) stopTitleAlert(); });
 window.addEventListener('blur', reportVisibility);
+// Latido: mientras Crix está a la vista se renueva cada 10 s; si deja de llegar (app cerrada/congelada en iPhone o PC), el servidor vuelve a mandar push.
+setInterval(() => { if (appInView()) reportVisibility(); }, 10000);
 document.addEventListener('visibilitychange', () => { reportVisibility(); if (appInView() && !(typeof _callState !== 'undefined' && _callState && _callState.status === 'incoming')) stopTitleAlert(); });
 window.addEventListener('pagehide', () => { try { socket && socket.emit('app_visibility', { visible: false, endpoint: _pushEndpoint }); } catch {} });
 // ── Abrir la app desde una notificación ──
