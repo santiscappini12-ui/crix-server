@@ -1244,17 +1244,20 @@ app.get('/status', (req, res) => res.json({
   uptime: Math.floor((Date.now()-stats.start)/1000),
 }));
 
-// ── PING (evita que Render duerma el proceso) ──
+// ── PING (mantiene despierto el servidor en hosts gratis que duermen por inactividad) ──
 app.get('/ping', (req, res) => res.send('pong'));
 
-// Auto-ping cada 13 minutos para no dormir
-setInterval(() => {
-  try {
-    https.get(`https://crix-server-1.onrender.com/ping`, r => {
-      log('AUTOPing', r.statusCode);
-    }).on('error', ()=>{});
-  } catch(e) {}
-}, 13 * 60 * 1000);
+// Auto-ping cada 13 minutos. Solo si definís CRIX_SELF_URL (ej. https://usuario-crix.hf.space).
+const SELF_URL = String(process.env.CRIX_SELF_URL || '').trim().replace(/\/+$/, '');
+if (SELF_URL) {
+  setInterval(() => {
+    try {
+      (SELF_URL.startsWith('http://') ? require('http') : https).get(SELF_URL + '/ping', r => {
+        r.resume(); log('AUTOPing', r.statusCode);
+      }).on('error', () => {});
+    } catch (e) {}
+  }, 13 * 60 * 1000);
+}
 
 // ══════════════════════════════════════════════
 // SOCKET.IO
