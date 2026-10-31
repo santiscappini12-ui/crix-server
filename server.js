@@ -670,13 +670,12 @@ app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
 });
 // ── Servidores ICE para las llamadas ──
 // Sin un servidor TURN, dos teléfonos en datos móviles (CGNAT) o detrás de ciertos routers NO logran conectarse:
-// la llamada queda en "Conectando…" y cada uno solo se ve a sí mismo. Opciones (de más fácil a más manual):
-//  1) Cloudflare Realtime TURN (gratis hasta 1 TB/mes): CRIX_CF_TURN_KEY_ID + CRIX_CF_TURN_API_TOKEN
-//  2) Metered.ca (plan gratis):                        CRIX_METERED_DOMAIN (ej. crix.metered.live) + CRIX_METERED_API_KEY
-//  3) TURN propio (coturn, etc.):                      CRIX_TURN_URL (varias separadas por coma) + CRIX_TURN_USER + CRIX_TURN_PASS
-const STUN_SERVERS = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun.cloudflare.com:3478'] }];
+// la llamada queda en "Conectando…" y cada uno solo se ve a sí mismo. Opciones (todas sin tarjeta):
+//  1) Metered Open Relay (20 GB/mes gratis, solo registro): CRIX_METERED_DOMAIN (ej. crix.metered.live) + CRIX_METERED_API_KEY
+//  2) Cualquier TURN con usuario/clave fijos (ExpressTURN, coturn, etc.): CRIX_TURN_URL (varias separadas por coma) + CRIX_TURN_USER + CRIX_TURN_PASS
+const STUN_SERVERS = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }];
 let iceCache = { at:0, servers:null, turn:false, source:'stun' };
-const ICE_CACHE_MS = 6 * 60 * 60 * 1000;     // las credenciales se piden con ttl de 24 h y se renuevan cada 6 h
+const ICE_CACHE_MS = 6 * 60 * 60 * 1000;     // las credenciales se renuevan cada 6 h
 async function fetchJson(url, opts = {}, ms = 6000) {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
   try { const r = await fetch(url, { ...opts, signal:ctl.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
@@ -685,20 +684,8 @@ async function fetchJson(url, opts = {}, ms = 6000) {
 async function buildIceServers() {
   const out = [...STUN_SERVERS]; let turn = false, source = 'stun';
   try {
-    if (process.env.CRIX_CF_TURN_KEY_ID && process.env.CRIX_CF_TURN_API_TOKEN) {
-      const j = await fetchJson('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(process.env.CRIX_CF_TURN_KEY_ID) + '/credentials/generate-ice-servers', {
-        method:'POST', headers:{ 'Authorization':'Bearer ' + process.env.CRIX_CF_TURN_API_TOKEN, 'Content-Type':'application/json' }, body:JSON.stringify({ ttl:86400 })
-      });
-      const list = Array.isArray(j.iceServers) ? j.iceServers : (j.iceServers ? [j.iceServers] : []);
-      for (const srv of list) {
-        // El puerto 53 lo bloquean los navegadores: se descarta para no esperar un timeout.
-        const urls = [].concat(srv.urls || []).filter(u => !/:53(\?|$)/.test(u));
-        if (!urls.length) continue;
-        if (srv.username) { out.push({ urls, username:srv.username, credential:srv.credential }); turn = true; } else out.push({ urls });
-      }
-      if (turn) source = 'cloudflare';
-    } else if (process.env.CRIX_METERED_DOMAIN && process.env.CRIX_METERED_API_KEY) {
-      const j = await fetchJson('https://' + process.env.CRIX_METERED_DOMAIN + '/api/v1/turn/credentials?apiKey=' + encodeURIComponent(process.env.CRIX_METERED_API_KEY));
+    if (process.env.CRIX_METERED_DOMAIN && process.env.CRIX_METERED_API_KEY) {
+      const j = await fetchJson('https://' + String(process.env.CRIX_METERED_DOMAIN).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') + '/api/v1/turn/credentials?apiKey=' + encodeURIComponent(process.env.CRIX_METERED_API_KEY));
       if (Array.isArray(j)) for (const srv of j) { out.push(srv); if (srv.username) turn = true; }
       if (turn) source = 'metered';
     }
@@ -713,7 +700,7 @@ async function getIceServers() {
   if (iceCache.servers && Date.now() - iceCache.at < ICE_CACHE_MS) return iceCache;
   const built = await buildIceServers();
   // Si se configuró TURN y falló, se reintenta en 1 minuto en vez de quedarse 6 h solo con STUN.
-  const wantsTurn = !!(process.env.CRIX_CF_TURN_KEY_ID || process.env.CRIX_METERED_DOMAIN || process.env.CRIX_TURN_URL);
+  const wantsTurn = !!(process.env.CRIX_METERED_DOMAIN || process.env.CRIX_TURN_URL);
   iceCache = { at: (wantsTurn && !built.turn) ? Date.now() - ICE_CACHE_MS + 60000 : Date.now(), servers:built.servers, turn:built.turn, source:built.source };
   log('ICE', 'servidores listos · TURN: ' + (built.turn ? built.source : 'no configurado (solo STUN)'));
   return iceCache;

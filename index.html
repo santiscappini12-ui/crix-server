@@ -4075,7 +4075,7 @@ function videoPlayError(el) {
 var _callGen = 0, _toneCtx = null, _toneTimer = null, _callClock = null;
 function callPeerInfo(st) { const u = (getUsers() || {})[st.peerId]; return { name: (u && u.username) || st.peerName || 'Usuario', color: (u && u.color) || '#5b8def' }; }
 var _iceHasTurn = false, _iceCache = null, _iceAt = 0;
-const CALL_STUN = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun.cloudflare.com:3478'] }];
+const CALL_STUN = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }];
 // Se piden al servidor (STUN + TURN si está configurado) y se guardan 10 min; callPrefetchIce() los adelanta al sonar la llamada.
 async function callIceServers() {
   if (_iceCache && Date.now() - _iceAt < 600000) return _iceCache;
