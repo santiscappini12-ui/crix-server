@@ -953,6 +953,7 @@ input,select,textarea{font-family:var(--font);}
     <div id="call-status">Llamando...</div>
   </div>
   <video id="call-local" autoplay playsinline muted></video>
+  <video id="call-pip" playsinline muted style="position:absolute;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none"></video>
   <div class="call-btns" id="call-btns"></div>
 </div>
 <div id="toast"></div>
@@ -4073,13 +4074,22 @@ function videoPlayError(el) {
 // negociación (SDP/ICE) y avisa: sonando, ocupado, rechazada, terminada.
 var _callGen = 0, _toneCtx = null, _toneTimer = null, _callClock = null;
 function callPeerInfo(st) { const u = (getUsers() || {})[st.peerId]; return { name: (u && u.username) || st.peerName || 'Usuario', color: (u && u.color) || '#5b8def' }; }
+var _iceHasTurn = false, _iceCache = null, _iceAt = 0;
+const CALL_STUN = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun.cloudflare.com:3478'] }];
+// Se piden al servidor (STUN + TURN si está configurado) y se guardan 10 min; callPrefetchIce() los adelanta al sonar la llamada.
 async function callIceServers() {
-  try { const r = await apiRequest('/api/ice'); if (r.iceServers && r.iceServers.length) return r.iceServers; } catch {}
-  return [{ urls: ['stun:stun.l.google.com:19302'] }];
+  if (_iceCache && Date.now() - _iceAt < 600000) return _iceCache;
+  try {
+    const r = await apiRequest('/api/ice');
+    if (r.iceServers && r.iceServers.length) { _iceHasTurn = !!r.hasTurn; _iceCache = r.iceServers; _iceAt = Date.now(); return _iceCache; }
+  } catch {}
+  return CALL_STUN;
 }
+function callPrefetchIce() { try { callIceServers(); } catch {} }
 async function callGetMedia(type) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof RTCPeerConnection === 'undefined')
     throw new Error('Tu navegador no permite llamadas (hace falta HTTPS o localhost)');
+  callAudioSession(true);
   const audio = { echoCancellation:true, noiseSuppression:true, autoGainControl:true };
   try { return await navigator.mediaDevices.getUserMedia({ audio, video: type === 'video' ? { width:{ ideal:1280 }, height:{ ideal:720 }, facingMode:'user' } : false }); }
   catch (err) {
@@ -4121,6 +4131,7 @@ function callTone(kind) {
 // aunque la app se haya abierto desde la notificación.
 ['pointerdown', 'touchstart', 'keydown'].forEach(ev => window.addEventListener(ev, () => { try { sfxCtx(); } catch {} }, { passive: true }));
 async function callStart(peerId, type) {
+  callPrefetchIce();
   if (!ME || !peerId || peerId === ME.id) return;
   const peer = (getUsers() || {})[peerId]; if (!peer) { showToast('Usuario no encontrado'); return; }
   if (_callState) { showToast('Ya estás en una llamada'); return; }
@@ -4147,19 +4158,41 @@ async function callAccept() {
   socket.emit('call_accept', { to: st.peerId });
   callArmConnectTimeout(st);
 }
-function callArmConnectTimeout(st) { clearTimeout(st.connTimer); st.connTimer = setTimeout(() => { if (_callState === st && st.status !== 'active') callHangup('No se pudo establecer la conexión'); }, 25000); }
+function callConnOk(st) { return !!(st && st.pc && (['connected','completed'].includes(st.pc.iceConnectionState) || st.pc.connectionState === 'connected')); }
+function callArmConnectTimeout(st) {
+  clearTimeout(st.connTimer); clearTimeout(st.hintTimer); st.hint = '';
+  // A los 7 s sin conexión se explica qué pasa (antes solo se veía el propio video y "Conectando…").
+  st.hintTimer = setTimeout(() => {
+    if (_callState !== st || st.status === 'active') return;
+    const c = st.cand || {};
+    st.hint = _iceHasTurn ? '· buscando una ruta alternativa…' : (c.srflx || c.relay ? '· la red bloquea la conexión directa (falta un servidor TURN)' : '· sin respuesta de la red (falta un servidor TURN)');
+    callRender();
+  }, 7000);
+  st.connTimer = setTimeout(() => { if (_callState === st && st.status !== 'active') callHangup(_iceHasTurn ? 'No se pudo establecer la conexión' : 'No se pudo conectar: la red bloquea la llamada directa (el servidor necesita TURN)'); }, 32000);
+}
 async function callCreatePeer(st) {
-  const pc = new RTCPeerConnection({ iceServers: await callIceServers() });
-  st.pc = pc; st.remote = null;
+  const pc = new RTCPeerConnection({ iceServers: await callIceServers(), iceCandidatePoolSize: 2 });
+  st.pc = pc; st.remote = null; st.cand = {};
   st.local.getTracks().forEach(track => pc.addTrack(track, st.local));
-  if (st.role === 'caller' && st.type === 'video' && !st.local.getVideoTracks().length) { try { pc.addTransceiver('video', { direction:'recvonly' }); } catch {} }
+  if (st.type === 'video' && !st.local.getVideoTracks().length) { try { pc.addTransceiver('video', { direction:'recvonly' }); } catch {} }
+  // Canal de datos fijo (sin negociar): avisa a la otra persona si estás en segundo plano, sin cámara o con el micrófono pausado.
+  try {
+    const dc = pc.createDataChannel('crix', { negotiated:true, id:1 }); st.dc = dc;
+    dc.onopen = () => callSendState(st);
+    dc.onmessage = ev => { try { const m = JSON.parse(ev.data); if (m && m.t === 'state' && _callState === st) { st.peerState = m; callUpdateStatus(); callRender(); } } catch {} };
+  } catch {}
   pc.ontrack = e => {
-    if (e.streams && e.streams[0]) st.remote = e.streams[0];
-    else { st.remote = st.remote || new MediaStream(); st.remote.addTrack(e.track); }
-    try { e.track.onunmute = () => { if (_callState === st) { callRender(); callPlayRemote(); } }; } catch {}
+    // Se arma un único MediaStream con todas las pistas recibidas (no se depende de e.streams, que a veces viene vacío).
+    if (!st.remote) st.remote = new MediaStream();
+    if (!st.remote.getTracks().includes(e.track)) st.remote.addTrack(e.track);
+    const refresh = () => { if (_callState === st) { callRender(); callPlayRemote(); } };
+    try { e.track.onunmute = refresh; e.track.onmute = refresh; e.track.onended = refresh; } catch {}
     callAttachRemote();
   };
-  pc.onicecandidate = e => { if (_callState === st && socket) socket.emit('call_signal', { to: st.peerId, kind:'ice', candidate: e.candidate ? (e.candidate.toJSON ? e.candidate.toJSON() : e.candidate) : null }); };
+  pc.onicecandidate = e => {
+    if (e.candidate && e.candidate.type) st.cand[e.candidate.type] = true;
+    if (_callState === st && socket) socket.emit('call_signal', { to: st.peerId, kind:'ice', candidate: e.candidate ? (e.candidate.toJSON ? e.candidate.toJSON() : e.candidate) : null });
+  };
   const onState = () => callOnConnState(st);
   pc.onconnectionstatechange = onState; pc.oniceconnectionstatechange = onState;
   return pc;
@@ -4167,38 +4200,81 @@ async function callCreatePeer(st) {
 function callOnConnState(st) {
   if (_callState !== st || !st.pc) return;
   const c = st.pc.connectionState, i = st.pc.iceConnectionState;
+  const armCut = (msg, ms) => { clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !callConnOk(st)) callHangup(msg); }, ms); };
   if (c === 'connected' || i === 'connected' || i === 'completed') {
-    clearTimeout(st.discTimer); clearTimeout(st.connTimer); st.triedRestart = false;
-    if (st.status !== 'active') { st.status = 'active'; st.startedAt = Date.now(); callTone(null); callRender(); callStartClock(); callWakeLockAcquire(); callMediaSessionSet(st); if (document.visibilityState === 'hidden') callOngoingNotif(true); }
-    else callUpdateStatus();
+    clearTimeout(st.discTimer); clearTimeout(st.connTimer); clearTimeout(st.hintTimer); st.hint = ''; st.triedRestart = false;
+    if (st.status !== 'active') {
+      st.status = 'active'; st.startedAt = Date.now(); callTone(null); callRender(); callStartClock(); callWakeLockAcquire(); callMediaSessionSet(st); callBgStart(st);
+      if (document.visibilityState === 'hidden') callOngoingNotif(true);
+    } else callUpdateStatus();
+    callSendState(st);
   } else if (c === 'failed' || i === 'failed') {
-    // Primero se intenta recuperar la conexión (cambio de red, vuelta de segundo plano); recién después se corta.
-    if (st.role === 'caller' && st.status === 'active' && !st.triedRestart) {
-      st.triedRestart = true; callTryIceRestart(st);
-      clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('No se pudo mantener la conexión (red restringida)'); }, 20000);
-    } else if (st.role !== 'caller' && st.status === 'active') {
-      clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('No se pudo mantener la conexión (red restringida)'); }, 20000);
-    } else callHangup('No se pudo mantener la conexión (red restringida)');
+    // Se intenta recuperar la ruta (cambio de red, vuelta de segundo plano) antes de cortar.
+    if (!st.triedRestart) { st.triedRestart = true; callTryIceRestart(st, true); }
+    armCut(st.status === 'active' ? 'No se pudo mantener la conexión (red restringida)' : (_iceHasTurn ? 'No se pudo establecer la conexión' : 'No se pudo conectar: la red bloquea la llamada directa (el servidor necesita TURN)'), st.status === 'active' ? 30000 : 15000);
   } else if ((c === 'disconnected' || i === 'disconnected') && st.status === 'active') {
     const el = document.getElementById('call-status'); if (el) el.textContent = 'Reconectando…';
     callTryIceRestart(st);
-    clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('Se perdió la conexión'); }, 25000);
+    armCut('Se perdió la conexión', 45000);
   }
 }
-// Reinicio de ICE (solo lo inicia quien llamó): recupera la llamada tras un corte de red o de segundo plano.
-async function callTryIceRestart(st) {
-  if (st.role !== 'caller' || !st.pc || st.restarting) return;
+// Reinicio de ICE desde cualquiera de los dos lados. Quien llamó actúa enseguida y la otra persona espera un poco
+// para no chocar ofertas (si chocan, gana quien llamó; ver callHandleSignal).
+async function callTryIceRestart(st, now) {
+  if (!st || !st.pc || st.restarting) return;
   st.restarting = true; setTimeout(() => { st.restarting = false; }, 8000);
   try {
-    if (!socket || !socket.connected) return;
+    if (st.role !== 'caller' && !now) { await new Promise(r => setTimeout(r, 2500)); }
+    if (_callState !== st || !st.pc || callConnOk(st) || st.pc.signalingState !== 'stable') return;
     const offer = await st.pc.createOffer({ iceRestart:true }); await st.pc.setLocalDescription(offer);
-    socket.emit('call_signal', { to: st.peerId, kind:'offer', sdp: offer.sdp });
-  } catch {}
+    if (socket) socket.emit('call_signal', { to: st.peerId, kind:'offer', sdp: offer.sdp });   // si el socket está caído, socket.io lo guarda y lo envía al volver
+  } catch (err) { console.warn('[CALL] reinicio ICE', err); }
+}
+async function callFlushIce(st) { for (const c of st.pendingIce.splice(0)) { try { await st.pc.addIceCandidate(c); } catch {} } }
+// Las señales se procesan de una en una y en orden (antes podían pisarse entre sí: un candidato ICE llegaba mientras
+// se aplicaba la oferta y se perdía, y la llamada nunca terminaba de conectar).
+async function callHandleSignal(st, { kind, sdp, candidate }) {
+  const pc = st.pc; if (!pc || _callState !== st) return;
+  if (kind === 'offer') {
+    if (pc.signalingState === 'have-local-offer') {
+      if (st.role === 'caller') return;                 // choque de ofertas: gana quien llamó
+      try { await pc.setLocalDescription({ type:'rollback' }); } catch {}
+    }
+    await pc.setRemoteDescription({ type:'offer', sdp });
+    await callFlushIce(st);
+    const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
+    socket.emit('call_signal', { to: st.peerId, kind:'answer', sdp: answer.sdp });
+  } else if (kind === 'answer') {
+    if (pc.signalingState !== 'have-local-offer') return;
+    await pc.setRemoteDescription({ type:'answer', sdp });
+    await callFlushIce(st);
+  } else if (kind === 'ice' && candidate) {
+    if (pc.remoteDescription) { try { await pc.addIceCandidate(candidate); } catch {} } else st.pendingIce.push(candidate);
+  }
 }
 function callStartClock() { clearInterval(_callClock); _callClock = setInterval(callUpdateStatus, 1000); callUpdateStatus(); }
+function callSendState(st) {
+  st = st || _callState; if (!st || !st.dc || st.dc.readyState !== 'open') return;
+  const cam = st.local && st.local.getVideoTracks()[0];
+  try { st.dc.send(JSON.stringify({ t:'state', mic: !st.muted && !st.sysMuted, sys: !!st.sysMuted, cam: !!cam && !st.camOff && !cam.muted, bg: document.visibilityState === 'hidden' })); } catch {}
+}
+function callStatusSuffix(st) {
+  const p = st.peerState || {}, parts = [];
+  if (p.bg) parts.push('en segundo plano');
+  if (p.sys) parts.push('micrófono pausado por el sistema'); else if (p.mic === false) parts.push('micrófono apagado');
+  if (st.type === 'video') {
+    if (!(st.remote && st.remote.getVideoTracks().length)) parts.push('sin cámara'); else if (p.cam === false) parts.push('cámara apagada');
+  }
+  let mine = st.sysMuted ? ' · ⚠️ tu micrófono está pausado' : '';
+  return (parts.length ? ' · ' + parts.join(' · ') : '') + mine;
+}
 function callUpdateStatus() {
   const st = _callState, el = document.getElementById('call-status'); if (!st || !el) return;
-  if (st.status === 'active') { const s = Math.floor((Date.now() - st.startedAt) / 1000); el.textContent = 'En llamada · ' + String(Math.floor(s / 60)).padStart(2,'0') + ':' + String(s % 60).padStart(2,'0'); }
+  if (st.status === 'active') {
+    const s = Math.floor((Date.now() - st.startedAt) / 1000);
+    el.textContent = 'En llamada · ' + String(Math.floor(s / 60)).padStart(2,'0') + ':' + String(s % 60).padStart(2,'0') + callStatusSuffix(st);
+    callDrawCard();
+  }
 }
 function callAttachLocal() {
   const st = _callState, el = document.getElementById('call-local'); if (!st || !el || !st.local) return;
@@ -4206,8 +4282,11 @@ function callAttachLocal() {
   try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch {}
 }
 function callRemoteVideoLive(st) {
+  // Solo cuenta si hay una pista viva, que no esté pausada y con imagen real: antes bastaba con que existiera la pista
+  // y, si la conexión no terminaba de armarse, se mostraba un cuadro negro a pantalla completa con tu propia cámara encima.
   const s = st && st.remote; if (!s || !s.getVideoTracks) return false;
-  return s.getVideoTracks().some(t => t.readyState === 'live');
+  const v = document.getElementById('call-remote');
+  return s.getVideoTracks().some(t => t.readyState === 'live' && !t.muted) && !!v && v.videoWidth > 0;
 }
 // El video remoto va SIEMPRE silenciado (así ningún navegador bloquea su reproducción) y el audio sale por un <audio> aparte.
 function callAttachRemote() {
@@ -4234,9 +4313,9 @@ function callPlayRemote() {
 function callWatchRemote(st) {
   if (st._watching === st.remote) return; st._watching = st.remote;
   const refresh = () => { if (_callState === st) { callRender(); callPlayRemote(); } };
-  st.remote.addEventListener('addtrack', e => { try { e.track.onunmute = refresh; e.track.onended = refresh; } catch {} refresh(); });
+  st.remote.addEventListener('addtrack', e => { try { e.track.onunmute = refresh; e.track.onmute = refresh; e.track.onended = refresh; } catch {} refresh(); });
   st.remote.addEventListener('removetrack', refresh);
-  st.remote.getTracks().forEach(t => { t.onunmute = refresh; t.onended = refresh; });
+  st.remote.getTracks().forEach(t => { t.onunmute = refresh; t.onmute = refresh; t.onended = refresh; });
   const v = document.getElementById('call-remote'); if (v) { v.onloadedmetadata = v.onplaying = v.onresize = refresh; }
 }
 function callRender() {
@@ -4252,7 +4331,7 @@ function callRender() {
   document.getElementById('call-name').textContent = info.name;
   document.getElementById('call-kind').textContent = st.type === 'video' ? '📹 Videollamada' : '📞 Llamada de voz';
   const text = { calling:'Llamando…', incoming: st.type === 'video' ? 'Videollamada entrante' : 'Llamada entrante', connecting:'Conectando…', active:'En llamada' }[st.status];
-  if (st.status !== 'active') document.getElementById('call-status').textContent = text; else callUpdateStatus();
+  if (st.status !== 'active') document.getElementById('call-status').textContent = text + (st.hint ? ' ' + st.hint : ''); else callUpdateStatus();
   document.getElementById('call-remote').classList.toggle('audio-only', !showVideo);
   document.getElementById('call-center').classList.toggle('compact', showVideo);
   const local = document.getElementById('call-local'); if (st.local) local.style.display = st.local.getVideoTracks().length && !st.camOff ? 'block' : 'none';
@@ -4260,7 +4339,7 @@ function callRender() {
   const btn = (icon, bg, fn, label, id, extra) => '<button class="call-btn' + (extra ? ' ' + extra : '') + '" ' + (id ? 'id="' + id + '" ' : '') + 'style="background:' + bg + '" onclick="' + fn + '" title="' + label + '" aria-label="' + label + '">' + icon + '</button>';
   let html = '';
   if (st.status === 'incoming') html = btn('📵', 'var(--red)', 'callHangup()', 'Rechazar') + btn('📞', '#22c55e', 'callAccept()', 'Aceptar');
-  else if (st.status === 'active') html = btn(st.muted ? '🔇' : '🎤', st.muted ? '#7a3030' : '#2a2f3e', 'callToggleMute()', 'Silenciar micrófono', 'mute-btn') + (st.local && st.local.getVideoTracks().length ? btn(st.camOff ? '📷' : '📹', st.camOff ? '#7a3030' : '#2a2f3e', 'callToggleCam()', 'Activar o apagar la cámara', 'cam-btn', 'nomini') : '') + (showVideo && callPipSupported() ? btn('🗗', '#2a2f3e', 'callTogglePip()', 'Ventana flotante (sigue visible fuera de Crix)', 'pip-btn', 'nomini') : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
+  else if (st.status === 'active') html = btn(st.muted ? '🔇' : '🎤', st.muted ? '#7a3030' : '#2a2f3e', 'callToggleMute()', 'Silenciar micrófono', 'mute-btn') + (st.local && st.local.getVideoTracks().length ? btn(st.camOff ? '📷' : '📹', st.camOff ? '#7a3030' : '#2a2f3e', 'callToggleCam()', 'Activar o apagar la cámara', 'cam-btn', 'nomini') : '') + (callPipSupported() ? btn('🗗', document.pictureInPictureElement ? '#3b5bdb' : '#2a2f3e', 'callTogglePip()', 'Ventana flotante: la llamada sigue activa aunque salgas de Crix', 'pip-btn', 'nomini') : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
   else html = btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
   document.getElementById('call-btns').innerHTML = html;
 }
@@ -4276,12 +4355,107 @@ async function callWakeLockAcquire() {
   } catch { _wakeLock = null; }
 }
 function callWakeLockRelease() { try { if (_wakeLock) _wakeLock.release(); } catch {} _wakeLock = null; }
-function callPipSupported() { return !!(document.pictureInPictureEnabled && window.HTMLVideoElement && HTMLVideoElement.prototype.requestPictureInPicture); }
-async function callEnterPip() {
-  const v = document.getElementById('call-remote'); if (!v || !callPipSupported() || !callRemoteVideoLive(_callState)) return;
-  try { if (document.pictureInPictureElement !== v) await v.requestPictureInPicture(); } catch {}
+// ── Ventana flotante (Picture-in-Picture) ──
+// Es lo único que, desde una PWA, mantiene viva la llamada al salir de la app en iPhone y Android: el sistema la trata como un
+// video en reproducción. En llamadas de voz (o si el otro no tiene cámara) se usa una tarjeta con avatar, nombre y cronómetro.
+var _pipCanvas = null;
+function callPipCardVideo() { return document.getElementById('call-pip'); }
+function callPipSupported() {
+  const v = callPipCardVideo() || document.createElement('video');
+  return !!((document.pictureInPictureEnabled && v.requestPictureInPicture) || (typeof v.webkitSupportsPresentationMode === 'function' && v.webkitSupportsPresentationMode('picture-in-picture')));
 }
-async function callTogglePip() { try { if (document.pictureInPictureElement) await document.exitPictureInPicture(); else await callEnterPip(); } catch {} }
+function callDrawCard() {
+  const st = _callState, cv = _pipCanvas; if (!st || !cv) return;
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, info = callPeerInfo(st);
+  g.fillStyle = '#0d1018'; g.fillRect(0, 0, W, H);
+  g.fillStyle = info.color; g.beginPath(); g.arc(W / 2, H / 2 - 30, 58, 0, Math.PI * 2); g.fill();
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fff';
+  g.font = '700 58px sans-serif'; g.fillText(info.name[0].toUpperCase(), W / 2, H / 2 - 28);
+  g.font = '700 26px sans-serif'; g.fillText(info.name, W / 2, H / 2 + 56);
+  const secs = st.startedAt ? Math.floor((Date.now() - st.startedAt) / 1000) : 0;
+  g.font = '18px sans-serif'; g.fillStyle = '#9aa6bf';
+  g.fillText((st.status === 'active' ? String(Math.floor(secs / 60)).padStart(2,'0') + ':' + String(secs % 60).padStart(2,'0') : 'Conectando…') + (st.muted ? '  ·  micrófono apagado' : ''), W / 2, H / 2 + 92);
+}
+function callPipCardStart() {
+  const v = callPipCardVideo(); if (!v || _pipCanvas) return;
+  try {
+    _pipCanvas = document.createElement('canvas'); _pipCanvas.width = 480; _pipCanvas.height = 270;
+    callDrawCard();
+    v.srcObject = _pipCanvas.captureStream(5); v.muted = true; v.autoPictureInPicture = true;
+    const pr = v.play(); if (pr && pr.catch) pr.catch(() => {});
+  } catch (err) { console.warn('[CALL] tarjeta PiP', err); _pipCanvas = null; }
+}
+function callPipCardStop() {
+  const v = callPipCardVideo();
+  try { if (v && v.srcObject) v.srcObject.getTracks().forEach(t => t.stop()); } catch {}
+  if (v) { try { v.srcObject = null; } catch {} }
+  _pipCanvas = null;
+}
+function callInPip() {
+  const rv = document.getElementById('call-remote'), cv = callPipCardVideo();
+  return !!document.pictureInPictureElement || (rv && rv.webkitPresentationMode === 'picture-in-picture') || (cv && cv.webkitPresentationMode === 'picture-in-picture');
+}
+async function callEnterPip() {
+  const st = _callState; if (!st || st.status === 'incoming') return false;
+  const rv = document.getElementById('call-remote');
+  const useRemote = callRemoteVideoLive(st) && rv.readyState >= 2;
+  if (!useRemote) callPipCardStart();
+  const v = useRemote ? rv : callPipCardVideo(); if (!v) return false;
+  try {
+    if (!useRemote) { callDrawCard(); try { await v.play(); } catch {} }
+    if (document.pictureInPictureEnabled && v.requestPictureInPicture) { if (document.pictureInPictureElement !== v) await v.requestPictureInPicture(); callRender(); return true; }
+    if (typeof v.webkitSetPresentationMode === 'function') { v.webkitSetPresentationMode('picture-in-picture'); callRender(); return true; }
+  } catch (err) { console.warn('[CALL] PiP', err && err.message); }
+  return false;
+}
+async function callTogglePip() {
+  try {
+    if (document.pictureInPictureElement) { await document.exitPictureInPicture(); }
+    else {
+      let done = false;
+      for (const id of ['call-remote', 'call-pip']) { const v = document.getElementById(id); if (v && v.webkitPresentationMode === 'picture-in-picture') { v.webkitSetPresentationMode('inline'); done = true; } }
+      if (!done) { const ok = await callEnterPip(); if (!ok) showToast('Tu navegador no permite la ventana flotante'); }
+    }
+  } catch {}
+  callRender();
+}
+// ── Segundo plano: sesión de audio, audio de relleno y vigilancia de las pistas locales ──
+// iPhone/iPad (Safari 16.4+) permite declarar que la página hace una llamada; con eso el sistema mantiene el audio.
+function callAudioSession(on) { try { if (navigator.audioSession) navigator.audioSession.type = on ? 'play-and-record' : 'auto'; } catch {} }
+var _keepCtx = null, _keepOsc = null;
+function callKeepAlive(on) {
+  try {
+    if (!on) { try { if (_keepOsc) _keepOsc.stop(); } catch {} try { if (_keepCtx) _keepCtx.close(); } catch {} _keepCtx = _keepOsc = null; return; }
+    if (_keepCtx) { if (_keepCtx.state === 'suspended') _keepCtx.resume().catch(() => {}); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    _keepCtx = new AC(); const osc = _keepCtx.createOscillator(), gain = _keepCtx.createGain();
+    gain.gain.value = 0.0001; osc.frequency.value = 20; osc.connect(gain); gain.connect(_keepCtx.destination); osc.start(); _keepOsc = osc;
+    if (_keepCtx.state === 'suspended') _keepCtx.resume().catch(() => {});
+  } catch {}
+}
+function callWatchLocal(st) {
+  if (!st.local) return;
+  st.local.getTracks().forEach(t => {
+    t.onmute = () => {
+      if (_callState !== st) return; if (t.kind === 'audio') st.sysMuted = true;
+      callSendState(st); callUpdateStatus(); callRender();
+      if (document.visibilityState === 'hidden') callOngoingNotif(true, 'El sistema pausó tu micrófono. Tocá para volver a la llamada');
+    };
+    t.onunmute = () => { if (_callState !== st) return; if (t.kind === 'audio') st.sysMuted = false; callSendState(st); callUpdateStatus(); callRender(); };
+    t.onended = () => {
+      if (_callState !== st) return;
+      if (t.kind === 'audio') st.sysMuted = true;
+      callSendState(st);
+      if (document.visibilityState === 'visible') callRecoverMedia();
+    };
+  });
+}
+function callBgStart(st) { callAudioSession(true); callKeepAlive(true); callPipCardStart(); callWatchLocal(st); }
+function callMediaSessionSync() {
+  const st = _callState; if (!st || !('mediaSession' in navigator)) return;
+  try { if (navigator.mediaSession.setMicrophoneActive) navigator.mediaSession.setMicrophoneActive(!st.muted); } catch {}
+  try { if (navigator.mediaSession.setCameraActive) navigator.mediaSession.setCameraActive(!!(st.local && st.local.getVideoTracks().length) && !st.camOff); } catch {}
+}
 function callMediaSessionSet(st) {
   if (!('mediaSession' in navigator)) return;
   try {
@@ -4293,7 +4467,11 @@ function callMediaSessionSet(st) {
   set('hangup', () => callHangup('Llamada finalizada'));
   set('togglemicrophone', () => callToggleMute());
   set('togglecamera', () => callToggleCam());
+  // Chrome (Android y PC) abre la ventana flotante solo al salir de la pestaña/app si hay una llamada con micrófono activo.
   set('enterpictureinpicture', () => callEnterPip());
+  // Los controles de reproducción del sistema no deben pausar el audio de la llamada.
+  set('play', () => { callPlayRemote(); }); set('pause', () => { callPlayRemote(); });
+  callMediaSessionSync();
 }
 function callMediaSessionClear() {
   if (!('mediaSession' in navigator)) return;
@@ -4301,55 +4479,86 @@ function callMediaSessionClear() {
   try { navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; } catch {}
 }
 // Aviso fijo "En llamada con X" mientras Crix está en segundo plano: un toque vuelve a la llamada, "Colgar" la corta.
-async function callOngoingNotif(show) {
+async function callOngoingNotif(show, bodyText) {
   try {
     const reg = await swReady(); if (!reg || !reg.showNotification) return;
     if (!show) { (await reg.getNotifications({ tag:'oncall' })).forEach(n => n.close()); return; }
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const st = _callState; if (!st) return; const info = callPeerInfo(st);
-    await reg.showNotification('En llamada con ' + info.name, { body: 'Tocá para volver a Crix', tag:'oncall', silent:true, requireInteraction:true, icon:'/icons/icon-192.png', badge:'/icons/badge-72.png', actions:[{ action:'hangup', title:'Colgar' }], data:{ type:'call_ongoing', url:'/' } });
+    await reg.showNotification('En llamada con ' + info.name, { body: bodyText || 'Tocá para volver a Crix', tag:'oncall', silent:true, requireInteraction:true, icon:'/icons/icon-192.png', badge:'/icons/badge-72.png', actions:[{ action:'hangup', title:'Colgar' }], data:{ type:'call_ongoing', url:'/' } });
   } catch {}
 }
 // Al volver de segundo plano el sistema puede haber cortado el micrófono o la cámara: se piden de nuevo y se reemplazan en la llamada.
+// Al volver de segundo plano el sistema puede haber cortado o pausado el micrófono o la cámara: se piden de nuevo y se
+// reemplazan en la llamada sin renegociar (replaceTrack).
 async function callRecoverMedia() {
   const st = _callState; if (!st || !st.local || !st.pc || st._recovering) return;
-  const aT = st.local.getAudioTracks()[0], vT = st.local.getVideoTracks()[0];
-  const audioDead = !!aT && aT.readyState === 'ended', videoDead = !!vT && vT.readyState === 'ended';
-  if (!audioDead && !videoDead) return;
+  const bad = t => !!t && (t.readyState === 'ended' || t.muted);
+  let aT = st.local.getAudioTracks()[0], vT = st.local.getVideoTracks()[0];
+  if (!bad(aT) && !bad(vT)) return;
   st._recovering = true;
   try {
-    const fresh = await navigator.mediaDevices.getUserMedia({ audio: audioDead, video: videoDead ? { width:{ ideal:1280 }, height:{ ideal:720 }, facingMode:'user' } : false });
+    // Una pista solo pausada suele volver sola en un instante; se espera antes de pedirla otra vez.
+    if ((aT && aT.readyState !== 'ended' && aT.muted) || (vT && vT.readyState !== 'ended' && vT.muted)) {
+      await new Promise(r => setTimeout(r, 900));
+      if (_callState !== st) return;
+      aT = st.local.getAudioTracks()[0]; vT = st.local.getVideoTracks()[0];
+    }
+    const audioDead = bad(aT), videoDead = bad(vT);
+    if (!audioDead && !videoDead) return;
+    let fresh;
+    try { fresh = await navigator.mediaDevices.getUserMedia({ audio: audioDead ? { echoCancellation:true, noiseSuppression:true, autoGainControl:true } : false, video: videoDead ? { width:{ ideal:1280 }, height:{ ideal:720 }, facingMode:'user' } : false }); }
+    catch (err) {
+      if (videoDead && audioDead) fresh = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
+      else throw err;
+    }
     if (_callState !== st) { fresh.getTracks().forEach(t => t.stop()); return; }
     for (const t of fresh.getTracks()) {
       const sender = st.pc.getSenders().find(x => x.track && x.track.kind === t.kind);
       if (sender) await sender.replaceTrack(t);
-      const old = st.local.getTracks().find(x => x.kind === t.kind); if (old) st.local.removeTrack(old);
+      const old = st.local.getTracks().find(x => x.kind === t.kind); if (old) { try { old.onended = old.onmute = old.onunmute = null; old.stop(); } catch {} st.local.removeTrack(old); }
       t.enabled = t.kind === 'audio' ? !st.muted : !st.camOff; st.local.addTrack(t);
+      if (t.kind === 'audio') st.sysMuted = false;
     }
-    callAttachLocal(); callRender();
+    callWatchLocal(st); callAttachLocal(); callSendState(st); callRender();
   } catch (err) { console.warn('[CALL] no se pudo recuperar el medio', err); }
   finally { st._recovering = false; }
+}
+// Al volver a Crix (o recuperar la red) se reactiva todo: pantalla encendida, audio, micrófono y la ruta de la llamada.
+function callResume(st) {
+  st = st || _callState; if (!st || !['connecting', 'active'].includes(st.status)) return;
+  if (st._resumeAt && Date.now() - st._resumeAt < 600) return; st._resumeAt = Date.now();
+  callOngoingNotif(false); callWakeLockAcquire(); callPlayRemote(); callKeepAlive(true);
+  try { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); } catch {}
+  if (typeof socket !== 'undefined' && socket && !socket.connected) { try { socket.connect(); } catch {} }
+  callRecoverMedia(); callSendState(st); callRender();
+  if (st.status === 'active' && st.pc && !callConnOk(st)) { st.restarting = false; callTryIceRestart(st, true); }
 }
 document.addEventListener('visibilitychange', () => {
   // El socket puede haberse dado por vencido en segundo plano: se reconecta al volver.
   if (document.visibilityState === 'visible' && typeof socket !== 'undefined' && socket && !socket.connected) { try { socket.connect(); } catch {} }
   const st = _callState; if (!st || !['connecting', 'active'].includes(st.status)) return;
-  if (document.visibilityState === 'hidden') { if (st.status === 'active') callOngoingNotif(true); }
-  else { callOngoingNotif(false); callWakeLockAcquire(); callPlayRemote(); callRecoverMedia(); }
+  if (document.visibilityState === 'hidden') {
+    callSendState(st);
+    if (st.status === 'active') { callOngoingNotif(true); callEnterPip(); }
+  } else callResume(st);
 });
-function callToggleMute() { const st = _callState; if (!st || !st.local) return; st.muted = !st.muted; st.local.getAudioTracks().forEach(t => { t.enabled = !st.muted; }); callRender(); }
-function callToggleCam() { const st = _callState; if (!st || !st.local) return; st.camOff = !st.camOff; st.local.getVideoTracks().forEach(t => { t.enabled = !st.camOff; }); callRender(); }
+['pageshow', 'focus', 'online'].forEach(ev => window.addEventListener(ev, () => { if (document.visibilityState === 'visible') callResume(); }));
+function callToggleMute() { const st = _callState; if (!st || !st.local) return; st.muted = !st.muted; st.local.getAudioTracks().forEach(t => { t.enabled = !st.muted; }); callSendState(st); callMediaSessionSync(); callRender(); callDrawCard(); }
+function callToggleCam() { const st = _callState; if (!st || !st.local) return; st.camOff = !st.camOff; st.local.getVideoTracks().forEach(t => { t.enabled = !st.camOff; }); callSendState(st); callMediaSessionSync(); callRender(); }
 // Quita las notificaciones apiladas de llamadas (el servidor manda una nueva en cada repetición del timbre).
 function closeCallNotifs() {
   try { swReady().then(reg => reg && reg.getNotifications && reg.getNotifications().then(list => list.filter(n => (n.tag || '').startsWith('call-')).forEach(n => n.close()))); } catch {}
 }
 function callCleanup() {
-  closeCallNotifs(); callOngoingNotif(false); callWakeLockRelease(); callMediaSessionClear();
+  closeCallNotifs(); callOngoingNotif(false); callWakeLockRelease(); callMediaSessionClear(); callKeepAlive(false); callAudioSession(false); callPipCardStop();
   try { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); } catch {}
   const st = _callState; _callState = null;
   clearInterval(_callClock); callTone(null);
   if (st) {
-    ['ringTimer','connTimer','discTimer'].forEach(k => clearTimeout(st[k]));
+    ['ringTimer','connTimer','discTimer','hintTimer'].forEach(k => clearTimeout(st[k]));
+    try { if (st.dc) st.dc.close(); } catch {}
+    if (st.local) st.local.getTracks().forEach(t => { t.onmute = t.onunmute = t.onended = null; });
     if (st.pc) { try { st.pc.ontrack = st.pc.onicecandidate = st.pc.onconnectionstatechange = st.pc.oniceconnectionstatechange = null; st.pc.close(); } catch {} }
     if (st.local) st.local.getTracks().forEach(t => { try { t.stop(); } catch {} });
   }
@@ -4368,7 +4577,7 @@ function callInitSignaling() {
   socket.on('call_invite', ({ from, fromName, type }) => {
     if (_callState) { socket.emit('call_decline', { to: from }); return; }
     const st = _callState = { peerId: from, peerName: fromName, type: type === 'video' ? 'video' : 'audio', role:'callee', status:'incoming', pendingIce:[], gen:++_callGen };
-    closeCallNotifs(); callRender(); callTone('ring'); titleAlert('📞 ' + fromName + ' te llama');
+    callPrefetchIce(); closeCallNotifs(); callRender(); callTone('ring'); titleAlert('📞 ' + fromName + ' te llama');
     try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch {}
     sendBrowserNotif(fromName + ' te llama', st.type === 'video' ? '📹 Videollamada entrante' : '📞 Llamada de voz entrante', { tag: 'call-' + from, requireInteraction: true, vibrate: [400, 200, 400, 200, 400] });
     applyPendingCall(from);
@@ -4383,21 +4592,16 @@ function callInitSignaling() {
       socket.emit('call_signal', { to: st.peerId, kind:'offer', sdp: offer.sdp });
     } catch (err) { callHangup('No se pudo iniciar la llamada'); }
   });
-  socket.on('call_signal', async ({ from, kind, sdp, candidate }) => {
-    const st = _callState; if (!st || st.peerId !== from || !st.pc) { if (st && st.peerId === from && kind === 'ice' && candidate) st.pendingIce.push(candidate); return; }
-    try {
-      if (kind === 'offer') {
-        await st.pc.setRemoteDescription({ type:'offer', sdp });
-        for (const c of st.pendingIce.splice(0)) { try { await st.pc.addIceCandidate(c); } catch {} }
-        const answer = await st.pc.createAnswer(); await st.pc.setLocalDescription(answer);
-        socket.emit('call_signal', { to: st.peerId, kind:'answer', sdp: answer.sdp });
-      } else if (kind === 'answer') {
-        await st.pc.setRemoteDescription({ type:'answer', sdp });
-        for (const c of st.pendingIce.splice(0)) { try { await st.pc.addIceCandidate(c); } catch {} }
-      } else if (kind === 'ice' && candidate) {
-        if (st.pc.remoteDescription) { try { await st.pc.addIceCandidate(candidate); } catch {} } else st.pendingIce.push(candidate);
-      }
-    } catch (err) { console.warn('[CALL] señal', kind, err); callHangup('Error de conexión en la llamada'); }
+  socket.on('call_signal', ({ from, kind, sdp, candidate }) => {
+    const st = _callState;
+    if (!st || st.peerId !== from) return;
+    if (!st.pc) { if (kind === 'ice' && candidate) st.pendingIce.push(candidate); return; }
+    // Se encadenan para que se apliquen en orden, una por vez.
+    st.sigQ = (st.sigQ || Promise.resolve()).then(() => callHandleSignal(st, { kind, sdp, candidate })).catch(err => {
+      console.warn('[CALL] señal', kind, err);
+      // Un fallo al renegociar una llamada ya activa no la corta: el reinicio de ICE lo vuelve a intentar.
+      if (_callState === st && st.status !== 'active') callHangup('Error de conexión en la llamada');
+    });
   });
   socket.on('call_decline', ({ from }) => callRemoteEnded(from, (callPeerInfo(_callState || { peerId: from }).name) + ' rechazó la llamada'));
   socket.on('call_busy', ({ from }) => callRemoteEnded(from, (callPeerInfo(_callState || { peerId: from }).name) + ' está en otra llamada'));

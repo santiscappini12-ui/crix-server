@@ -66,10 +66,15 @@ Al instalar Crix como aplicación (o desde el navegador) aparece un aviso para *
 
 ## Llamadas en segundo plano
 
-- **Minimizar**: el botón ⤓ de la llamada la convierte en una ventanita flotante (con el video del otro si es videollamada) y se puede seguir usando Crix, incluso jugar. Tocar la ventanita la vuelve a agrandar.
-- **Fuera de Crix**: la pantalla se mantiene encendida durante la llamada, se registran los controles del sistema (colgar, silenciar, cámara), las videollamadas ofrecen ventana flotante del sistema (🗗 / Picture-in-Picture) y, con las notificaciones activas, aparece un aviso fijo "En llamada con X" con botón *Colgar*.
-- **Cortes de red o de segundo plano**: el servidor ya no corta una llamada aceptada cuando se cae el socket de uno de los dos (el audio/video va directo entre ambos); espera hasta 2 minutos a que vuelva. El cliente reintenta la conexión sin límite, reinicia ICE si la conexión se pierde y vuelve a pedir micrófono/cámara si el sistema los cortó.
-- Limitación: iPhone/iPad suspende las PWA en segundo plano y no se puede evitar desde la web; ahí la llamada sigue mientras Crix esté a la vista.
+Una PWA no puede mantener el micrófono abierto "a la fuerza" cuando el sistema la pasa a segundo plano (no existe esa API web). Lo que sí hace Crix, en orden de efectividad:
+
+- **Ventana flotante (🗗, Picture-in-Picture)**: es lo que mejor funciona en iPhone y Android, porque el sistema trata la llamada como un video en reproducción y no suspende la página. Ahora está disponible también en **llamadas de voz** (se muestra una tarjeta con avatar, nombre y cronómetro) y en videollamadas cuando el otro no tiene cámara. Chrome en Android la abre solo al salir de la app; en iPhone hay que tocar 🗗 **antes** de salir.
+- **Sesión de audio de llamada** (`navigator.audioSession = "play-and-record"`, Safari 16.4+), audio de relleno silencioso, Media Session (colgar / silenciar desde el sistema) y pantalla encendida mientras Crix está a la vista.
+- **Aviso fijo "En llamada con X"** con botón *Colgar* (con notificaciones activas) para volver con un toque.
+- **Recuperación automática al volver**: si el sistema cortó o pausó el micrófono/cámara, se vuelven a pedir y se reemplazan en la llamada sin cortarla; se reconecta el socket y se reinicia la ruta (ICE) desde cualquiera de los dos lados. Las señales que llegan mientras alguien estaba en segundo plano las guarda el servidor y se las entrega al volver.
+- **Avisos a la otra persona**: por un canal de datos WebRTC la otra persona ve "en segundo plano", "micrófono pausado por el sistema", "sin cámara", etc., en vez de quedarse sin saber por qué no se escucha.
+- El servidor no corta una llamada aceptada si se cae el socket de uno de los dos; espera hasta 2 minutos.
+- Limitación real: si el usuario sale de Crix **sin** ventana flotante, iPhone/iPad puede suspender la PWA y el micrófono se pausa hasta que vuelva (Android suele mantener el audio, pero apaga la cámara). Para llamadas largas con el teléfono bloqueado hace falta una app nativa.
 
 ## Iluminación y sombras
 
@@ -96,7 +101,15 @@ En esta versión las instancias son salas separadas coordinadas por el proceso N
 
 Desde cualquier conversación se puede iniciar una **llamada de voz** o una **videollamada** con WebRTC real: se ve quién llama, se acepta o rechaza, hay timbre, silenciar micrófono, apagar cámara, cronómetro y avisos claros (rechazada, ocupado, sin respuesta, se cortó la conexión, falta el permiso del micrófono o la cámara). El audio y el video viajan directo entre las dos personas con cifrado DTLS-SRTP; el servidor solo retransmite la negociación (SDP e ICE) y lleva el estado de la llamada, y comprueba que quien envía señales sea realmente parte de una llamada aceptada.
 
-Por defecto se usan servidores STUN públicos de Google, que alcanzan para la mayoría de las redes. Detrás de redes muy restrictivas (NAT simétrico, algunas redes móviles o corporativas) hace falta un servidor **TURN**: configuralo con las variables de entorno `CRIX_TURN_URL` (una o varias URL separadas por coma, por ejemplo `turn:turn.midominio.com:3478`), `CRIX_TURN_USER` y `CRIX_TURN_PASS`; los clientes lo reciben desde `GET /api/ice`. Las llamadas requieren HTTPS (o `localhost`) para que el navegador permita el micrófono y la cámara.
+Por defecto se usan servidores STUN públicos, que alcanzan solo cuando las dos personas pueden conectarse directo (mismo wifi, o redes sin NAT estricto). **Entre dos teléfonos con datos móviles (CGNAT) suele fallar**: la llamada queda en "Conectando…" y cada uno solo se ve a sí mismo. La solución es un servidor **TURN**; el servidor entrega las credenciales a los clientes desde `GET /api/ice`. Configurá **una** de estas opciones en las variables de entorno (Render → *Environment*):
+
+| Opción | Variables | Notas |
+| --- | --- | --- |
+| **Cloudflare Realtime TURN** (recomendada) | `CRIX_CF_TURN_KEY_ID`, `CRIX_CF_TURN_API_TOKEN` | Gratis hasta 1 TB/mes. En el panel de Cloudflare: *Realtime → TURN → Create*. Las credenciales temporales se generan solas. |
+| **Metered.ca** | `CRIX_METERED_DOMAIN` (ej. `crix.metered.live`), `CRIX_METERED_API_KEY` | Plan gratuito disponible. |
+| **TURN propio** (coturn, etc.) | `CRIX_TURN_URL` (varias separadas por coma, ej. `turn:turn.midominio.com:3478,turns:turn.midominio.com:443?transport=tcp`), `CRIX_TURN_USER`, `CRIX_TURN_PASS` | |
+
+El log del servidor indica al arrancar si hay TURN (`ICE servidores listos · TURN: cloudflare`). Si no hay TURN, la llamada avisa en pantalla a los 7 s qué está pasando. Las llamadas requieren HTTPS (o `localhost`) para que el navegador permita el micrófono y la cámara.
 
 ## Chat privado E2EE
 

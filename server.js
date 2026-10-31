@@ -663,10 +663,59 @@ app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
   push.unsubscribe(req.user.id, typeof req.body?.endpoint === 'string' ? req.body.endpoint : '');
   res.json({ ok:true });
 });
-app.get('/api/ice', requireAuth, (req, res) => {
-  const iceServers = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }];
-  if (process.env.CRIX_TURN_URL) iceServers.push({ urls:String(process.env.CRIX_TURN_URL).split(',').map(x => x.trim()).filter(Boolean), username:process.env.CRIX_TURN_USER || '', credential:process.env.CRIX_TURN_PASS || '' });
-  res.json({ ok:true, iceServers });
+// ── Servidores ICE para las llamadas ──
+// Sin un servidor TURN, dos teléfonos en datos móviles (CGNAT) o detrás de ciertos routers NO logran conectarse:
+// la llamada queda en "Conectando…" y cada uno solo se ve a sí mismo. Opciones (de más fácil a más manual):
+//  1) Cloudflare Realtime TURN (gratis hasta 1 TB/mes): CRIX_CF_TURN_KEY_ID + CRIX_CF_TURN_API_TOKEN
+//  2) Metered.ca (plan gratis):                        CRIX_METERED_DOMAIN (ej. crix.metered.live) + CRIX_METERED_API_KEY
+//  3) TURN propio (coturn, etc.):                      CRIX_TURN_URL (varias separadas por coma) + CRIX_TURN_USER + CRIX_TURN_PASS
+const STUN_SERVERS = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun.cloudflare.com:3478'] }];
+let iceCache = { at:0, servers:null, turn:false, source:'stun' };
+const ICE_CACHE_MS = 6 * 60 * 60 * 1000;     // las credenciales se piden con ttl de 24 h y se renuevan cada 6 h
+async function fetchJson(url, opts = {}, ms = 6000) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try { const r = await fetch(url, { ...opts, signal:ctl.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
+  finally { clearTimeout(t); }
+}
+async function buildIceServers() {
+  const out = [...STUN_SERVERS]; let turn = false, source = 'stun';
+  try {
+    if (process.env.CRIX_CF_TURN_KEY_ID && process.env.CRIX_CF_TURN_API_TOKEN) {
+      const j = await fetchJson('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(process.env.CRIX_CF_TURN_KEY_ID) + '/credentials/generate-ice-servers', {
+        method:'POST', headers:{ 'Authorization':'Bearer ' + process.env.CRIX_CF_TURN_API_TOKEN, 'Content-Type':'application/json' }, body:JSON.stringify({ ttl:86400 })
+      });
+      const list = Array.isArray(j.iceServers) ? j.iceServers : (j.iceServers ? [j.iceServers] : []);
+      for (const srv of list) {
+        // El puerto 53 lo bloquean los navegadores: se descarta para no esperar un timeout.
+        const urls = [].concat(srv.urls || []).filter(u => !/:53(\?|$)/.test(u));
+        if (!urls.length) continue;
+        if (srv.username) { out.push({ urls, username:srv.username, credential:srv.credential }); turn = true; } else out.push({ urls });
+      }
+      if (turn) source = 'cloudflare';
+    } else if (process.env.CRIX_METERED_DOMAIN && process.env.CRIX_METERED_API_KEY) {
+      const j = await fetchJson('https://' + process.env.CRIX_METERED_DOMAIN + '/api/v1/turn/credentials?apiKey=' + encodeURIComponent(process.env.CRIX_METERED_API_KEY));
+      if (Array.isArray(j)) for (const srv of j) { out.push(srv); if (srv.username) turn = true; }
+      if (turn) source = 'metered';
+    }
+  } catch (err) { log('ICE', 'No se pudieron pedir credenciales TURN: ' + err.message); }
+  if (process.env.CRIX_TURN_URL) {
+    out.push({ urls:String(process.env.CRIX_TURN_URL).split(',').map(x => x.trim()).filter(Boolean), username:process.env.CRIX_TURN_USER || '', credential:process.env.CRIX_TURN_PASS || '' });
+    turn = true; if (source === 'stun') source = 'custom';
+  }
+  return { servers:out, turn, source };
+}
+async function getIceServers() {
+  if (iceCache.servers && Date.now() - iceCache.at < ICE_CACHE_MS) return iceCache;
+  const built = await buildIceServers();
+  // Si se configuró TURN y falló, se reintenta en 1 minuto en vez de quedarse 6 h solo con STUN.
+  const wantsTurn = !!(process.env.CRIX_CF_TURN_KEY_ID || process.env.CRIX_METERED_DOMAIN || process.env.CRIX_TURN_URL);
+  iceCache = { at: (wantsTurn && !built.turn) ? Date.now() - ICE_CACHE_MS + 60000 : Date.now(), servers:built.servers, turn:built.turn, source:built.source };
+  log('ICE', 'servidores listos · TURN: ' + (built.turn ? built.source : 'no configurado (solo STUN)'));
+  return iceCache;
+}
+app.get('/api/ice', requireAuth, async (req, res) => {
+  const ice = await getIceServers();
+  res.json({ ok:true, iceServers:ice.servers, hasTurn:ice.turn, source:ice.source });
 });
 
 // ── Gente en línea ahora (visible para todos) ──
@@ -1281,8 +1330,18 @@ io.on('connection', socket => {
     if (!['offer','answer','ice'].includes(kind)) return;
     if (kind !== 'ice' && (typeof sdp !== 'string' || sdp.length > 60000)) return;
     if (kind === 'ice' && (candidate !== null && (typeof candidate !== 'object' || JSON.stringify(candidate).length > 4000))) return;
-    const target = onlineUsers[to]; if (!target) return;
-    io.to(target.socketId).emit('call_signal', { from:me.id, kind, sdp: kind === 'ice' ? undefined : sdp, candidate: kind === 'ice' ? candidate : undefined });
+    const payload = { from:me.id, kind, sdp: kind === 'ice' ? undefined : sdp, candidate: kind === 'ice' ? candidate : undefined };
+    const target = onlineUsers[to];
+    if (!target) {
+      // La otra persona está en segundo plano o cambió de red (socket caído): la señal se guarda y se entrega apenas
+      // vuelva, así la oferta de reconexión y los candidatos ICE no se pierden. Una oferta nueva reemplaza lo anterior.
+      const other = calls.get(to); if (!other) return;
+      other.queue = other.queue || [];
+      if (kind === 'offer') other.queue.length = 0;
+      if (other.queue.length < 80) other.queue.push(payload);
+      return;
+    }
+    io.to(target.socketId).emit('call_signal', payload);
   });
 
   // El chat privado solo se almacena y notifica mediante la API E2EE.
@@ -1299,6 +1358,11 @@ io.on('connection', socket => {
     // Si la app volvió de segundo plano con una llamada en curso, se cancela la cuenta regresiva de corte.
     const ongoing = calls.get(user.id);
     if (ongoing?.dcTimer) { clearTimeout(ongoing.dcTimer); ongoing.dcTimer = null; }
+    // Señales (reoferta, ICE) que llegaron mientras estaba en segundo plano.
+    if (ongoing?.accepted && ongoing.queue?.length) {
+      const pendingSignals = ongoing.queue.splice(0);
+      for (const sig of pendingSignals) socket.emit('call_signal', sig);
+    }
     // Si alguien está llamando mientras la app estaba cerrada, el timbre aparece apenas se conecta.
     const pending = calls.get(user.id);
     if (pending && !pending.caller && !pending.accepted) {
