@@ -804,8 +804,13 @@ async function getIceServers() {
   return iceCache;
 }
 app.get('/api/ice', requireAuth, async (req, res) => {
-  const ice = await getIceServers();
-  res.json({ ok:true, iceServers:ice.servers, hasTurn:ice.turn, source:ice.source });
+  try {
+    const ice = await getIceServers();
+    res.json({ ok:true, iceServers:ice.servers, hasTurn:ice.turn, source:ice.source });
+  } catch (err) {
+    log('ICE', 'getIceServers falló: ' + err.message);
+    res.json({ ok:true, iceServers:STUN_SERVERS, hasTurn:false, source:'stun' });   // al menos STUN: la llamada no se cae por esto
+  }
 });
 
 // Diagnóstico del TURN: abrir https://TU-APP/api/ice/test estando con sesión iniciada.
@@ -1412,23 +1417,26 @@ io.on('connection', socket => {
   });
   socket.on('call_accept', ({ to } = {}) => {
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
-    if (!c || c.peer !== to || c.caller || c.accepted) return;
+    if (!c || c.peer !== to) return socket.emit('call_end', { from:to, reason:'gone' });   // la llamada ya no existe: que la pantalla no quede colgada
+    if (c.caller || c.accepted) return;
     clearTimeout(c.timer); clearInterval(c.ring); c.accepted = true; const other = calls.get(to); if (other) other.accepted = true;
-    const target = onlineUsers[to]; if (target) io.to(target.socketId).emit('call_accept', { from:me.id });
+    const target = onlineUsers[to]; if (target) io.to(target.socketId).emit('call_accept', { from:me.id }); else log('CALL', 'accept de ' + me.username + ' sin socket de quien llamó (' + to + ')');
   });
   socket.on('call_decline', ({ to } = {}) => {
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
-    if (!c || c.peer !== to || c.caller || c.accepted) return;
+    if (!c || c.peer !== to) return socket.emit('call_end', { from:to, reason:'gone' });
+    if (c.caller || c.accepted) return;
     clearCall(me.id, { event:'call_decline' });
   });
   socket.on('call_end', ({ to } = {}) => {
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
-    if (!c || c.peer !== to) return;
+    if (!c || c.peer !== to) return;   // ya estaba cortada: nada que avisar
     clearCall(me.id, { event:'call_end', reason:'hangup' });
   });
   socket.on('call_signal', ({ to, kind, sdp, candidate } = {}) => {
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
-    if (!c || c.peer !== to || !c.accepted) return;
+    if (me && (!c || c.peer !== to)) return socket.emit('call_end', { from:to, reason:'gone' });
+    if (!c || !c.accepted) return;
     if (!['offer','answer','ice'].includes(kind)) return;
     if (kind !== 'ice' && (typeof sdp !== 'string' || sdp.length > 60000)) return;
     if (kind === 'ice' && (candidate !== null && (typeof candidate !== 'object' || JSON.stringify(candidate).length > 4000))) return;

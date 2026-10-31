@@ -354,6 +354,10 @@ input,select,textarea{font-family:var(--font);}
 .call-btns{display:flex;gap:14px;}
 .call-btn{width:54px;height:54px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;transition:all .15s;}
 .call-btn:hover{transform:scale(1.08);}
+.call-btn.hot{box-shadow:0 0 0 0 rgba(91,141,239,.8);animation:callHot 1.6s infinite;background:#3b5bdb!important}
+@keyframes callHot{0%{box-shadow:0 0 0 0 rgba(91,141,239,.75)}70%{box-shadow:0 0 0 16px rgba(91,141,239,0)}100%{box-shadow:0 0 0 0 rgba(91,141,239,0)}}
+#call-pip-hint{display:none;max-width:290px;margin-top:10px;padding:9px 12px;border-radius:12px;background:rgba(59,91,219,.22);border:1px solid rgba(91,141,239,.6);color:#dbe4ff;font-size:12.5px;line-height:1.4;text-align:center;cursor:pointer}
+#call-overlay.mini #call-pip-hint{display:none!important}
 /* ═══ TOAST ═══ */
 #toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(8,10,15,.95);border:1px solid var(--acc);color:var(--text);padding:8px 18px;border-radius:20px;font-size:12px;z-index:9999;display:none;white-space:nowrap;pointer-events:none;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,.5);}
 /* ═══ SCROLLBAR ═══ */
@@ -953,7 +957,7 @@ input,select,textarea{font-family:var(--font);}
     <div id="call-status">Llamando...</div>
   </div>
   <video id="call-local" autoplay playsinline muted></video>
-  <video id="call-pip" playsinline muted style="position:absolute;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none"></video>
+  <video id="call-pip" playsinline webkit-playsinline muted style="position:absolute;left:0;bottom:0;width:96px;height:54px;opacity:.01;pointer-events:none;z-index:-1"></video>
   <div class="call-btns" id="call-btns"></div>
 </div>
 <div id="toast"></div>
@@ -4371,13 +4375,18 @@ function callRender() {
   document.getElementById('call-center').classList.toggle('compact', showVideo);
   const local = document.getElementById('call-local'); if (st.local) local.style.display = st.local.getVideoTracks().length && !st.camOff ? 'block' : 'none';
   const minBtn = document.getElementById('call-min'); if (minBtn) minBtn.style.display = (st.status === 'incoming' || st.minimized) ? 'none' : 'flex';
+  const ios = typeof isIOSDevice === 'function' && isIOSDevice();
   const btn = (icon, bg, fn, label, id, extra) => '<button class="call-btn' + (extra ? ' ' + extra : '') + '" ' + (id ? 'id="' + id + '" ' : '') + 'style="background:' + bg + '" onclick="' + fn + '" title="' + label + '" aria-label="' + label + '">' + icon + '</button>';
   let html = '';
   if (st.status === 'incoming') html = btn('📵', 'var(--red)', 'callHangup()', 'Rechazar') + btn('📞', '#22c55e', 'callAccept()', 'Aceptar');
-  else if (st.status === 'active') html = btn(st.muted ? '🔇' : '🎤', st.muted ? '#7a3030' : '#2a2f3e', 'callToggleMute()', 'Silenciar micrófono', 'mute-btn') + (st.local && st.local.getVideoTracks().length ? btn(st.camOff ? '📷' : '📹', st.camOff ? '#7a3030' : '#2a2f3e', 'callToggleCam()', 'Activar o apagar la cámara', 'cam-btn', 'nomini') : '') + (callPipSupported() ? btn('🗗', document.pictureInPictureElement ? '#3b5bdb' : '#2a2f3e', 'callTogglePip()', 'Ventana flotante: la llamada sigue activa aunque salgas de Crix', 'pip-btn', 'nomini') : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
-  else html = btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
+  else if (st.status === 'active') html = btn(st.muted ? '🔇' : '🎤', st.muted ? '#7a3030' : '#2a2f3e', 'callToggleMute()', 'Silenciar micrófono', 'mute-btn') + (st.local && st.local.getVideoTracks().length ? btn(st.camOff ? '📷' : '📹', st.camOff ? '#7a3030' : '#2a2f3e', 'callToggleCam()', 'Activar o apagar la cámara', 'cam-btn', 'nomini') : '') + (callPipSupported() ? btn('🗗', callInPip() ? '#3b5bdb' : '#2a2f3e', 'callTogglePip()', 'Ventana flotante: la llamada sigue activa aunque salgas de Crix', 'pip-btn', 'nomini' + (ios && !callInPip() ? ' hot' : '')) : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
+  else html = (st.status === 'connecting' && callPipSupported() ? btn('🗗', callInPip() ? '#3b5bdb' : '#2a2f3e', 'callTogglePip()', 'Ventana flotante: la llamada sigue activa aunque salgas de Crix', 'pip-btn', 'nomini' + (ios && !callInPip() ? ' hot' : '')) : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
   document.getElementById('call-btns').innerHTML = html;
+  callPipHint(st);
+  if (st.status !== 'incoming') callPipCardStart();
 }
+['call-remote', 'call-pip'].forEach(id => { const v = document.getElementById(id); if (!v) return;
+  ['webkitpresentationmodechanged', 'enterpictureinpicture', 'leavepictureinpicture'].forEach(ev => v.addEventListener(ev, () => { try { callRender(); } catch {} })); });
 // ── Segundo plano: minimizar, ventana flotante, pantalla encendida, controles del sistema ──
 function callMinimize() { const st = _callState; if (!st || st.status === 'incoming') return; st.minimized = true; callRender(); }
 function callExpand() { const st = _callState; if (!st) return; st.minimized = false; callRender(); }
@@ -4397,7 +4406,10 @@ var _pipCanvas = null;
 function callPipCardVideo() { return document.getElementById('call-pip'); }
 function callPipSupported() {
   const v = callPipCardVideo() || document.createElement('video');
-  return !!((document.pictureInPictureEnabled && v.requestPictureInPicture) || (typeof v.webkitSupportsPresentationMode === 'function' && v.webkitSupportsPresentationMode('picture-in-picture')));
+  if (document.pictureInPictureEnabled && v.requestPictureInPicture) return true;
+  // iPhone/iPad (también en la PWA instalada): la API es webkitSetPresentationMode. webkitSupportsPresentationMode() devuelve false
+  // mientras el video aún no cargó, así que alcanza con que exista la función.
+  return typeof v.webkitSetPresentationMode === 'function' || (typeof HTMLVideoElement !== 'undefined' && typeof HTMLVideoElement.prototype.webkitSetPresentationMode === 'function');
 }
 function callDrawCard() {
   const st = _callState, cv = _pipCanvas; if (!st || !cv) return;
@@ -4426,6 +4438,22 @@ function callPipCardStop() {
   if (v) { try { v.srcObject = null; } catch {} }
   _pipCanvas = null;
 }
+var _pipHintOff = false;
+// iPhone no deja usar el micrófono en segundo plano: la ventana flotante es lo que mantiene viva la llamada. Solo se puede abrir
+// con un toque, así que se avisa y el propio aviso es un botón.
+function callPipHint(st) {
+  let el = document.getElementById('call-pip-hint');
+  const ios = typeof isIOSDevice === 'function' && isIOSDevice();
+  const show = !!st && ios && ['connecting', 'active'].includes(st.status) && !st.minimized && !_pipHintOff && !callInPip() && callPipSupported();
+  if (!show) { if (el) el.style.display = 'none'; return; }
+  if (!el) {
+    el = document.createElement('div'); el.id = 'call-pip-hint';
+    el.onclick = () => { callTogglePip(); };
+    const c = document.getElementById('call-center'); if (!c) return; c.appendChild(el);
+  }
+  el.textContent = '📲 Tocá acá antes de salir de Crix: abre la ventana flotante y así el micrófono sigue funcionando en segundo plano.';
+  el.style.display = 'block';
+}
 function callInPip() {
   const rv = document.getElementById('call-remote'), cv = callPipCardVideo();
   return !!document.pictureInPictureElement || (rv && rv.webkitPresentationMode === 'picture-in-picture') || (cv && cv.webkitPresentationMode === 'picture-in-picture');
@@ -4434,14 +4462,23 @@ async function callEnterPip() {
   const st = _callState; if (!st || st.status === 'incoming') return false;
   const rv = document.getElementById('call-remote');
   const useRemote = callRemoteVideoLive(st) && rv.readyState >= 2;
-  if (!useRemote) callPipCardStart();
+  if (!useRemote) { callPipCardStart(); callDrawCard(); }
   const v = useRemote ? rv : callPipCardVideo(); if (!v) return false;
-  try {
-    if (!useRemote) { callDrawCard(); try { await v.play(); } catch {} }
-    if (document.pictureInPictureEnabled && v.requestPictureInPicture) { if (document.pictureInPictureElement !== v) await v.requestPictureInPicture(); callRender(); return true; }
-    if (typeof v.webkitSetPresentationMode === 'function') { v.webkitSetPresentationMode('picture-in-picture'); callRender(); return true; }
-  } catch (err) { console.warn('[CALL] PiP', err && err.message); }
-  return false;
+  // Safari de iPhone solo abre la ventana flotante si se pide en el mismo instante del toque: nada de await antes.
+  if (v.paused) { try { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
+  const inPip = () => document.pictureInPictureElement === v || v.webkitPresentationMode === 'picture-in-picture';
+  const viaWebkit = () => { if (typeof v.webkitSetPresentationMode !== 'function') return false; try { v.webkitSetPresentationMode('picture-in-picture'); return true; } catch (e) { console.warn('[CALL] PiP webkit', e && e.message); return false; } };
+  const viaStd = async () => { if (!(document.pictureInPictureEnabled && v.requestPictureInPicture)) return false; try { if (document.pictureInPictureElement !== v) await v.requestPictureInPicture(); return true; } catch (e) { console.warn('[CALL] PiP', e && e.message); return false; } };
+  const ios = typeof isIOSDevice === 'function' && isIOSDevice();
+  let ok;
+  if (ios) { ok = viaWebkit(); if (!ok) ok = await viaStd(); }
+  else { ok = await viaStd(); if (!ok) ok = viaWebkit(); }
+  if (ok && ios) {
+    await new Promise(r => setTimeout(r, 400));                       // iOS cambia el modo de forma asíncrona
+    if (!inPip()) ok = await viaStd();
+  }
+  callRender();
+  return ok && (inPip() || !ios);
 }
 async function callTogglePip() {
   try {
@@ -4449,7 +4486,7 @@ async function callTogglePip() {
     else {
       let done = false;
       for (const id of ['call-remote', 'call-pip']) { const v = document.getElementById(id); if (v && v.webkitPresentationMode === 'picture-in-picture') { v.webkitSetPresentationMode('inline'); done = true; } }
-      if (!done) { const ok = await callEnterPip(); if (!ok) showToast('Tu navegador no permite la ventana flotante'); }
+      if (!done) { const ok = await callEnterPip(); if (!ok) showToast((typeof isIOSDevice === 'function' && isIOSDevice()) ? 'No se pudo abrir la ventana flotante. Probá de nuevo con la llamada ya conectada (iOS 15 o superior).' : 'Tu navegador no permite la ventana flotante'); }
     }
   } catch {}
   callRender();
@@ -4586,6 +4623,7 @@ function closeCallNotifs() {
   try { swReady().then(reg => reg && reg.getNotifications && reg.getNotifications().then(list => list.filter(n => (n.tag || '').startsWith('call-')).forEach(n => n.close()))); } catch {}
 }
 function callCleanup() {
+  _pipHintOff = false; { const h = document.getElementById('call-pip-hint'); if (h) h.style.display = 'none'; }
   closeCallNotifs(); callOngoingNotif(false); callWakeLockRelease(); callMediaSessionClear(); callKeepAlive(false); callAudioSession(false); callPipCardStop();
   try { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); } catch {}
   const st = _callState; _callState = null;
@@ -4603,13 +4641,16 @@ function callCleanup() {
 }
 function callHangup(reason) {
   const st = _callState; if (!st) return;
-  if (socket && socket.connected) socket.emit(st.status === 'incoming' ? 'call_decline' : 'call_end', { to: st.peerId });
+  if (socket) socket.emit(st.status === 'incoming' ? 'call_decline' : 'call_end', { to: st.peerId });   // si está reconectando, socket.io lo envía al volver
   callCleanup(); if (reason) showToast(reason);
 }
 function callRemoteEnded(from, message) { const st = _callState; if (!st || st.peerId !== from) return; callCleanup(); if (message) showToast(message); }
 function callInitSignaling() {
   if (!socket || socket._callSig) return; socket._callSig = true;
   socket.on('call_invite', ({ from, fromName, type }) => {
+    // El servidor reenvía la invitación cada vez que esta cuenta vuelve a conectarse mientras suena. Si ya se está mostrando
+    // esa misma llamada se ignora; antes se rechazaba sola, la llamada moría en el servidor y los botones dejaban de funcionar.
+    if (_callState && _callState.peerId === from) { if (_callState.status === 'incoming') applyPendingCall(from); return; }
     if (_callState) { socket.emit('call_decline', { to: from }); return; }
     const st = _callState = { peerId: from, peerName: fromName, type: type === 'video' ? 'video' : 'audio', role:'callee', status:'incoming', pendingIce:[], gen:++_callGen };
     callPrefetchIce(); closeCallNotifs(); callRender(); callTone('ring'); titleAlert('📞 ' + fromName + ' te llama');
@@ -4643,6 +4684,7 @@ function callInitSignaling() {
   socket.on('call_unavailable', ({ from, reason }) => callRemoteEnded(from, reason === 'self_busy' ? 'Ya estás en otra llamada' : reason === 'not_friends' ? 'Solo podés llamar a tus amigos' : 'Esa persona no está disponible'));
   socket.on('call_end', ({ from, reason }) => {
     const st = _callState, wasActive = st && st.status === 'active', wasIncoming = st && st.status === 'incoming';
+    if (reason === 'gone') { callRemoteEnded(from, wasActive ? 'Se cortó la llamada' : 'La llamada ya terminó'); return; }
     callRemoteEnded(from, reason === 'timeout' ? (wasIncoming ? 'Llamada perdida' : 'Sin respuesta') : reason === 'disconnect' ? 'Se desconectó' : (wasActive ? 'Llamada finalizada' : (wasIncoming ? 'Llamada perdida' : '')));
   });
 }
