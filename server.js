@@ -131,6 +131,11 @@ function notifyPush(userId, payload, options) {
   if (!userId || !needsPush(userId)) return;
   push.send(userId, payload, { ...(options || {}), excludeEndpoints: visibleEndpoints(userId) }).catch(() => {});
 }
+// El chat y las llamadas son solo entre amigos (la amistad es mutua: ambas cuentas se tienen en su lista).
+function areFriends(a, b) {
+  const ua = DB.users[a], ub = DB.users[b];
+  return !!(ua && ub && a !== b && (ua.friends || []).includes(b) && (ub.friends || []).includes(a));
+}
 function clearCall(userId, notify) {
   const c = calls.get(userId); if (!c) return null;
   clearTimeout(c.timer); clearInterval(c.ring); clearTimeout(c.dcTimer); calls.delete(userId);
@@ -955,6 +960,8 @@ app.post('/api/convs/:convId', (req, res) => {
       return res.status(400).json({ ok:false, err:'Sobre E2EE incompleto o inválido' });
     if (JSON.stringify(msg.e2ee).length > 45 * 1024 * 1024)
       return res.status(413).json({ ok:false, err:'El adjunto cifrado supera el límite del chat' });
+    if (!areFriends(members[0], members[1]))
+      return res.status(403).json({ ok:false, err:'Solo podés escribirle a tus amigos' });
     if (!DB.users[members[0]]?.e2eePublicKey || !DB.users[members[1]]?.e2eePublicKey)
       return res.status(409).json({ ok:false, err:'Ambas cuentas deben activar el chat cifrado iniciando sesión' });
     const encryptedMessage = {
@@ -1274,6 +1281,7 @@ io.on('connection', socket => {
   socket.on('call_invite', ({ to, type } = {}) => {
     const me = socket.data.user; to = String(to || ''); if (!me || !to || to === me.id) return;
     const target = onlineUsers[to];
+    if (!areFriends(me.id, to)) return socket.emit('call_unavailable', { from:to, reason:'not_friends' });
     if (!DB.users[to] || DB.users[to].banned || (!target && !push.has(to))) return socket.emit('call_unavailable', { from:to, reason:'offline' });
     if (calls.has(me.id)) return socket.emit('call_unavailable', { from:to, reason:'self_busy' });
     if (calls.has(to)) return socket.emit('call_busy', { from:to });

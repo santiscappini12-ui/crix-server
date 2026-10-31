@@ -1549,7 +1549,7 @@ function renderProfile(uid) {
     (isMe
       ? '<button class="btn btn-g" style="font-size:12px" onclick="editProfile()">✏️ Editar bio</button><button class="btn btn-g" style="font-size:12px" onclick="document.getElementById(\'profile-avatar-file\').click()">🖼 Cambiar foto</button>'+(profileAvatarSrc(u)?'<button class="btn btn-g" style="font-size:12px" onclick="removeProfileAvatar()">Quitar foto</button>':'')+'<button class="btn btn-red" style="font-size:12px" onclick="logout()">← Cerrar sesión</button>'
       : ((!isFriend ? '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(\''+u.id+'\')">+ Agregar amigo</button>' : '')+
-         '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje cifrado</button>')+
+         (isFriend ? '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje cifrado</button>' : ''))+
         (u.currentGameId && u.currentInstanceId ? '<button class="btn btn-p" style="font-size:12px" onclick="joinFriendGame(\''+u.id+'\')">▶ Unirme a su partida</button>' : '')+
         adminBanBtn)+
     '</div></div></div>'+
@@ -1696,17 +1696,17 @@ function makeAdmin(uid) {
 }
 let activeConvId = null;
 function convId(a, b) { return [a, b].sort().join('_'); }
-function openConvWith(userId) { if (!ME || !getUsers()[userId]) { showToast('Usuario no disponible'); return; } goTab('msg'); const cid = convId(ME.id, userId); activeConvId = cid; loadConvList(); renderConv(cid, userId); }
+function openConvWith(userId) { if (!ME || !getUsers()[userId]) { showToast('Usuario no disponible'); return; } if (!(ME.friends||[]).includes(userId)) { showToast('Solo podés chatear con tus amigos. Mandale una solicitud de amistad.'); return; } goTab('msg'); const cid = convId(ME.id, userId); activeConvId = cid; loadConvList(); renderConv(cid, userId); }
 function loadConvList() {
   const users=getUsers(), convs=getConvs(), el=document.getElementById('msg-list');
   if(!el)return;
-  const people=Object.values(users).filter(user=>user?.id&&user.id!==ME.id&&!user.banned);
+  const people=Object.values(users).filter(user=>user?.id&&user.id!==ME.id&&!user.banned&&(ME.friends||[]).includes(user.id));
   people.sort((a,b)=>{
     const am=(convs[convId(ME.id,a.id)]||[]).slice(-1)[0]?.t||0;
     const bm=(convs[convId(ME.id,b.id)]||[]).slice(-1)[0]?.t||0;
     return bm-am||String(a.username).localeCompare(String(b.username));
   });
-  if(!people.length){el.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px">Todavía no hay otras cuentas públicas en Crix.</div>';checkNotifs();return;}
+  if(!people.length){el.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px">Todavía no tenés amigos. Agregalos desde su perfil para chatear y llamar.</div>';checkNotifs();return;}
   el.innerHTML=people.map(user=>{
     const cid=convId(ME.id,user.id),msgs=convs[cid]||[],last=msgs[msgs.length-1];
     const unread=msgs.filter(message=>message.from!==ME.id&&!message.read).length;
@@ -4133,6 +4133,7 @@ function callTone(kind) {
 async function callStart(peerId, type) {
   callPrefetchIce();
   if (!ME || !peerId || peerId === ME.id) return;
+  if (!(ME.friends || []).includes(peerId)) { showToast('Solo podés llamar a tus amigos'); return; }
   const peer = (getUsers() || {})[peerId]; if (!peer) { showToast('Usuario no encontrado'); return; }
   if (_callState) { showToast('Ya estás en una llamada'); return; }
   if (!socket || !socket.connected) { showToast('Sin conexión con el servidor'); return; }
@@ -4165,10 +4166,10 @@ function callArmConnectTimeout(st) {
   st.hintTimer = setTimeout(() => {
     if (_callState !== st || st.status === 'active') return;
     const c = st.cand || {};
-    st.hint = _iceHasTurn ? '· buscando una ruta alternativa…' : (c.srflx || c.relay ? '· la red bloquea la conexión directa (falta un servidor TURN)' : '· sin respuesta de la red (falta un servidor TURN)');
+    st.hint = _iceHasTurn ? '· buscando una ruta alternativa…' : (c.srflx || c.relay ? '· sus redes no se pueden conectar directo (el servidor necesita TURN)' : '· sin respuesta de la red (el servidor necesita TURN)');
     callRender();
   }, 7000);
-  st.connTimer = setTimeout(() => { if (_callState === st && st.status !== 'active') callHangup(_iceHasTurn ? 'No se pudo establecer la conexión' : 'No se pudo conectar: la red bloquea la llamada directa (el servidor necesita TURN)'); }, 32000);
+  st.connTimer = setTimeout(() => { if (_callState === st && st.status !== 'active') callHangup(_iceHasTurn ? 'No se pudo establecer la conexión' : 'La llamada no pudo conectar entre sus redes (no es la cámara). El servidor necesita TURN.'); }, 32000);
 }
 async function callCreatePeer(st) {
   const pc = new RTCPeerConnection({ iceServers: await callIceServers(), iceCandidatePoolSize: 2 });
@@ -4211,7 +4212,7 @@ function callOnConnState(st) {
   } else if (c === 'failed' || i === 'failed') {
     // Se intenta recuperar la ruta (cambio de red, vuelta de segundo plano) antes de cortar.
     if (!st.triedRestart) { st.triedRestart = true; callTryIceRestart(st, true); }
-    armCut(st.status === 'active' ? 'No se pudo mantener la conexión (red restringida)' : (_iceHasTurn ? 'No se pudo establecer la conexión' : 'No se pudo conectar: la red bloquea la llamada directa (el servidor necesita TURN)'), st.status === 'active' ? 30000 : 15000);
+    armCut(st.status === 'active' ? 'No se pudo mantener la conexión (red restringida)' : (_iceHasTurn ? 'No se pudo establecer la conexión' : 'La llamada no pudo conectar entre sus redes (no es la cámara). El servidor necesita TURN.'), st.status === 'active' ? 30000 : 15000);
   } else if ((c === 'disconnected' || i === 'disconnected') && st.status === 'active') {
     const el = document.getElementById('call-status'); if (el) el.textContent = 'Reconectando…';
     callTryIceRestart(st);
@@ -4605,7 +4606,7 @@ function callInitSignaling() {
   });
   socket.on('call_decline', ({ from }) => callRemoteEnded(from, (callPeerInfo(_callState || { peerId: from }).name) + ' rechazó la llamada'));
   socket.on('call_busy', ({ from }) => callRemoteEnded(from, (callPeerInfo(_callState || { peerId: from }).name) + ' está en otra llamada'));
-  socket.on('call_unavailable', ({ from, reason }) => callRemoteEnded(from, reason === 'self_busy' ? 'Ya estás en otra llamada' : 'Esa persona no está disponible'));
+  socket.on('call_unavailable', ({ from, reason }) => callRemoteEnded(from, reason === 'self_busy' ? 'Ya estás en otra llamada' : reason === 'not_friends' ? 'Solo podés llamar a tus amigos' : 'Esa persona no está disponible'));
   socket.on('call_end', ({ from, reason }) => {
     const st = _callState, wasActive = st && st.status === 'active', wasIncoming = st && st.status === 'incoming';
     callRemoteEnded(from, reason === 'timeout' ? (wasIncoming ? 'Llamada perdida' : 'Sin respuesta') : reason === 'disconnect' ? 'Se desconectó' : (wasActive ? 'Llamada finalizada' : (wasIncoming ? 'Llamada perdida' : '')));
