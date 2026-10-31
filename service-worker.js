@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v10';
+const CACHE_NAME = 'crix-shell-v11';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-72.png'];
 const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-72.png';
@@ -79,8 +79,8 @@ self.addEventListener('push', event => {
   event.waitUntil((async () => {
     // Una llamada cancelada hace desaparecer el timbre antes de mostrar "Llamada perdida".
     if (d.type === 'call_cancel') {
-      const open = await self.registration.getNotifications({ tag: 'call-' + (d.from || '') });
-      open.forEach(n => n.close());
+      const open = await self.registration.getNotifications();
+      open.filter(n => (n.tag || '').startsWith('call-' + (d.from || ''))).forEach(n => n.close());
       if (!d.missed) return;
     }
     const data = { type: d.type, from: d.from, url: d.url || '/' };
@@ -102,6 +102,8 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   const n = event.notification, data = n.data || {};
   n.close();
+  // Una llamada genera varios avisos apilados: al tocar uno se quitan todos los de esa persona.
+  if (data.type === 'call') event.waitUntil(self.registration.getNotifications().then(list => list.filter(x => (x.tag || '').startsWith('call-' + (data.from || ''))).forEach(x => x.close())));
   const action = event.action || '';
   const msg = { crixNotif: true, type: data.type, from: data.from, action };
   // Si la app no está abierta, se abre con los datos en la URL y el cliente los procesa al iniciar sesión.

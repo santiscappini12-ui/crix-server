@@ -4182,7 +4182,12 @@ function callRender() {
 }
 function callToggleMute() { const st = _callState; if (!st || !st.local) return; st.muted = !st.muted; st.local.getAudioTracks().forEach(t => { t.enabled = !st.muted; }); callRender(); }
 function callToggleCam() { const st = _callState; if (!st || !st.local) return; st.camOff = !st.camOff; st.local.getVideoTracks().forEach(t => { t.enabled = !st.camOff; }); callRender(); }
+// Quita las notificaciones apiladas de llamadas (el servidor manda una nueva en cada repetición del timbre).
+function closeCallNotifs() {
+  try { swReady().then(reg => reg && reg.getNotifications && reg.getNotifications().then(list => list.filter(n => (n.tag || '').startsWith('call-')).forEach(n => n.close()))); } catch {}
+}
 function callCleanup() {
+  closeCallNotifs();
   const st = _callState; _callState = null;
   clearInterval(_callClock); callTone(null);
   if (st) {
@@ -4204,7 +4209,7 @@ function callInitSignaling() {
   socket.on('call_invite', ({ from, fromName, type }) => {
     if (_callState) { socket.emit('call_decline', { to: from }); return; }
     const st = _callState = { peerId: from, peerName: fromName, type: type === 'video' ? 'video' : 'audio', role:'callee', status:'incoming', pendingIce:[], gen:++_callGen };
-    callRender(); callTone('ring'); titleAlert('📞 ' + fromName + ' te llama');
+    closeCallNotifs(); callRender(); callTone('ring'); titleAlert('📞 ' + fromName + ' te llama');
     try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch {}
     sendBrowserNotif(fromName + ' te llama', st.type === 'video' ? '📹 Videollamada entrante' : '📞 Llamada de voz entrante', { tag: 'call-' + from, requireInteraction: true, vibrate: [400, 200, 400, 200, 400] });
     applyPendingCall(from);

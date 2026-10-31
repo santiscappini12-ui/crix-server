@@ -1241,16 +1241,20 @@ io.on('connection', socket => {
     // así que se repite cada pocos segundos con el mismo tag (renotify) para que funcione como timbre.
     // Cada repetición vuelve a evaluar qué dispositivos tienen Crix a la vista; se corta al contestar,
     // rechazar, colgar o vencer (clearCall).
-    const ringPayload = { type:'call', from:me.id, fromName:me.username, callType, tag:'call-' + me.id,
-      url:'/?n=call&u=' + encodeURIComponent(me.id) };
+    // Cada repetición lleva un tag distinto (call-<id>-<n>): en iPhone un aviso con el mismo tag reemplaza al
+    // anterior sin volver a sonar, así que cada uno tiene que ser una notificación nueva. Se cierran todas
+    // al contestar, rechazar o cortar (service worker y app, por el prefijo call-<id>).
+    let ringN = 0;
+    const ringPayload = () => ({ type:'call', from:me.id, fromName:me.username, callType, tag:'call-' + me.id + '-' + (ringN++),
+      url:'/?n=call&u=' + encodeURIComponent(me.id) });
     const ringTopic = 'call' + String(me.id).slice(0,20);
-    notifyPush(to, ringPayload, { ttl:45, urgency:'high', topic:ringTopic });
+    notifyPush(to, ringPayload(), { ttl:45, urgency:'high', topic:ringTopic });
     const calleeEntry = calls.get(to);
     if (calleeEntry && push.has(to)) {
       let repeats = 0;
       calleeEntry.ring = setInterval(() => {
         if (calls.get(to) !== calleeEntry || calleeEntry.accepted || ++repeats > RING_MAX_REPEATS) { clearInterval(calleeEntry.ring); return; }
-        notifyPush(to, ringPayload, { ttl:10, urgency:'high', topic:ringTopic });
+        notifyPush(to, ringPayload(), { ttl:10, urgency:'high', topic:ringTopic });
       }, RING_EVERY_MS);
     }
   });
