@@ -122,7 +122,7 @@ module.exports = function createPush({ getDB, saveDB }) {
     if (!subs.length) return 0;
     
     const body = JSON.stringify(payload);
-    const opts = { TTL: options.ttl ?? 60 * 60, urgency: options.urgency || 'normal' };
+    const opts = { TTL: options.ttl ?? 60 * 60, urgency: options.urgency || 'normal', timeout: 15000 };
     if (options.topic) opts.topic = String(options.topic).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || undefined;
     
     let sent = 0;

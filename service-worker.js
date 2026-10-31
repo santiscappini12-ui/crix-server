@@ -1,10 +1,16 @@
-const CACHE_NAME = 'crix-shell-v11';
+const CACHE_NAME = 'crix-shell-v12';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-72.png'];
 const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-72.png';
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)));
+  // IMPORTANTE: cache.addAll() falla entera si UN solo archivo da 404 y entonces el service worker nunca se
+  // instala (y sin service worker no hay notificaciones push). Se cachea archivo por archivo y los que falten se ignoran.
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => Promise.allSettled(SHELL.map(url => cache.add(url))))
+      .catch(() => {})
+  );
   self.skipWaiting();
 });
 
@@ -112,6 +118,8 @@ self.addEventListener('notificationclick', event => {
   event.waitUntil((async () => {
     const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const existing = list.find(c => c.url.startsWith(self.location.origin));
+    // "Colgar" desde el aviso de llamada en curso: se corta sin traer la app al frente.
+    if (data.type === 'call_ongoing' && action === 'hangup') { list.forEach(c => c.postMessage(msg)); return; }
     if (existing) {
       try { await existing.focus(); } catch {}
       existing.postMessage(msg);

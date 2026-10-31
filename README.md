@@ -62,6 +62,15 @@ Al instalar Crix como aplicación (o desde el navegador) aparece un aviso para *
 - Claves: se generan solas y se guardan en la base. Opcionalmente fijalas con `CRIX_VAPID_PUBLIC_KEY`, `CRIX_VAPID_PRIVATE_KEY` y `CRIX_VAPID_SUBJECT` (por ejemplo `mailto:vos@dominio.com`). Si cambian, los dispositivos se vuelven a suscribir al abrir la app.
 - Requiere HTTPS (o `localhost`). Rutas: `GET /api/push/key`, `POST /api/push/subscribe`, `POST /api/push/unsubscribe`.
 
+- **Íconos de la PWA**: la carpeta `icons/` (192, 512, maskable, apple-touch y badge) tiene que estar desplegada. Si falta un solo archivo, antes el service worker no se instalaba y por eso no llegaba ninguna notificación; ahora el service worker tolera archivos faltantes, pero sin íconos la app no se puede instalar bien en el teléfono.
+
+## Llamadas en segundo plano
+
+- **Minimizar**: el botón ⤓ de la llamada la convierte en una ventanita flotante (con el video del otro si es videollamada) y se puede seguir usando Crix, incluso jugar. Tocar la ventanita la vuelve a agrandar.
+- **Fuera de Crix**: la pantalla se mantiene encendida durante la llamada, se registran los controles del sistema (colgar, silenciar, cámara), las videollamadas ofrecen ventana flotante del sistema (🗗 / Picture-in-Picture) y, con las notificaciones activas, aparece un aviso fijo "En llamada con X" con botón *Colgar*.
+- **Cortes de red o de segundo plano**: el servidor ya no corta una llamada aceptada cuando se cae el socket de uno de los dos (el audio/video va directo entre ambos); espera hasta 2 minutos a que vuelva. El cliente reintenta la conexión sin límite, reinicia ICE si la conexión se pierde y vuelve a pedir micrófono/cámara si el sistema los cortó.
+- Limitación: iPhone/iPad suspende las PWA en segundo plano y no se puede evitar desde la web; ahí la llamada sigue mientras Crix esté a la vista.
+
 ## Iluminación y sombras
 
 El sol proyecta sombras que **siguen al jugador** (o a la cámara del editor) con una cámara de sombras amplia y ajustada a la rejilla del mapa de sombras para que no titilen; las piezas translúcidas y de alambre no proyectan sombra y los avatares sí. El juego ahora usa la configuración de **Lighting** del editor (antes se ignoraba): ambiente, brillo, niebla, color de cielo, brillo/contraste/saturación y los nuevos controles *Intensidad*, *Altura* y *Dirección* del sol y el interruptor *Sombras*. Las cuñas (Wedge) tenían tres caras invertidas y ahora se ven completas con sombreado plano. Bloom, Blur y SunRays siguen siendo marcadores.

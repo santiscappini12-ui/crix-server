@@ -17,7 +17,7 @@ const app    = express();
 const server = http.createServer(app);
 const io     = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  pingTimeout: 20000, pingInterval: 10000,
+  pingTimeout: 45000, pingInterval: 15000,
 });
 app.use(express.json({ limit: '50mb' }));
 
@@ -113,6 +113,7 @@ const calls = new Map();       // userId → { peer, caller, accepted, type, tim
 // Si cierran la PWA y el socket queda colgado hasta el ping timeout (iPhone/PC), el estado viejo no puede
 // seguir tapando el push: pasados VIS_FRESH_MS se considera que la app ya no está a la vista.
 const VIS_FRESH_MS = 25000;
+const CALL_DISCONNECT_GRACE_MS = 120000;                // margen para que una llamada en curso sobreviva al segundo plano
 const RING_EVERY_MS = 4000, RING_MAX_REPEATS = 10;   // timbre repetido por push mientras la llamada suena
 function visibleEndpoints(userId) {
   const set = new Set(), now = Date.now();
@@ -132,9 +133,9 @@ function notifyPush(userId, payload, options) {
 }
 function clearCall(userId, notify) {
   const c = calls.get(userId); if (!c) return null;
-  clearTimeout(c.timer); clearInterval(c.ring); calls.delete(userId);
+  clearTimeout(c.timer); clearInterval(c.ring); clearTimeout(c.dcTimer); calls.delete(userId);
   const other = calls.get(c.peer);
-  if (other && other.peer === userId) { clearTimeout(other.timer); clearInterval(other.ring); calls.delete(c.peer); }
+  if (other && other.peer === userId) { clearTimeout(other.timer); clearInterval(other.ring); clearTimeout(other.dcTimer); calls.delete(c.peer); }
   if (notify) { const target = onlineUsers[c.peer]; if (target) io.to(target.socketId).emit(notify.event, { from:userId, reason:notify.reason }); }
   // Si la llamada no llegó a atenderse y la cortó/perdió quien llamaba, se cancela el timbre en los
   // dispositivos de quien recibía y queda un aviso de llamada perdida.
@@ -1295,6 +1296,9 @@ io.on('connection', socket => {
     DB.users[user.id].onlineAt = Date.now();
     io.emit('online_update', { userId:user.id, online:true });
     emitPresence(user.id);
+    // Si la app volvió de segundo plano con una llamada en curso, se cancela la cuenta regresiva de corte.
+    const ongoing = calls.get(user.id);
+    if (ongoing?.dcTimer) { clearTimeout(ongoing.dcTimer); ongoing.dcTimer = null; }
     // Si alguien está llamando mientras la app estaba cerrada, el timbre aparece apenas se conecta.
     const pending = calls.get(user.id);
     if (pending && !pending.caller && !pending.accepted) {
@@ -1421,7 +1425,17 @@ io.on('connection', socket => {
       if (presence?.socketId === socket.id) {
         const ringing = calls.get(meta.userId);
         const keepRinging = ringing && !ringing.caller && !ringing.accepted && push.has(meta.userId);
-        if (!keepRinging) clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
+        const keepActive = ringing && ringing.accepted;
+        if (keepActive) {
+          // Llamada en curso: el media es P2P y sigue aunque la señalización se corte (app en segundo plano,
+          // cambio de red, pantalla bloqueada). Solo se corta si no vuelve a conectarse a tiempo.
+          const uid = meta.userId;
+          clearTimeout(ringing.dcTimer);
+          ringing.dcTimer = setTimeout(() => {
+            const cur = calls.get(uid);
+            if (cur && cur === ringing && !onlineUsers[uid]) clearCall(uid, { event:'call_end', reason:'disconnect' });
+          }, CALL_DISCONNECT_GRACE_MS);
+        } else if (!keepRinging) clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
         else {
           // La app pasó a segundo plano y se cortó el socket sin avisar visibilidad: el teléfono tiene que sonar ahora.
           const caller = DB.users[ringing.peer];

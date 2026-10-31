@@ -279,7 +279,7 @@ input,select,textarea{font-family:var(--font);}
 /* ═══ LLAMADAS ═══ */
 #call-overlay{background:#06080d;gap:0;overflow:hidden}
 #call-remote{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
-#call-remote.audio-only{opacity:0;pointer-events:none;width:2px;height:2px}
+#call-remote.audio-only{opacity:0;pointer-events:none}
 #call-center{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:0 20px;transition:all .3s}
 #call-center.compact{position:absolute;top:18px;left:18px;align-items:flex-start;text-align:left;gap:2px;padding:8px 14px;background:rgba(0,0,0,.45);border-radius:12px}
 #call-center.compact .call-av-big{display:none}
@@ -290,6 +290,18 @@ input,select,textarea{font-family:var(--font);}
 #call-local{position:absolute;right:16px;bottom:104px;width:min(34vw,170px);aspect-ratio:3/4;object-fit:cover;border-radius:14px;background:#111;border:2px solid rgba(255,255,255,.25);transform:scaleX(-1);z-index:3;display:none}
 #call-overlay .call-btns{position:absolute;bottom:28px;left:0;right:0;justify-content:center;z-index:4}
 .call-av-big.ringing{animation:callPulse 1.4s ease-in-out infinite}
+#call-min{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));right:14px;z-index:5;width:40px;height:40px;border-radius:50%;border:none;background:rgba(0,0,0,.45);color:#fff;font-size:18px;cursor:pointer;display:none;align-items:center;justify-content:center}
+/* Llamada minimizada: ventanita flotante que deja usar el resto de Crix mientras la llamada sigue */
+#call-overlay.open.mini{inset:auto;top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;left:auto;bottom:auto;width:158px;height:212px;border-radius:16px;border:1px solid rgba(255,255,255,.22);box-shadow:0 10px 30px rgba(0,0,0,.65);background:#06080d;cursor:pointer;z-index:850}
+#call-overlay.open.mini.novideo{height:132px}
+#call-overlay.mini #call-local,#call-overlay.mini #call-kind,#call-overlay.mini #call-min,#call-overlay.mini .call-btn.nomini{display:none!important}
+#call-overlay.mini #call-center{margin-top:-20px;gap:4px;padding:0}
+#call-overlay.mini #call-center.compact{top:6px;left:6px;padding:3px 8px;border-radius:8px;margin:0}
+#call-overlay.mini .call-av-big{width:44px;height:44px;font-size:18px;border-width:2px}
+#call-overlay.mini #call-name{font-size:13px}
+#call-overlay.mini #call-status{font-size:11px}
+#call-overlay.mini .call-btns{bottom:8px;gap:8px}
+#call-overlay.mini .call-btn{width:36px;height:36px;font-size:15px}
 @keyframes callPulse{0%,100%{box-shadow:0 0 0 0 rgba(91,141,239,.55)}50%{box-shadow:0 0 0 22px rgba(91,141,239,0)}}
 /* ═══ COLOR / MATERIAL / TEXTURA (inspector) ═══ */
 .ap-sec{padding:9px 12px 4px;border-top:1px solid var(--border)}
@@ -931,7 +943,9 @@ input,select,textarea{font-family:var(--font);}
 </div>
 <!-- ═══ CALL OVERLAY ═══ -->
 <div id="call-overlay" role="dialog" aria-label="Llamada">
-  <video id="call-remote" class="audio-only" autoplay playsinline></video>
+  <video id="call-remote" class="audio-only" autoplay playsinline muted></video>
+  <audio id="call-remote-audio" autoplay playsinline></audio>
+  <button id="call-min" onclick="callMinimize()" title="Minimizar (la llamada sigue)" aria-label="Minimizar llamada">⤓</button>
   <div id="call-center">
     <div id="call-kind"></div>
     <div class="call-av-big" id="call-av"></div>
@@ -2266,7 +2280,22 @@ function _loadMap(m) {
   _spawnPlayer(spawn);gSpawnPos={x:spawn.x,y:spawn.y,z:spawn.z};resetGameState(m);if(typeof buildGameGui==='function')buildGameGui(m);gCamTheta=0;gCamPhi=0.45;gChatMsgs=[];document.getElementById('g-chat-msgs').innerHTML='';addGMsg(`Bienvenido a ${m.name}`,'sys');
 }
 function _stepScriptParts() { const serverPhysics=netServerScriptsActive&&netConnected;for(const object of runtimeObjects.values()){if(object.data.anchored||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
-function _spawnPlayer(pos) { const g = new THREE.Group(); const c = new THREE.Color(ME.color||'#5b8def'); const bMat = new THREE.MeshPhongMaterial({color:c}); const sMat = new THREE.MeshPhongMaterial({color:0xffdbac}); const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45,1.10,0.45),bMat); lL.position.set(-0.27, 0.55, 0); const lR = lL.clone(); lR.position.set( 0.27, 0.55, 0); const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55),bMat); torso.position.set(0, 1.70, 0); const head = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.70,0.70),sMat); head.position.set(0, 2.75, 0); const eyeM = new THREE.MeshPhongMaterial({color:0x111111}); const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeM); eL.position.set(-0.17, 2.78, 0.36); const eR = eL.clone(); eR.position.set( 0.17, 2.78, 0.36); const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40,1.10,0.40),bMat); aL.position.set(-0.72, 1.70, 0); const aR = aL.clone(); aR.position.set( 0.72, 1.70, 0); g.add(lL,lR,torso,head,eL,eR,aL,aR); shadowAllMeshes(g); g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = {aL,aR,lL,lR}; gVelY = 0; gOnGround = false; gTargetRY = 0; }
+// Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
+// así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
+// (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
+function _buildHumanoid(color) {
+  const g = new THREE.Group(); const c = new THREE.Color(color || '#5b8def');
+  const bMat = new THREE.MeshPhongMaterial({color:c}); const sMat = new THREE.MeshPhongMaterial({color:0xffdbac}); const eyeM = new THREE.MeshPhongMaterial({color:0x111111});
+  const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45,1.10,0.45),bMat); lL.position.set(-0.27, 0.55, 0); const lR = lL.clone(); lR.position.set( 0.27, 0.55, 0);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55),bMat); torso.position.set(0, 1.70, 0);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.70,0.70),sMat); head.position.set(0, 2.75, 0);
+  const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeM); eL.position.set(-0.17, 2.78, 0.36); const eR = eL.clone(); eR.position.set( 0.17, 2.78, 0.36);
+  const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40,1.10,0.40),bMat); aL.position.set(-0.72, 1.70, 0); const aR = aL.clone(); aR.position.set( 0.72, 1.70, 0);
+  g.add(lL,lR,torso,head,eL,eR,aL,aR); shadowAllMeshes(g);
+  const parts = {aL,aR,lL,lR}; g.userData.parts = parts;
+  return { group:g, parts };
+}
+function _spawnPlayer(pos) { const built = _buildHumanoid(ME.color||'#5b8def'); const g = built.group; g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = built.parts; gVelY = 0; gOnGround = false; gTargetRY = 0; }
 function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; gAnimT += 0.016; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } _prevPos.copy(gPlayer.position); const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; if (moving) { const dir = new THREE.Vector3(mx,0,mz).normalize().applyAxisAngle(new THREE.Vector3(0,1,0), gCamTheta); gPlayer.position.x += dir.x * G_SPD; gPlayer.position.z += dir.z * G_SPD; gTargetRY = Math.atan2(dir.x, dir.z); } let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * 0.2; gVelY -= G_GRAV; gPlayer.position.y += gVelY; gOnGround = false; for (const col of gColliders) { col.box.setFromObject(col.mesh); const feet = gPlayer.position.y; const head = feet + AV_H; const pBox = new THREE.Box3( new THREE.Vector3(gPlayer.position.x - AV_HW, feet, gPlayer.position.z - AV_HD), new THREE.Vector3(gPlayer.position.x + AV_HW, head, gPlayer.position.z + AV_HD) ); if (!pBox.intersectsBox(col.box)) continue; const overY = Math.min(head, col.box.max.y) - Math.max(feet, col.box.min.y); const overX = Math.min(gPlayer.position.x+AV_HW, col.box.max.x) - Math.max(gPlayer.position.x-AV_HW, col.box.min.x); const overZ = Math.min(gPlayer.position.z+AV_HD, col.box.max.z) - Math.max(gPlayer.position.z-AV_HD, col.box.min.z); if (overY <= overX && overY <= overZ) { if (gVelY <= 0 && feet < col.box.max.y && head > col.box.max.y) { gPlayer.position.y = col.box.max.y; gVelY = 0; gOnGround = true; } else if (gVelY > 0 && head > col.box.min.y && feet < col.box.min.y) { gPlayer.position.y = col.box.min.y - AV_H; gVelY = 0; } } else { gPlayer.position.x = _prevPos.x; gPlayer.position.z = _prevPos.z; } } _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y=t;const rig=npc.mesh.userData.rig;if(rig){const swing=Math.sin(t*3)*0.45;rig.armL.rotation.x=swing;rig.armR.rotation.x=-swing;rig.legL.rotation.x=-swing;rig.legR.rotation.x=swing;} }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
 function _setupGameInput() { window.addEventListener('keydown', e => { if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return; gKeys[e.code] = true; if (e.code === 'Space') { e.preventDefault(); _tryJump(); } if (e.code === 'Escape') exitGame(); }); window.addEventListener('keyup', e => delete gKeys[e.code]); let cDrag = false, cx2=0, cy2=0; window.addEventListener('mousedown', e => { if (e.button===2 && document.getElementById('s-game').classList.contains('active')) { cDrag=true; cx2=e.clientX; cy2=e.clientY; } }); window.addEventListener('mouseup', e => { if (e.button===2) cDrag=false; }); window.addEventListener('mousemove', e => { if (!cDrag) return; gCamTheta -= (e.clientX-cx2)*0.01; gCamPhi = Math.max(0.08, Math.min(Math.PI/2.1, gCamPhi+(e.clientY-cy2)*0.01)); cx2=e.clientX; cy2=e.clientY; }); window.addEventListener('wheel', e => { if (document.getElementById('s-game').classList.contains('active')) gCamDist = Math.max(5,Math.min(60,gCamDist+e.deltaY*0.05)); }, {passive:true}); window.oncontextmenu = e => { if (document.getElementById('s-game').classList.contains('active')) e.preventDefault(); }; }
 function _tryJump() { if (gOnGround) { gVelY = G_JUMP; gOnGround = false; } }
@@ -2280,7 +2309,7 @@ const NET_RATE = 3;
 let remotePlayers = {};
 function netConnect() {
   const serverUrl=window.location.origin;
-  try{socket=io(serverUrl,{auth:{token:DB.get('token')},transports:['websocket','polling'],reconnection:true,reconnectionDelay:1500,reconnectionAttempts:10});}
+  try{socket=io(serverUrl,{auth:{token:DB.get('token')},transports:['websocket','polling'],reconnection:true,reconnectionDelay:1500,reconnectionDelayMax:8000,reconnectionAttempts:Infinity,timeout:20000});}
   catch(error){console.warn('[NET] Socket.IO no disponible — modo offline');return;}
   socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
   socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();});
@@ -2351,7 +2380,7 @@ function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTi
 function netSendChat(text) { if (!socket || !netConnected) return false; socket.emit('game_chat', { text }); return true; }
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
 function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const group = _buildAvatar(playerData.color || '#f97316'); group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, parts: group.userData.parts, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false }; }
-function _buildAvatar(color) { const g = new THREE.Group(); const bodyM = new THREE.MeshPhongMaterial({ color: new THREE.Color(color) }); const skinM = new THREE.MeshPhongMaterial({ color: 0xffdbac }); const torso = new THREE.Mesh(new THREE.BoxGeometry(1, 1.3, 0.55), bodyM); torso.position.y = 0.65; const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), skinM); head.position.y = 1.65; const aL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.15, 0.42), bodyM); aL.position.set(-0.73, 0.575, 0); const aR = aL.clone(); aR.position.x = 0.73; const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.15, 0.45), bodyM); lL.position.set(-0.27, -0.575, 0); const lR = lL.clone(); lR.position.x = 0.27; g.add(torso, head, aL, aR, lL, lR); shadowAllMeshes(g); g.userData.parts = { aL, aR, lL, lR }; return g; }
+function _buildAvatar(color) { return _buildHumanoid(color).group; }
 function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
 function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); }); remotePlayers = {}; }
 function netUpdateRemotes() { const LERP = 0.18; for (const rp of Object.values(remotePlayers)) { rp.group.position.lerp(rp.targetPos, LERP); let diff = rp.targetRY - rp.group.rotation.y; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; rp.group.rotation.y += diff * LERP; const { aL, aR, lL, lR } = rp.parts; if (rp.moving) { const sw = rp.anim; aL.rotation.x = sw; aR.rotation.x = -sw; lL.rotation.x = -sw; lR.rotation.x = sw; } else { aL.rotation.x = aR.rotation.x = lL.rotation.x = lR.rotation.x = 0; } } }
@@ -2917,7 +2946,7 @@ async function pushSyncRun() {
     let reg = await Promise.race([swReady(), wait(8000).then(() => null)]);
     if (!reg) {
       // El service worker no llegó a activarse: se registra de nuevo y se espera.
-      try { await navigator.serviceWorker.register('/service-worker.js'); reg = await Promise.race([navigator.serviceWorker.ready, wait(8000).then(() => null)]); } catch {}
+      try { await navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' }); reg = await Promise.race([navigator.serviceWorker.ready, wait(8000).then(() => null)]); } catch {}
       if (reg) _swReg = reg;
     }
     if (!reg) throw new Error('el service worker no se pudo activar: recargá la app');
@@ -3091,6 +3120,7 @@ function handleNotifAction(m) {
   if (!m) return;
   if (!ME) { _pendingNotif = m; return; }
   const from = String(m.from || '');
+  if (m.type === 'call_ongoing') { if (m.action === 'hangup' && typeof _callState !== 'undefined' && _callState) callHangup('Llamada finalizada'); return; }
   if (m.type === 'call') {
     const st = typeof _callState !== 'undefined' ? _callState : null;
     if (st && st.status === 'incoming' && st.peerId === from) {
@@ -3249,7 +3279,7 @@ goTab = function(tab, extra) { _goTabCloud(tab, extra); if (CLOUD_READY) refresh
 setInterval(() => { if (CLOUD_READY) refreshCloudContent(); }, 60000);
 const _goTabNotif = goTab;
 goTab = function(tab, extra) { _goTabNotif(tab, extra); if (tab === 'msg') notifStatusRender(); };
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch(err => console.warn('[PWA] No se pudo instalar el caché:', err.message));
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' }).catch(err => console.warn('[PWA] No se pudo instalar el caché:', err.message));
 
 // ═══ Anclaje y física en Crix Hub ═══
 var stPhys={on:false,saved:null,vel:new Map()};
@@ -4100,7 +4130,7 @@ async function callStart(peerId, type) {
   try { st.local = await callGetMedia(st.type); }
   catch (err) { if (_callState === st) { callCleanup(); showToast(err.message); } return; }
   if (_callState !== st) { st.local.getTracks().forEach(t => t.stop()); return; }
-  if (st.type === 'video' && !st.local.getVideoTracks().length) st.type = 'audio';
+  st.noCam = st.type === 'video' && !st.local.getVideoTracks().length;   // sin cámara propia: igual se recibe el video del otro
   callAttachLocal(); callRender();
   socket.emit('call_invite', { to: peerId, type: st.type });
   callTone('ringback');
@@ -4122,9 +4152,11 @@ async function callCreatePeer(st) {
   const pc = new RTCPeerConnection({ iceServers: await callIceServers() });
   st.pc = pc; st.remote = null;
   st.local.getTracks().forEach(track => pc.addTrack(track, st.local));
+  if (st.role === 'caller' && st.type === 'video' && !st.local.getVideoTracks().length) { try { pc.addTransceiver('video', { direction:'recvonly' }); } catch {} }
   pc.ontrack = e => {
     if (e.streams && e.streams[0]) st.remote = e.streams[0];
     else { st.remote = st.remote || new MediaStream(); st.remote.addTrack(e.track); }
+    try { e.track.onunmute = () => { if (_callState === st) { callRender(); callPlayRemote(); } }; } catch {}
     callAttachRemote();
   };
   pc.onicecandidate = e => { if (_callState === st && socket) socket.emit('call_signal', { to: st.peerId, kind:'ice', candidate: e.candidate ? (e.candidate.toJSON ? e.candidate.toJSON() : e.candidate) : null }); };
@@ -4136,14 +4168,32 @@ function callOnConnState(st) {
   if (_callState !== st || !st.pc) return;
   const c = st.pc.connectionState, i = st.pc.iceConnectionState;
   if (c === 'connected' || i === 'connected' || i === 'completed') {
-    clearTimeout(st.discTimer); clearTimeout(st.connTimer);
-    if (st.status !== 'active') { st.status = 'active'; st.startedAt = Date.now(); callTone(null); callRender(); callStartClock(); }
+    clearTimeout(st.discTimer); clearTimeout(st.connTimer); st.triedRestart = false;
+    if (st.status !== 'active') { st.status = 'active'; st.startedAt = Date.now(); callTone(null); callRender(); callStartClock(); callWakeLockAcquire(); callMediaSessionSet(st); if (document.visibilityState === 'hidden') callOngoingNotif(true); }
     else callUpdateStatus();
-  } else if (c === 'failed' || i === 'failed') callHangup('No se pudo mantener la conexión (red restringida)');
-  else if ((c === 'disconnected' || i === 'disconnected') && st.status === 'active') {
+  } else if (c === 'failed' || i === 'failed') {
+    // Primero se intenta recuperar la conexión (cambio de red, vuelta de segundo plano); recién después se corta.
+    if (st.role === 'caller' && st.status === 'active' && !st.triedRestart) {
+      st.triedRestart = true; callTryIceRestart(st);
+      clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('No se pudo mantener la conexión (red restringida)'); }, 20000);
+    } else if (st.role !== 'caller' && st.status === 'active') {
+      clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('No se pudo mantener la conexión (red restringida)'); }, 20000);
+    } else callHangup('No se pudo mantener la conexión (red restringida)');
+  } else if ((c === 'disconnected' || i === 'disconnected') && st.status === 'active') {
     const el = document.getElementById('call-status'); if (el) el.textContent = 'Reconectando…';
-    clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('Se perdió la conexión'); }, 10000);
+    callTryIceRestart(st);
+    clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !['connected','completed'].includes(st.pc.iceConnectionState) && st.pc.connectionState !== 'connected') callHangup('Se perdió la conexión'); }, 25000);
   }
+}
+// Reinicio de ICE (solo lo inicia quien llamó): recupera la llamada tras un corte de red o de segundo plano.
+async function callTryIceRestart(st) {
+  if (st.role !== 'caller' || !st.pc || st.restarting) return;
+  st.restarting = true; setTimeout(() => { st.restarting = false; }, 8000);
+  try {
+    if (!socket || !socket.connected) return;
+    const offer = await st.pc.createOffer({ iceRestart:true }); await st.pc.setLocalDescription(offer);
+    socket.emit('call_signal', { to: st.peerId, kind:'offer', sdp: offer.sdp });
+  } catch {}
 }
 function callStartClock() { clearInterval(_callClock); _callClock = setInterval(callUpdateStatus, 1000); callUpdateStatus(); }
 function callUpdateStatus() {
@@ -4155,31 +4205,138 @@ function callAttachLocal() {
   el.srcObject = st.local; el.style.display = st.local.getVideoTracks().length ? 'block' : 'none';
   try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch {}
 }
+function callRemoteVideoLive(st) {
+  const s = st && st.remote; if (!s || !s.getVideoTracks) return false;
+  return s.getVideoTracks().some(t => t.readyState === 'live');
+}
+// El video remoto va SIEMPRE silenciado (así ningún navegador bloquea su reproducción) y el audio sale por un <audio> aparte.
 function callAttachRemote() {
-  const st = _callState, el = document.getElementById('call-remote'); if (!st || !el || !st.remote) return;
-  el.srcObject = st.remote; callRender();
-  try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => { const ov = document.getElementById('call-overlay'); const once = () => { el.play().catch(() => {}); ov.removeEventListener('click', once); }; ov.addEventListener('click', once); showToast('Tocá la pantalla para activar el audio'); }); } catch {}
+  const st = _callState; if (!st || !st.remote) return;
+  const v = document.getElementById('call-remote'), a = document.getElementById('call-remote-audio'); if (!v || !a) return;
+  if (v.srcObject !== st.remote) v.srcObject = st.remote;
+  if (a.srcObject !== st.remote) a.srcObject = st.remote;
+  v.muted = true;
+  callWatchRemote(st); callPlayRemote(); callRender();
+}
+function callPlayRemote() {
+  const v = document.getElementById('call-remote'), a = document.getElementById('call-remote-audio');
+  try { const p = v && v.play(); if (p && p.catch) p.catch(() => {}); } catch {}
+  try {
+    const p = a && a.play();
+    if (p && p.catch) p.catch(() => {
+      const ov = document.getElementById('call-overlay'); if (!ov || ov._unlock) return; ov._unlock = true;
+      const once = () => { ov._unlock = false; ov.removeEventListener('click', once, true); a.play().catch(() => {}); };
+      ov.addEventListener('click', once, true); showToast('Tocá la pantalla para activar el audio');
+    });
+  } catch {}
+}
+// El video puede llegar (o apagarse) después de conectar: se vuelve a dibujar cada vez que cambian las pistas.
+function callWatchRemote(st) {
+  if (st._watching === st.remote) return; st._watching = st.remote;
+  const refresh = () => { if (_callState === st) { callRender(); callPlayRemote(); } };
+  st.remote.addEventListener('addtrack', e => { try { e.track.onunmute = refresh; e.track.onended = refresh; } catch {} refresh(); });
+  st.remote.addEventListener('removetrack', refresh);
+  st.remote.getTracks().forEach(t => { t.onunmute = refresh; t.onended = refresh; });
+  const v = document.getElementById('call-remote'); if (v) { v.onloadedmetadata = v.onplaying = v.onresize = refresh; }
 }
 function callRender() {
   const st = _callState, ov = document.getElementById('call-overlay'); if (!ov) return;
-  if (!st) { ov.classList.remove('open'); return; }
+  if (!st) { ov.classList.remove('open', 'mini', 'novideo'); return; }
   ov.classList.add('open');
-  const info = callPeerInfo(st), hasRemoteVideo = !!(st.remote && st.remote.getVideoTracks && st.remote.getVideoTracks().length);
+  if (st.status === 'incoming') st.minimized = false;
+  const info = callPeerInfo(st), hasRemoteVideo = callRemoteVideoLive(st);
+  const showVideo = hasRemoteVideo && (st.status === 'connecting' || st.status === 'active');
+  ov.classList.toggle('mini', !!st.minimized);
+  ov.classList.toggle('novideo', !showVideo);
   const av = document.getElementById('call-av'); av.style.background = info.color; av.textContent = info.name[0].toUpperCase(); av.classList.toggle('ringing', st.status === 'calling' || st.status === 'incoming');
   document.getElementById('call-name').textContent = info.name;
   document.getElementById('call-kind').textContent = st.type === 'video' ? '📹 Videollamada' : '📞 Llamada de voz';
   const text = { calling:'Llamando…', incoming: st.type === 'video' ? 'Videollamada entrante' : 'Llamada entrante', connecting:'Conectando…', active:'En llamada' }[st.status];
   if (st.status !== 'active') document.getElementById('call-status').textContent = text; else callUpdateStatus();
-  document.getElementById('call-remote').classList.toggle('audio-only', !(st.status === 'active' && hasRemoteVideo));
-  document.getElementById('call-center').classList.toggle('compact', st.status === 'active' && hasRemoteVideo);
+  document.getElementById('call-remote').classList.toggle('audio-only', !showVideo);
+  document.getElementById('call-center').classList.toggle('compact', showVideo);
   const local = document.getElementById('call-local'); if (st.local) local.style.display = st.local.getVideoTracks().length && !st.camOff ? 'block' : 'none';
-  const btn = (cls, bg, fn, label, id) => '<button class="call-btn" ' + (id ? 'id="' + id + '" ' : '') + 'style="background:' + bg + '" onclick="' + fn + '" title="' + label + '" aria-label="' + label + '">' + cls + '</button>';
+  const minBtn = document.getElementById('call-min'); if (minBtn) minBtn.style.display = (st.status === 'incoming' || st.minimized) ? 'none' : 'flex';
+  const btn = (icon, bg, fn, label, id, extra) => '<button class="call-btn' + (extra ? ' ' + extra : '') + '" ' + (id ? 'id="' + id + '" ' : '') + 'style="background:' + bg + '" onclick="' + fn + '" title="' + label + '" aria-label="' + label + '">' + icon + '</button>';
   let html = '';
   if (st.status === 'incoming') html = btn('📵', 'var(--red)', 'callHangup()', 'Rechazar') + btn('📞', '#22c55e', 'callAccept()', 'Aceptar');
-  else if (st.status === 'active') html = btn(st.muted ? '🔇' : '🎤', st.muted ? '#7a3030' : '#2a2f3e', 'callToggleMute()', 'Silenciar micrófono', 'mute-btn') + (st.local && st.local.getVideoTracks().length ? btn(st.camOff ? '📷' : '📹', st.camOff ? '#7a3030' : '#2a2f3e', 'callToggleCam()', 'Activar o apagar la cámara', 'cam-btn') : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
+  else if (st.status === 'active') html = btn(st.muted ? '🔇' : '🎤', st.muted ? '#7a3030' : '#2a2f3e', 'callToggleMute()', 'Silenciar micrófono', 'mute-btn') + (st.local && st.local.getVideoTracks().length ? btn(st.camOff ? '📷' : '📹', st.camOff ? '#7a3030' : '#2a2f3e', 'callToggleCam()', 'Activar o apagar la cámara', 'cam-btn', 'nomini') : '') + (showVideo && callPipSupported() ? btn('🗗', '#2a2f3e', 'callTogglePip()', 'Ventana flotante (sigue visible fuera de Crix)', 'pip-btn', 'nomini') : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
   else html = btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
   document.getElementById('call-btns').innerHTML = html;
 }
+// ── Segundo plano: minimizar, ventana flotante, pantalla encendida, controles del sistema ──
+function callMinimize() { const st = _callState; if (!st || st.status === 'incoming') return; st.minimized = true; callRender(); }
+function callExpand() { const st = _callState; if (!st) return; st.minimized = false; callRender(); }
+(function () { const ov = document.getElementById('call-overlay'); if (ov) ov.addEventListener('click', e => { if (ov.classList.contains('mini') && !e.target.closest('.call-btn')) callExpand(); }); })();
+var _wakeLock = null;
+async function callWakeLockAcquire() {
+  try {
+    if (!('wakeLock' in navigator) || _wakeLock || document.visibilityState !== 'visible' || !_callState) return;
+    _wakeLock = await navigator.wakeLock.request('screen'); _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+  } catch { _wakeLock = null; }
+}
+function callWakeLockRelease() { try { if (_wakeLock) _wakeLock.release(); } catch {} _wakeLock = null; }
+function callPipSupported() { return !!(document.pictureInPictureEnabled && window.HTMLVideoElement && HTMLVideoElement.prototype.requestPictureInPicture); }
+async function callEnterPip() {
+  const v = document.getElementById('call-remote'); if (!v || !callPipSupported() || !callRemoteVideoLive(_callState)) return;
+  try { if (document.pictureInPictureElement !== v) await v.requestPictureInPicture(); } catch {}
+}
+async function callTogglePip() { try { if (document.pictureInPictureElement) await document.exitPictureInPicture(); else await callEnterPip(); } catch {} }
+function callMediaSessionSet(st) {
+  if (!('mediaSession' in navigator)) return;
+  try {
+    const info = callPeerInfo(st);
+    navigator.mediaSession.metadata = new MediaMetadata({ title: 'Llamada con ' + info.name, artist: 'Crix', artwork: [{ src:'/icons/icon-192.png', sizes:'192x192', type:'image/png' }, { src:'/icons/icon-512.png', sizes:'512x512', type:'image/png' }] });
+    navigator.mediaSession.playbackState = 'playing';
+  } catch {}
+  const set = (name, fn) => { try { navigator.mediaSession.setActionHandler(name, fn); } catch {} };
+  set('hangup', () => callHangup('Llamada finalizada'));
+  set('togglemicrophone', () => callToggleMute());
+  set('togglecamera', () => callToggleCam());
+  set('enterpictureinpicture', () => callEnterPip());
+}
+function callMediaSessionClear() {
+  if (!('mediaSession' in navigator)) return;
+  ['hangup','togglemicrophone','togglecamera','enterpictureinpicture'].forEach(n => { try { navigator.mediaSession.setActionHandler(n, null); } catch {} });
+  try { navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; } catch {}
+}
+// Aviso fijo "En llamada con X" mientras Crix está en segundo plano: un toque vuelve a la llamada, "Colgar" la corta.
+async function callOngoingNotif(show) {
+  try {
+    const reg = await swReady(); if (!reg || !reg.showNotification) return;
+    if (!show) { (await reg.getNotifications({ tag:'oncall' })).forEach(n => n.close()); return; }
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const st = _callState; if (!st) return; const info = callPeerInfo(st);
+    await reg.showNotification('En llamada con ' + info.name, { body: 'Tocá para volver a Crix', tag:'oncall', silent:true, requireInteraction:true, icon:'/icons/icon-192.png', badge:'/icons/badge-72.png', actions:[{ action:'hangup', title:'Colgar' }], data:{ type:'call_ongoing', url:'/' } });
+  } catch {}
+}
+// Al volver de segundo plano el sistema puede haber cortado el micrófono o la cámara: se piden de nuevo y se reemplazan en la llamada.
+async function callRecoverMedia() {
+  const st = _callState; if (!st || !st.local || !st.pc || st._recovering) return;
+  const aT = st.local.getAudioTracks()[0], vT = st.local.getVideoTracks()[0];
+  const audioDead = !!aT && aT.readyState === 'ended', videoDead = !!vT && vT.readyState === 'ended';
+  if (!audioDead && !videoDead) return;
+  st._recovering = true;
+  try {
+    const fresh = await navigator.mediaDevices.getUserMedia({ audio: audioDead, video: videoDead ? { width:{ ideal:1280 }, height:{ ideal:720 }, facingMode:'user' } : false });
+    if (_callState !== st) { fresh.getTracks().forEach(t => t.stop()); return; }
+    for (const t of fresh.getTracks()) {
+      const sender = st.pc.getSenders().find(x => x.track && x.track.kind === t.kind);
+      if (sender) await sender.replaceTrack(t);
+      const old = st.local.getTracks().find(x => x.kind === t.kind); if (old) st.local.removeTrack(old);
+      t.enabled = t.kind === 'audio' ? !st.muted : !st.camOff; st.local.addTrack(t);
+    }
+    callAttachLocal(); callRender();
+  } catch (err) { console.warn('[CALL] no se pudo recuperar el medio', err); }
+  finally { st._recovering = false; }
+}
+document.addEventListener('visibilitychange', () => {
+  // El socket puede haberse dado por vencido en segundo plano: se reconecta al volver.
+  if (document.visibilityState === 'visible' && typeof socket !== 'undefined' && socket && !socket.connected) { try { socket.connect(); } catch {} }
+  const st = _callState; if (!st || !['connecting', 'active'].includes(st.status)) return;
+  if (document.visibilityState === 'hidden') { if (st.status === 'active') callOngoingNotif(true); }
+  else { callOngoingNotif(false); callWakeLockAcquire(); callPlayRemote(); callRecoverMedia(); }
+});
 function callToggleMute() { const st = _callState; if (!st || !st.local) return; st.muted = !st.muted; st.local.getAudioTracks().forEach(t => { t.enabled = !st.muted; }); callRender(); }
 function callToggleCam() { const st = _callState; if (!st || !st.local) return; st.camOff = !st.camOff; st.local.getVideoTracks().forEach(t => { t.enabled = !st.camOff; }); callRender(); }
 // Quita las notificaciones apiladas de llamadas (el servidor manda una nueva en cada repetición del timbre).
@@ -4187,7 +4344,8 @@ function closeCallNotifs() {
   try { swReady().then(reg => reg && reg.getNotifications && reg.getNotifications().then(list => list.filter(n => (n.tag || '').startsWith('call-')).forEach(n => n.close()))); } catch {}
 }
 function callCleanup() {
-  closeCallNotifs();
+  closeCallNotifs(); callOngoingNotif(false); callWakeLockRelease(); callMediaSessionClear();
+  try { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); } catch {}
   const st = _callState; _callState = null;
   clearInterval(_callClock); callTone(null);
   if (st) {
@@ -4195,8 +4353,9 @@ function callCleanup() {
     if (st.pc) { try { st.pc.ontrack = st.pc.onicecandidate = st.pc.onconnectionstatechange = st.pc.oniceconnectionstatechange = null; st.pc.close(); } catch {} }
     if (st.local) st.local.getTracks().forEach(t => { try { t.stop(); } catch {} });
   }
-  ['call-remote','call-local'].forEach(id => { const el = document.getElementById(id); if (el) { try { el.srcObject = null; } catch {} } });
-  const ov = document.getElementById('call-overlay'); if (ov) ov.classList.remove('open');
+  ['call-remote','call-local','call-remote-audio'].forEach(id => { const el = document.getElementById(id); if (el) { try { el.srcObject = null; } catch {} } });
+  const rv = document.getElementById('call-remote'); if (rv) rv.onloadedmetadata = rv.onplaying = rv.onresize = null;
+  const ov = document.getElementById('call-overlay'); if (ov) ov.classList.remove('open', 'mini', 'novideo');
 }
 function callHangup(reason) {
   const st = _callState; if (!st) return;
