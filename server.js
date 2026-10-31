@@ -681,6 +681,27 @@ async function fetchJson(url, opts = {}, ms = 6000) {
   try { const r = await fetch(url, { ...opts, signal:ctl.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
   finally { clearTimeout(t); }
 }
+// Normaliza lo que se haya puesto en CRIX_TURN_URL: acepta "turn:host:3478", "host:3478", solo "host" (se expande a UDP+TCP+TLS 443,
+// que es lo que ExpressTURN publica) y separa por coma, espacio o salto de línea. Una URL mal formada hacía que
+// RTCPeerConnection lanzara SyntaxError en el navegador y la llamada ni siquiera arrancaba.
+function normalizeTurnUrls(raw) {
+  const out = [];
+  const add = u => { if (u && !out.includes(u)) out.push(u); };
+  for (let item of String(raw || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean)) {
+    item = item.replace(/^["']+|["']+$/g, '');
+    const m = item.match(/^(turns?|stuns?):/i);
+    if (m) { add(item.replace(/^(turns?|stuns?):/i, x => x.toLowerCase()).replace(/^(turns?:)\/\//i, '$1')); continue; }
+    const hp = item.replace(/^\/\//, '').replace(/\/+$/, '');
+    if (!hp) continue;
+    if (/:\d+$/.test(hp)) { add('turn:' + hp); continue; }             // host:puerto
+    add('turn:' + hp + ':3478?transport=udp');                           // solo host → conjunto estándar
+    add('turn:' + hp + ':3478?transport=tcp');
+    add('turns:' + hp + ':443?transport=tcp');
+  }
+  // Un turn: sin transport también se ofrece por TCP y los turns: siempre por TCP (si no, algunos navegadores los ignoran).
+  return out.map(u => (/^turns:/.test(u) && !/transport=/.test(u)) ? u + (u.includes('?') ? '&' : '?') + 'transport=tcp' : u);
+}
+function turnCreds() { return { user: String(process.env.CRIX_TURN_USER || '').trim(), pass: String(process.env.CRIX_TURN_PASS || '').trim() }; }
 async function buildIceServers() {
   const out = [...STUN_SERVERS]; let turn = false, source = 'stun';
   try {
@@ -691,10 +712,86 @@ async function buildIceServers() {
     }
   } catch (err) { log('ICE', 'No se pudieron pedir credenciales TURN: ' + err.message); }
   if (process.env.CRIX_TURN_URL) {
-    out.push({ urls:String(process.env.CRIX_TURN_URL).split(',').map(x => x.trim()).filter(Boolean), username:process.env.CRIX_TURN_USER || '', credential:process.env.CRIX_TURN_PASS || '' });
-    turn = true; if (source === 'stun') source = 'custom';
+    const urls = normalizeTurnUrls(process.env.CRIX_TURN_URL), { user, pass } = turnCreds();
+    if (!urls.length) log('ICE', 'CRIX_TURN_URL está vacía o no se pudo interpretar: ' + process.env.CRIX_TURN_URL);
+    else {
+      if (!user || !pass) log('ICE', '⚠️ CRIX_TURN_USER / CRIX_TURN_PASS vacíos: ExpressTURN rechazará la conexión (401)');
+      // Un STUN del mismo proveedor ayuda a descubrir la IP pública; cada URL de TURN va en su propia entrada
+      // (si una falla por puerto bloqueado, las demás siguen sirviendo).
+      for (const u of urls) if (/^stuns?:/.test(u)) out.push({ urls:[u] });
+      const turnUrls = urls.filter(u => /^turns?:/.test(u));
+      if (turnUrls.length) { out.push({ urls:turnUrls, username:user, credential:pass }); turn = true; if (source === 'stun') source = 'custom'; }
+    }
   }
   return { servers:out, turn, source };
+}
+// Prueba REAL del TURN desde el servidor (Allocate con autenticación, RFC 5766): distingue "no responde" (puerto bloqueado,
+// host mal escrito) de "responde pero rechaza usuario/clave" (401) y de "funciona". Se usa en el arranque y en /api/ice/test.
+function turnProbe(urlStr, user, pass, timeoutMs = 4500) {
+  const dgram = require('dgram'), net = require('net'), tls = require('tls');
+  return new Promise(resolve => {
+    const m = String(urlStr).match(/^(turns?):([^:?]+)(?::(\d+))?(?:\?transport=(udp|tcp))?$/i);
+    if (!m) return resolve({ url:urlStr, ok:false, err:'URL no válida' });
+    const secure = m[1].toLowerCase() === 'turns', host = m[2], port = +m[3] || (secure ? 5349 : 3478), proto = secure ? 'tcp' : (m[4] || 'udp').toLowerCase();
+    const MAGIC = 0x2112A442, t0 = Date.now(); let done = false, sock = null, step = 0, realm = '', nonce = '', buf = Buffer.alloc(0);
+    const finish = r => { if (done) return; done = true; clearTimeout(timer); try { sock && (sock.close ? sock.close() : sock.destroy()); } catch {} resolve({ url:urlStr, ms:Date.now() - t0, ...r }); };
+    const timer = setTimeout(() => finish({ ok:false, err:'sin respuesta (timeout: host/puerto bloqueado o mal escrito)' }), timeoutMs);
+    const attr = (type, val) => { const pad = (4 - val.length % 4) % 4, b = Buffer.alloc(4 + val.length + pad); b.writeUInt16BE(type, 0); b.writeUInt16BE(val.length, 2); val.copy(b, 4); return b; };
+    const msg = (attrs, tid, withAuth) => {
+      let body = Buffer.concat(attrs);
+      if (withAuth) {
+        const key = crypto.createHash('md5').update(user + ':' + realm + ':' + pass).digest();
+        const h = Buffer.alloc(20); h.writeUInt16BE(0x0003, 0); h.writeUInt16BE(body.length + 24, 2); h.writeUInt32BE(MAGIC, 4); tid.copy(h, 8);
+        const mi = crypto.createHmac('sha1', key).update(Buffer.concat([h, body])).digest();
+        body = Buffer.concat([body, attr(0x0008, mi)]);
+      }
+      const h = Buffer.alloc(20); h.writeUInt16BE(0x0003, 0); h.writeUInt16BE(body.length, 2); h.writeUInt32BE(MAGIC, 4); tid.copy(h, 8);
+      return Buffer.concat([h, body]);
+    };
+    const parse = b => {
+      const type = b.readUInt16BE(0), len = b.readUInt16BE(2), attrs = {}; let o = 20;
+      while (o + 4 <= 20 + len) { const t = b.readUInt16BE(o), l = b.readUInt16BE(o + 2); attrs[t] = b.slice(o + 4, o + 4 + l); o += 4 + l + ((4 - l % 4) % 4); }
+      return { type, attrs };
+    };
+    const send = authed => {
+      const tid = crypto.randomBytes(12), a = [attr(0x0019, Buffer.from([17, 0, 0, 0]))];     // REQUESTED-TRANSPORT: UDP
+      if (authed) { a.push(attr(0x0006, Buffer.from(user)), attr(0x0014, Buffer.from(realm)), attr(0x0015, Buffer.from(nonce))); }
+      const pkt = msg(a, tid, authed); if (proto === 'udp') sock.send(pkt); else sock.write(pkt);
+    };
+    const onMsg = b => {
+      let r; try { r = parse(b); } catch { return finish({ ok:false, err:'respuesta ilegible' }); }
+      if (step === 0 && r.type === 0x0113) {                                    // 401 con realm/nonce
+        const code = r.attrs[0x0009] ? r.attrs[0x0009][2] * 100 + r.attrs[0x0009][3] : 0;
+        if (r.attrs[0x0014] && r.attrs[0x0015]) { realm = r.attrs[0x0014].toString(); nonce = r.attrs[0x0015].toString(); step = 1; return send(true); }
+        return finish({ ok:false, err:'el servidor rechazó la solicitud (' + code + ')' });
+      }
+      if (step === 0 && r.type === 0x0103) return finish({ ok:true, note:'responde (sin autenticación)' });
+      if (r.type === 0x0103) return finish({ ok:true });                         // Allocate success
+      if (r.type === 0x0113) {
+        const c = r.attrs[0x0009] ? r.attrs[0x0009][2] * 100 + r.attrs[0x0009][3] : 0;
+        if (c === 401) return finish({ ok:false, reachable:true, err:'usuario o contraseña incorrectos (401): revisá CRIX_TURN_USER y CRIX_TURN_PASS' });
+        if (c === 438 && step === 1 && r.attrs[0x0015]) { nonce = r.attrs[0x0015].toString(); step = 2; return send(true); }
+        if (c === 486 || c === 508) return finish({ ok:true, reachable:true, note:'autenticado (' + c + ': cuota/asignaciones agotadas ahora mismo)' });
+        return finish({ ok:false, reachable:true, err:'error ' + c });
+      }
+      finish({ ok:false, err:'respuesta inesperada 0x' + r.type.toString(16) });
+    };
+    try {
+      if (proto === 'udp') {
+        sock = dgram.createSocket('udp4'); sock.on('error', e => finish({ ok:false, err:e.message })); sock.on('message', onMsg);
+        sock.connect(port, host, () => send(false));
+      } else {
+        const onData = d => { buf = Buffer.concat([buf, d]); while (buf.length >= 20) { const L = 20 + buf.readUInt16BE(2); if (buf.length < L) break; const one = buf.slice(0, L); buf = buf.slice(L); onMsg(one); } };
+        sock = secure ? tls.connect({ host, port, servername:host }, () => send(false)) : net.connect({ host, port }, () => send(false));
+        sock.on('data', onData); sock.on('error', e => finish({ ok:false, err:e.message }));
+      }
+    } catch (e) { finish({ ok:false, err:e.message }); }
+  });
+}
+async function testTurn() {
+  const { user, pass } = turnCreds(), urls = normalizeTurnUrls(process.env.CRIX_TURN_URL).filter(u => /^turns?:/.test(u));
+  if (!urls.length) return { configured:false, results:[] };
+  return { configured:true, results: await Promise.all(urls.map(u => turnProbe(u, user, pass))) };
 }
 async function getIceServers() {
   if (iceCache.servers && Date.now() - iceCache.at < ICE_CACHE_MS) return iceCache;
@@ -703,11 +800,18 @@ async function getIceServers() {
   const wantsTurn = !!(process.env.CRIX_METERED_DOMAIN || process.env.CRIX_TURN_URL);
   iceCache = { at: (wantsTurn && !built.turn) ? Date.now() - ICE_CACHE_MS + 60000 : Date.now(), servers:built.servers, turn:built.turn, source:built.source };
   log('ICE', 'servidores listos · TURN: ' + (built.turn ? built.source : 'no configurado (solo STUN)'));
+  if (process.env.CRIX_TURN_URL) testTurn().then(t => t.results.forEach(r => log('ICE', 'TURN ' + r.url + ' → ' + (r.ok ? 'OK' + (r.note ? ' · ' + r.note : '') + ' (' + r.ms + ' ms)' : '✖ ' + r.err)))).catch(() => {});
   return iceCache;
 }
 app.get('/api/ice', requireAuth, async (req, res) => {
   const ice = await getIceServers();
   res.json({ ok:true, iceServers:ice.servers, hasTurn:ice.turn, source:ice.source });
+});
+
+// Diagnóstico del TURN: abrir https://TU-APP/api/ice/test estando con sesión iniciada.
+app.get('/api/ice/test', requireAuth, async (req, res) => {
+  const t = await testTurn(); const ice = await getIceServers();
+  res.json({ ok:true, hasTurn:ice.turn, source:ice.source, urls:(ice.servers || []).flatMap(x => x.urls), ...t });
 });
 
 // ── Gente en línea ahora (visible para todos) ──

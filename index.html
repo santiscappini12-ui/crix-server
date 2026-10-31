@@ -4077,11 +4077,26 @@ function callPeerInfo(st) { const u = (getUsers() || {})[st.peerId]; return { na
 var _iceHasTurn = false, _iceCache = null, _iceAt = 0;
 const CALL_STUN = [{ urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }];
 // Se piden al servidor (STUN + TURN si está configurado) y se guardan 10 min; callPrefetchIce() los adelanta al sonar la llamada.
+// Quita URLs inválidas (una sola mala hacía que RTCPeerConnection lanzara SyntaxError y la llamada no arrancara).
+function callCleanIce(list) {
+  const out = [];
+  for (const srv of (list || [])) {
+    if (!srv) continue;
+    const urls = (Array.isArray(srv.urls) ? srv.urls : [srv.urls]).filter(u => typeof u === 'string' && /^(stun|stuns|turn|turns):[^\s]+$/i.test(u.trim())).map(u => u.trim());
+    if (!urls.length) continue;
+    const e = { urls };
+    if (srv.username) { e.username = String(srv.username); e.credential = String(srv.credential || ''); }
+    if (urls.some(u => /^turns?:/i.test(u)) && !e.username) continue;      // un TURN sin usuario nunca funciona
+    out.push(e);
+  }
+  return out;
+}
 async function callIceServers() {
-  if (_iceCache && Date.now() - _iceAt < 600000) return _iceCache;
+  if (_iceCache && Date.now() - _iceAt < (_iceHasTurn ? 600000 : 20000)) return _iceCache;   // sin TURN se reintenta pronto (el servidor reintenta al minuto)
   try {
     const r = await apiRequest('/api/ice');
-    if (r.iceServers && r.iceServers.length) { _iceHasTurn = !!r.hasTurn; _iceCache = r.iceServers; _iceAt = Date.now(); return _iceCache; }
+    const clean = callCleanIce(r && r.iceServers);
+    if (clean.length) { _iceHasTurn = clean.some(x => x.username); _iceCache = clean; _iceAt = Date.now(); return _iceCache; }
   } catch {}
   return CALL_STUN;
 }
@@ -4166,14 +4181,33 @@ function callArmConnectTimeout(st) {
   st.hintTimer = setTimeout(() => {
     if (_callState !== st || st.status === 'active') return;
     const c = st.cand || {};
-    st.hint = _iceHasTurn ? '· buscando una ruta alternativa…' : (c.srflx || c.relay ? '· sus redes no se pueden conectar directo (el servidor necesita TURN)' : '· sin respuesta de la red (el servidor necesita TURN)');
+    st.hint = _iceHasTurn ? (c.relay ? '· buscando una ruta alternativa…' : callTurnHint(st)) : (c.srflx || c.relay ? '· sus redes no se pueden conectar directo (el servidor necesita TURN)' : '· sin respuesta de la red (el servidor necesita TURN)');
     callRender();
   }, 7000);
-  st.connTimer = setTimeout(() => { if (_callState === st && st.status !== 'active') callHangup(_iceHasTurn ? 'No se pudo establecer la conexión' : 'La llamada no pudo conectar entre sus redes (no es la cámara). El servidor necesita TURN.'); }, 32000);
+  st.connTimer = setTimeout(() => { if (_callState === st && st.status !== 'active') callHangup(_iceHasTurn ? 'No se pudo establecer la conexión' + callTurnWhy(st) : 'La llamada no pudo conectar entre sus redes (no es la cámara). El servidor necesita TURN.'); }, 32000);
 }
+// Explica por qué no se llegó al TURN (en vez de un "no se pudo" genérico).
+function callTurnWhy(st) {
+  const e = st && st.iceErr; if (!e || (st.cand && st.cand.relay)) return '';
+  if (e.code === 401 || e.code === 438) return ' · el TURN rechazó el usuario/clave (revisá CRIX_TURN_USER y CRIX_TURN_PASS)';
+  if (e.code === 701) return ' · no se pudo alcanzar el TURN (puerto bloqueado o host mal escrito)';
+  return ' · error del TURN ' + e.code;
+}
+function callTurnHint(st) { const w = callTurnWhy(st); return w ? '·' + w.slice(2) : '· conectando con el servidor TURN…'; }
 async function callCreatePeer(st) {
-  const pc = new RTCPeerConnection({ iceServers: await callIceServers(), iceCandidatePoolSize: 2 });
-  st.pc = pc; st.remote = null; st.cand = {};
+  const ice = await callIceServers();
+  let pc;
+  try { pc = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: _iceHasTurn ? 0 : 2 }); }
+  catch (err) { console.warn('[CALL] ICE inválido, se usa solo STUN', err); _iceHasTurn = false; pc = new RTCPeerConnection({ iceServers: CALL_STUN }); }
+  st.pc = pc; st.remote = null; st.cand = {}; st.iceErr = null;
+  // El navegador avisa por qué falla cada servidor (401 = usuario/clave, 701 = no se pudo alcanzar el host/puerto).
+  pc.onicecandidateerror = e => {
+    const u = String(e.url || '');
+    if (!/^turns?:/i.test(u)) return;
+    st.iceErrs = st.iceErrs || {}; st.iceErrs[u] = e.errorCode;
+    st.iceErr = { code:e.errorCode, text:e.errorText || '', url:u };
+    console.warn('[CALL] TURN error', e.errorCode, e.errorText, u);
+  };
   st.local.getTracks().forEach(track => pc.addTrack(track, st.local));
   if (st.type === 'video' && !st.local.getVideoTracks().length) { try { pc.addTransceiver('video', { direction:'recvonly' }); } catch {} }
   // Canal de datos fijo (sin negociar): avisa a la otra persona si estás en segundo plano, sin cámara o con el micrófono pausado.
@@ -4212,7 +4246,7 @@ function callOnConnState(st) {
   } else if (c === 'failed' || i === 'failed') {
     // Se intenta recuperar la ruta (cambio de red, vuelta de segundo plano) antes de cortar.
     if (!st.triedRestart) { st.triedRestart = true; callTryIceRestart(st, true); }
-    armCut(st.status === 'active' ? 'No se pudo mantener la conexión (red restringida)' : (_iceHasTurn ? 'No se pudo establecer la conexión' : 'La llamada no pudo conectar entre sus redes (no es la cámara). El servidor necesita TURN.'), st.status === 'active' ? 30000 : 15000);
+    armCut(st.status === 'active' ? 'No se pudo mantener la conexión (red restringida)' : (_iceHasTurn ? 'No se pudo establecer la conexión' + callTurnWhy(st) : 'La llamada no pudo conectar entre sus redes (no es la cámara). El servidor necesita TURN.'), st.status === 'active' ? 30000 : 15000);
   } else if ((c === 'disconnected' || i === 'disconnected') && st.status === 'active') {
     const el = document.getElementById('call-status'); if (el) el.textContent = 'Reconectando…';
     callTryIceRestart(st);

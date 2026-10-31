@@ -108,6 +108,16 @@ Por defecto se usan servidores STUN públicos, que alcanzan solo cuando las dos 
 | **Metered Open Relay** (recomendada, sin tarjeta) | `CRIX_METERED_DOMAIN` (ej. `crix.metered.live`), `CRIX_METERED_API_KEY` | 20 GB/mes gratis, solo registro con email. Las credenciales se piden solas a la API. |
 | **TURN con usuario/clave fijos** (ExpressTURN, coturn, etc.) | `CRIX_TURN_URL` (varias separadas por coma, ej. `turn:turn.midominio.com:3478,turns:turn.midominio.com:443?transport=tcp`), `CRIX_TURN_USER`, `CRIX_TURN_PASS` | |
 
+**ExpressTURN (gratis, 1 TB/mes).** En Render → *Environment* alcanza con:
+
+```
+CRIX_TURN_URL  = relay1.expressturn.com
+CRIX_TURN_USER = (usuario del panel de ExpressTURN)
+CRIX_TURN_PASS = (contraseña del panel de ExpressTURN)
+```
+
+Si ponés solo el host, Crix lo expande solo a `turn:…:3478?transport=udp`, `turn:…:3478?transport=tcp` y `turns:…:443?transport=tcp` (esta última atraviesa redes que bloquean 3478). También se aceptan URLs completas separadas por coma. Para comprobar que responde: iniciá sesión y abrí `/api/ice/test` (dice por cada URL si responde, si rechaza usuario/clave o si el puerto está bloqueado); el mismo resultado sale en el log al arrancar (`ICE: TURN … → OK`). Si una llamada no conecta, la pantalla ahora indica el motivo real (usuario/clave rechazados o TURN inalcanzable).
+
 El log del servidor indica al arrancar si hay TURN (`ICE servidores listos · TURN: metered`). Si no hay TURN, la llamada avisa en pantalla a los 7 s qué está pasando. Las llamadas requieren HTTPS (o `localhost`) para que el navegador permita el micrófono y la cámara.
 
 ## Chat privado E2EE
