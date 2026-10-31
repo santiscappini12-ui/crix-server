@@ -2893,10 +2893,33 @@ async function swReady() {
   return _swReg;
 }
 // Registra (o renueva) la suscripción push de este dispositivo en el servidor.
-async function pushSync() {
-  if (!pushSupported() || Notification.permission !== 'granted' || !ME || !DB.get('token') || lsGet('crix_push_off') === '1') return false;
+// Si algo falla, el motivo queda en _pushErr y se muestra en el panel de estado (antes solo iba a la consola).
+let _pushErr = '', _pushSyncAt = 0, _pushSyncing = null;
+function pushErrText(e) {
+  const n = (e && e.name) || '', m = (e && e.message) || String(e || '');
+  if (e && e.status === 503) return 'el servidor no tiene push configurado (revisá las claves VAPID y los logs de Render)';
+  if (e && e.status === 401) return 'sesión no válida: cerrá sesión y volvé a entrar';
+  if (n === 'NotAllowedError') return 'el permiso de notificaciones está bloqueado para este sitio';
+  if (n === 'AbortError' || /push service|registration failed/i.test(m)) return 'el navegador no pudo conectarse a su servicio push (' + m + '). En Brave activá "Usar Google Services para mensajería push" en brave://settings/privacy; en Chrome/Edge revisá VPN, firewall o bloqueadores que corten fcm.googleapis.com';
+  if (n === 'InvalidStateError') return 'el navegador rechazó la suscripción (' + m + '). Probá desinstalar y volver a instalar la app';
+  return (n ? n + ': ' : '') + m;
+}
+function pushSync() { return _pushSyncing || (_pushSyncing = pushSyncRun().finally(() => { _pushSyncing = null; })); }
+async function pushSyncRun() {
+  _pushSyncAt = Date.now();
+  if (!pushSupported()) { _pushErr = 'este navegador no admite push'; return false; }
+  if (Notification.permission !== 'granted') { _pushErr = 'falta el permiso de notificaciones'; return false; }
+  if (!ME || !DB.get('token')) return false;
+  if (lsGet('crix_push_off') === '1') { _pushErr = 'las notificaciones push están desactivadas en este dispositivo: tocá Activar'; return false; }
   try {
-    const reg = await swReady(); if (!reg) return false;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    let reg = await Promise.race([swReady(), wait(8000).then(() => null)]);
+    if (!reg) {
+      // El service worker no llegó a activarse: se registra de nuevo y se espera.
+      try { await navigator.serviceWorker.register('/service-worker.js'); reg = await Promise.race([navigator.serviceWorker.ready, wait(8000).then(() => null)]); } catch {}
+      if (reg) _swReg = reg;
+    }
+    if (!reg) throw new Error('el service worker no se pudo activar: recargá la app');
     const { key } = await apiRequest('/api/push/key');
     const appKey = b64ToU8(key);
     let sub = await reg.pushManager.getSubscription();
@@ -2904,11 +2927,26 @@ async function pushSync() {
       const cur = sub.options && sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
       if (cur && (cur.length !== appKey.length || cur.some((v, i) => v !== appKey[i]))) { await sub.unsubscribe(); sub = null; }
     }
-    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+    if (!sub) {
+      const subscribe = () => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+      try { sub = await subscribe(); }
+      catch (e1) {
+        if (e1 && e1.name === 'NotAllowedError') throw e1;
+        // Reintento: algunos navegadores fallan la primera vez o dejan una suscripción a medias.
+        await wait(1200);
+        try { const old = await reg.pushManager.getSubscription(); if (old) await old.unsubscribe(); } catch {}
+        sub = await subscribe();
+      }
+    }
     await apiRequest('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
-    _pushActive = true; _pushEndpoint = sub.endpoint; reportVisibility(); return true;
-  } catch (e) { console.warn('[PUSH]', e.message); _pushActive = false; return false; }
+    _pushActive = true; _pushEndpoint = sub.endpoint; _pushErr = ''; reportVisibility(); return true;
+  } catch (e) { _pushErr = pushErrText(e); console.warn('[PUSH]', e); _pushActive = false; return false; }
 }
+// Si el permiso ya está dado pero no hay suscripción, se reintenta solo al volver a la app (como máximo cada minuto).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || _pushActive || !ME || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (Date.now() - _pushSyncAt > 60000) pushSync().then(() => { try { notifStatusRender(); } catch {} });
+});
 // Se llama desde un botón (iOS exige un toque del usuario para pedir permiso).
 async function enableNotifications() {
   if (!('Notification' in window)) { showToast('Este navegador no admite notificaciones'); return false; }
@@ -2920,7 +2958,7 @@ async function enableNotifications() {
   if (perm === 'denied') { showToast('Las notificaciones están bloqueadas: activalas en los ajustes del sitio'); notifBannerHide(); return false; }
   if (!_notifPermission) return false;
   const ok = await pushSync();
-  showToast(ok ? '🔔 Listo: te avisamos de llamadas y mensajes aunque cierres Crix' : '🔔 Avisos activados mientras Crix esté abierto');
+  showToast(ok ? '🔔 Listo: te avisamos de llamadas y mensajes aunque cierres Crix' : '⚠️ Permiso concedido, pero no se pudo crear la suscripción push: ' + (_pushErr || 'error desconocido'), ok ? 3000 : 12000);
   playSfx('message'); notifBannerHide(); return true;
 }
 async function disableNotifications() {
@@ -2982,6 +3020,7 @@ async function notifStatusRender() {
   try { reg = await Promise.race([swReady(), new Promise(r => setTimeout(() => r(null), 2000))]); sub = reg && await reg.pushManager.getSubscription(); } catch {}
   rows.push(reg ? ok('Service worker activo') : no('Service worker sin registrar'));
   rows.push(sub ? ok('Suscripción de este dispositivo creada') : no('Sin suscripción push en este dispositivo'));
+  if (!sub && _pushErr) rows.push(no('Motivo: ' + _pushErr));
   try { const st = await apiRequest('/api/push/status'); rows.push(st.devices ? ok('Servidor: ' + st.devices + ' dispositivo(s) registrado(s)') : no('Servidor: ningún dispositivo registrado')); if (st.lastError) rows.push(no('Último error al enviar (' + st.lastError.host + '): ' + st.lastError.code + ' ' + st.lastError.body)); } catch { rows.push(no('No se pudo consultar al servidor')); }
   rows.push(soundOn() ? ok('Sonidos dentro de la app activados') : '• Sonidos dentro de la app silenciados');
   el.innerHTML = rows.map(r => '<div>' + esc(r) + '</div>').join('');

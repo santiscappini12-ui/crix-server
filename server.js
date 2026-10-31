@@ -925,7 +925,7 @@ app.post('/api/convs/:convId', (req, res) => {
       if (uid !== user.id) notifyPush(uid, {
         type:'message', from:user.id, fromName:user.username, convId,
         tag:'msg-' + convId, url:'/?n=message&u=' + encodeURIComponent(user.id)
-      }, { ttl:24 * 3600, topic:'msg' + String(user.id).slice(0,24) });
+      }, { ttl:24 * 3600, urgency:'high', topic:'msg' + String(user.id).slice(0,24) });
     });
     res.json({ ok:true });
   } catch(e) { res.json({ ok:false, err:e.message }); }
