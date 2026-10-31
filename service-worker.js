@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v8';
+const CACHE_NAME = 'crix-shell-v10';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-72.png'];
 const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-72.png';
@@ -62,7 +62,7 @@ function describe(d) {
         tag: 'missed-' + (d.from || ''), renotify: true, vibrate: [200, 100, 200]
       };
     case 'message':
-      return { title: name, body: '💬 Te envió un mensaje cifrado', tag: d.tag || 'msg', renotify: true, vibrate: [200, 100, 200] };
+      return { title: name, body: '💬 Te envió un mensaje cifrado', tag: d.tag || 'msg', renotify: true, vibrate: [300, 150, 300, 150, 300] };
     case 'friend_request':
       return { title: 'Solicitud de amistad', body: name + ' quiere ser tu amigo en Crix', tag: d.tag || 'friend', renotify: true, vibrate: [150, 80, 150] };
     case 'friend_accepted':
@@ -83,11 +83,19 @@ self.addEventListener('push', event => {
       open.forEach(n => n.close());
       if (!d.missed) return;
     }
-    await self.registration.showNotification(info.title, {
-      body: info.body, tag: info.tag, renotify: info.renotify, requireInteraction: !!info.requireInteraction,
-      vibrate: info.vibrate, actions: info.actions, icon: ICON, badge: BADGE, silent: false,
-      timestamp: Date.now(), data: { type: d.type, from: d.from, url: d.url || '/' }
-    });
+    const data = { type: d.type, from: d.from, url: d.url || '/' };
+    try {
+      await self.registration.showNotification(info.title, {
+        body: info.body, tag: info.tag, renotify: info.renotify, requireInteraction: !!info.requireInteraction,
+        vibrate: info.vibrate, actions: info.actions, icon: ICON, badge: BADGE, silent: false,
+        timestamp: Date.now(), data
+      });
+    } catch (err) {
+      // Algunos navegadores (iOS/Safari sobre todo) rechazan opciones que no soportan y entonces no se muestra
+      // nada. Se reintenta con lo mínimo para que el aviso aparezca siempre.
+      try { await self.registration.showNotification(info.title, { body: info.body, tag: info.tag, icon: ICON, data }); }
+      catch { await self.registration.showNotification(info.title, { body: info.body, data }); }
+    }
   })());
 });
 

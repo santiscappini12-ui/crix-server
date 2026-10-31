@@ -732,6 +732,7 @@ input,select,textarea{font-family:var(--font);}
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-p" style="padding:5px 10px;font-size:11px" onclick="enableNotifications().then(notifStatusRender)">Activar</button>
           <button class="btn" style="padding:5px 10px;font-size:11px;background:var(--bg3);color:var(--text)" onclick="testNotification()">Probar</button>
+          <button class="btn" style="padding:5px 10px;font-size:11px;background:var(--bg3);color:var(--text)" onclick="resetNotifications()">Reiniciar</button>
           <button class="btn" style="padding:5px 10px;font-size:11px;background:var(--bg3);color:var(--text)" onclick="toggleSound();notifStatusRender()">Sonido</button>
         </div>
       </div>
@@ -2961,6 +2962,17 @@ async function enableNotifications() {
   showToast(ok ? '🔔 Listo: te avisamos de llamadas y mensajes aunque cierres Crix' : '⚠️ Permiso concedido, pero no se pudo crear la suscripción push: ' + (_pushErr || 'error desconocido'), ok ? 3000 : 12000);
   playSfx('message'); notifBannerHide(); return true;
 }
+// Borra cualquier suscripción rota (en el dispositivo y en el servidor) y vuelve a crearla desde cero.
+async function resetNotifications() {
+  showToast('Reiniciando notificaciones…');
+  try {
+    const reg = await swReady(), sub = reg && await reg.pushManager.getSubscription();
+    if (sub) { await apiRequest('/api/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
+  } catch {}
+  _pushActive = false; _pushErr = '';
+  await enableNotifications();
+  notifStatusRender();
+}
 async function disableNotifications() {
   lsSet('crix_push_off', '1'); _pushActive = false;
   try {
@@ -3014,6 +3026,11 @@ async function notifStatusRender() {
   rows.push(location.protocol === 'https:' || location.hostname === 'localhost' ? ok('Conexión segura') : no('Falta HTTPS (sin HTTPS no hay push)'));
   if (isIOSDevice() && !isStandalone()) rows.push(no('En iPhone hay que instalarla: Compartir → Agregar a inicio'));
   else rows.push(isStandalone() ? ok('Abierta como app instalada') : '• Abierta en el navegador (instalarla ayuda en el celular)');
+  if (isIOSDevice()) {
+    const mv = /OS (\d+)[_.](\d+)/.exec(navigator.userAgent), maj = mv ? +mv[1] : 0, min = mv ? +mv[2] : 0;
+    if (mv) rows.push(maj > 16 || (maj === 16 && min >= 4) ? ok('iOS ' + maj + '.' + min) : no('iOS ' + maj + '.' + min + ': las notificaciones push de apps web necesitan iOS 16.4 o más nuevo'));
+  }
+  if (!('PushManager' in window)) rows.push(no('Este modo no tiene push (en iPhone solo existe abierta desde el ícono de inicio, con iOS 16.4+)'));
   if (!('Notification' in window)) rows.push(no('Este navegador no admite notificaciones'));
   else rows.push(Notification.permission === 'granted' ? ok('Permiso concedido') : Notification.permission === 'denied' ? no('Permiso bloqueado: activalo en los ajustes del sitio') : no('Permiso sin pedir: tocá Activar'));
   let reg = null, sub = null;
@@ -4046,17 +4063,33 @@ async function callGetMedia(type) {
     throw new Error('No se pudo acceder al micrófono' + (type === 'video' ? '/cámara' : '') + ': ' + ((err && err.message) || name));
   }
 }
+var _vibTimer = null;
 function callTone(kind) {
-  clearInterval(_toneTimer); _toneTimer = null; stopTitleAlert(); if (!kind) return;
+  clearInterval(_toneTimer); _toneTimer = null; clearInterval(_vibTimer); _vibTimer = null;
+  try { if (navigator.vibrate) navigator.vibrate(0); } catch {}
+  stopTitleAlert(); if (!kind) return;
   const c = sfxCtx(); if (!c) return;
   // El timbre de una llamada entrante suena siempre, aunque los demás sonidos estén silenciados.
   const pattern = () => {
     if (c.state !== 'running') { try { c.resume(); } catch {} }
-    if (kind === 'ring') { for (let k = 0; k < 2; k++) { sfxTone(c, 1046, k * .5, .38, .24); sfxTone(c, 784, k * .5, .38, .24); sfxTone(c, 523, k * .5, .38, .12, 'triangle'); } }
-    else sfxTone(c, 440, 0, .9, .07);
+    if (kind === 'ring') {
+      // Timbre de teléfono: dos ráfagas de trino (dos notas alternadas) y una pausa, fuerte y en bucle.
+      for (let b = 0; b < 2; b++) for (let i = 0; i < 8; i++) {
+        const t = b * 0.95 + i * 0.1, f = i % 2 ? 1175 : 880;
+        sfxTone(c, f, t, 0.1, 0.5, 'triangle'); sfxTone(c, f / 2, t, 0.1, 0.25, 'sine');
+      }
+    } else sfxTone(c, 440, 0, .9, .07);
   };
-  pattern(); _toneTimer = setInterval(pattern, kind === 'ring' ? 2400 : 3000);
+  pattern(); _toneTimer = setInterval(pattern, kind === 'ring' ? 3000 : 3000);
+  // Vibración en bucle mientras suena (Android; en iPhone la vibración depende del sistema).
+  if (kind === 'ring' && navigator.vibrate) {
+    const vib = () => { try { navigator.vibrate([700, 300, 700, 300, 700]); } catch {} };
+    vib(); _vibTimer = setInterval(vib, 3000);
+  }
 }
+// El primer toque en la app desbloquea el audio (iPhone/Chrome lo exigen), así el timbre ya suena
+// aunque la app se haya abierto desde la notificación.
+['pointerdown', 'touchstart', 'keydown'].forEach(ev => window.addEventListener(ev, () => { try { sfxCtx(); } catch {} }, { passive: true }));
 async function callStart(peerId, type) {
   if (!ME || !peerId || peerId === ME.id) return;
   const peer = (getUsers() || {})[peerId]; if (!peer) { showToast('Usuario no encontrado'); return; }

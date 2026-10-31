@@ -113,7 +113,7 @@ const calls = new Map();       // userId → { peer, caller, accepted, type, tim
 // Si cierran la PWA y el socket queda colgado hasta el ping timeout (iPhone/PC), el estado viejo no puede
 // seguir tapando el push: pasados VIS_FRESH_MS se considera que la app ya no está a la vista.
 const VIS_FRESH_MS = 25000;
-const RING_EVERY_MS = 5000, RING_MAX_REPEATS = 8;   // timbre repetido por push mientras la llamada suena
+const RING_EVERY_MS = 4000, RING_MAX_REPEATS = 10;   // timbre repetido por push mientras la llamada suena
 function visibleEndpoints(userId) {
   const set = new Set(), now = Date.now();
   for (const meta of Object.values(connSockets)) {
