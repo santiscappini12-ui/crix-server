@@ -18,6 +18,7 @@ const server = http.createServer(app);
 const io     = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
   pingTimeout: 45000, pingInterval: 15000,
+  maxHttpBufferSize: 8e6,
 });
 app.use(express.json({ limit: '50mb' }));
 
@@ -406,10 +407,101 @@ function canReadMap(map, user) {
   if (privacy === 'public') return true;
   if (!user) return false;
   if (map.authorId === user.id || user.isAdmin) return true;
+  if (Array.isArray(map.collaborators) && map.collaborators.includes(user.id)) return true;
   if (privacy === 'friends') return (user.friends || []).includes(map.authorId);
   if (privacy === 'assigned') return (map.assignedPlayers || []).includes(user.username);
   return false;
 }
+
+// ═══ MODO EQUIPO: colaboradores y co-edición en vivo ═══
+// map.collaborators = ids de cuentas que pueden editar el proyecto (lo administra solo el creador o un admin).
+// Mientras alguien edita en vivo (sesión de equipo), el servidor es la fuente de verdad: aplica cada cambio (parte, script,
+// iluminación…) sobre el mapa y lo reenvía al resto; un guardado completo (POST /api/maps) no pisa esos campos.
+const MAX_COLLABORATORS = 20;
+const TEAM_PROTECTED = ['parts', 'scripts', 'lighting', 'settings', 'guis'];
+const teamSessions = {};   // mapId → { members: Map(socketId → {userId,username,color,sel}), rev }
+function canEditMap(map, user) {
+  return !!(map && user && (map.authorId === user.id || user.isAdmin || (Array.isArray(map.collaborators) && map.collaborators.includes(user.id))));
+}
+function teamChannel(mapId) { return 'team:' + encodeURIComponent(mapId); }
+function teamInfo(map) {
+  return (map.collaborators || []).map(id => { const u = DB.users[id]; return u ? { id, username:u.username, color:u.color || '#5b8def' } : null; }).filter(Boolean);
+}
+function teamInSession(mapId, userId) {
+  const sess = teamSessions[mapId]; if (!sess) return false;
+  for (const m of sess.members.values()) if (m.userId === userId) return true;
+  return false;
+}
+let _lazySaveTimer = null;
+function scheduleSave(ms = 1500) { if (_lazySaveTimer) return; _lazySaveTimer = setTimeout(() => { _lazySaveTimer = null; saveDB(); }, ms); _lazySaveTimer.unref?.(); }
+function teamLeave(socket) {
+  const mapId = socket.data.teamMapId; if (!mapId) return;
+  socket.data.teamMapId = null;
+  const sess = teamSessions[mapId];
+  try { socket.leave(teamChannel(mapId)); } catch {}
+  if (!sess) return;
+  sess.members.delete(socket.id);
+  io.to(teamChannel(mapId)).emit('team_member', { action:'leave', socketId:socket.id });
+  if (!sess.members.size) { delete teamSessions[mapId]; saveDB(); io.emit('map_updated', { mapId }); }
+}
+function rateOk(socket, key, perSec) {
+  const rl = socket.data.rl || (socket.data.rl = {}), now = Date.now(), b = rl[key] || (rl[key] = { t:now, n:0 });
+  if (now - b.t >= 1000) { b.t = now; b.n = 0; }
+  return ++b.n <= perSec;
+}
+function jsonSize(v, max) { try { const t = JSON.stringify(v); return t !== undefined && t.length <= max ? t.length : -1; } catch { return -1; } }
+
+app.get('/api/maps/:id/team', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map || !canReadMap(map, req.user)) return res.status(404).json({ ok:false, err:'Proyecto no encontrado' });
+  const owner = DB.users[map.authorId];
+  res.json({ ok:true, owner: owner ? { id:owner.id, username:owner.username, color:owner.color || '#5b8def' } : { id:map.authorId, username:map.authorName || 'Creador' },
+    team: teamInfo(map), canManage: map.authorId === req.user.id || !!req.user.isAdmin, canEdit: canEditMap(map, req.user) });
+});
+app.post('/api/maps/:id/team', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map) return res.status(404).json({ ok:false, err:'Proyecto no encontrado' });
+  if (map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'Solo el creador puede administrar el equipo' });
+  map.collaborators = Array.isArray(map.collaborators) ? map.collaborators : [];
+  const add = typeof req.body?.add === 'string' ? req.body.add.trim().toLowerCase().slice(0, 40) : '';
+  const remove = typeof req.body?.remove === 'string' ? req.body.remove.slice(0, 80) : '';
+  if (add) {
+    const target = Object.values(DB.users).find(u => String(u.username || '').toLowerCase() === add);
+    if (!target) return res.status(404).json({ ok:false, err:'No existe una cuenta con ese nombre' });
+    if (target.banned) return res.status(400).json({ ok:false, err:'Esa cuenta está suspendida' });
+    if (target.id === map.authorId) return res.status(400).json({ ok:false, err:'Esa cuenta ya es la creadora' });
+    if (map.collaborators.includes(target.id)) return res.status(400).json({ ok:false, err:'Ya está en el equipo' });
+    if (map.collaborators.length >= MAX_COLLABORATORS) return res.status(400).json({ ok:false, err:'El equipo está completo (' + MAX_COLLABORATORS + ')' });
+    map.collaborators.push(target.id);
+    const t = onlineUsers[target.id];
+    if (t) io.to(t.socketId).emit('team_invite', { mapId:map.id, mapName:map.name || 'Proyecto', from:req.user.username });
+  } else if (remove) {
+    map.collaborators = map.collaborators.filter(id => id !== remove);
+    const sess = teamSessions[map.id];
+    if (sess) for (const [sid, m] of sess.members) if (m.userId === remove) {
+      io.to(sid).emit('team_kicked', { mapId:map.id });
+      const sock = io.sockets.sockets.get(sid); if (sock) teamLeave(sock);
+    }
+  } else return res.status(400).json({ ok:false, err:'Falta el usuario' });
+  saveDB();
+  io.emit('map_updated', { mapId:map.id });
+  res.json({ ok:true, team: teamInfo(map) });
+});
+// Estado completo para entrar a editar en vivo (incluye la revisión de la sesión para ordenar los cambios que lleguen después).
+app.get('/api/maps/:id/edit-state', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map || !canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este proyecto' });
+  res.json({ ok:true, rev: teamSessions[map.id]?.rev || 0, map });
+});
+
+// ═══ API del servidor para apps y juegos HTML (se usa desde el SDK window.Crix) ═══
+const APP_KEY_RE = /^[\w.:-]{1,40}$/;
+function appCtx(socket) {
+  const meta = connSockets[socket.id]; if (!meta?.mapId) return null;
+  const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room || !room.players[socket.id]) return null;
+  return { meta, room, map: DB.maps[meta.mapId] };
+}
+const publicPlayer = p => ({ id:p.userId, socketId:p.socketId, username:p.username, color:p.color, joinedAt:p.joinedAt });
 // ── Almacenamiento de videos: archivos en disco (no base64 dentro del JSON de la base) ──
 const VIDEO_DIR = persist.VIDEO_DIR;
 const VIDEO_EXT = { 'video/mp4':'mp4', 'video/webm':'webm', 'video/ogg':'ogv' };
@@ -957,7 +1049,7 @@ function texFile(mapId, tid) { try { const f = fs.readdirSync(texDir(mapId)).fin
 app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
   const map = DB.maps[req.params.id];
   if (!map || !MAP_ID_RE.test(req.params.id)) return res.status(404).json({ ok:false, err:'Guardá el juego antes de subir texturas' });
-  if (map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
+  if (!canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
   const incoming = req.body && req.body.textures;
   if (!incoming || typeof incoming !== 'object') return res.status(400).json({ ok:false, err:'Faltan texturas' });
   const entries = Object.entries(incoming).slice(0, 8), ids = new Set(map.textureIds || []), staged = [];
@@ -998,9 +1090,15 @@ app.post('/api/maps', (req, res) => {
     const m = req.body;
     if (!m || !m.id) return res.json({ ok:false });
     const old = DB.maps[m.id];
-    if (old && old.authorId !== user.id && !user.isAdmin)
+    if (old && !canEditMap(old, user))
       return res.status(403).json({ ok:false, err:'No podés editar este juego' });
-    DB.maps[m.id] = { ...m, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [] };
+    const isOwner = !old || old.authorId === user.id || !!user.isAdmin;
+    // Quien colabora no cambia la visibilidad ni el equipo; el equipo siempre lo decide el servidor.
+    const body = isOwner ? m : { ...m, privacy:old.privacy, assignedPlayers:old.assignedPlayers };
+    const next = { ...body, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], collaborators: old?.collaborators || [] };
+    // En una sesión de equipo activa, las partes/scripts/luces ya llegan por cambios en vivo: un guardado completo no las pisa.
+    if (old && teamInSession(m.id, user.id)) for (const k of TEAM_PROTECTED) if (old[k] !== undefined) next[k] = old[k];
+    DB.maps[m.id] = next;
     delete DB.maps[m.id].textures;
     saveDB();
     io.emit('map_updated', { mapId: m.id });
@@ -1018,6 +1116,8 @@ app.delete('/api/maps/:id', (req, res) => {
   if (existing.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
   delete DB.maps[req.params.id];
+  if (DB.appData) delete DB.appData[req.params.id];
+  if (DB.appScores) delete DB.appScores[req.params.id];
   if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${req.params.id}/`); }
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
@@ -1558,6 +1658,161 @@ io.on('connection', socket => {
 
   // El chat privado solo se almacena y notifica mediante la API E2EE.
   // No se reenvían eventos `msg` antiguos que pudieran contener texto plano.
+  // ── Modo equipo: co-edición en vivo ──
+  socket.on('team_join', ({ mapId } = {}, cb) => {
+    const ack = ackFn(cb), user = socket.data.user; mapId = String(mapId || '').slice(0, 120);
+    const map = DB.maps[mapId];
+    if (!user || !map || !canEditMap(map, user)) return ack({ ok:false, err:'No tenés permiso para editar este proyecto' });
+    teamLeave(socket);
+    const sess = teamSessions[mapId] || (teamSessions[mapId] = { members:new Map(), rev:0 });
+    const me = { userId:user.id, username:user.username, color:user.color || '#5b8def', sel:null };
+    sess.members.set(socket.id, me); socket.data.teamMapId = mapId;
+    socket.join(teamChannel(mapId));
+    socket.to(teamChannel(mapId)).emit('team_member', { action:'join', socketId:socket.id, ...me });
+    ack({ ok:true, rev:sess.rev, members:[...sess.members].map(([socketId, m]) => ({ socketId, ...m })) });
+  });
+  socket.on('team_leave', () => teamLeave(socket));
+  socket.on('team_ops', ({ ops } = {}, cb) => {
+    const ack = ackFn(cb), user = socket.data.user, mapId = socket.data.teamMapId;
+    const sess = mapId && teamSessions[mapId], map = mapId && DB.maps[mapId];
+    if (!sess || !sess.members.has(socket.id) || !map || !canEditMap(map, user)) return ack({ ok:false, err:'No estás en una sesión de equipo' });
+    if (!rateOk(socket, 'team', 30) || !Array.isArray(ops) || !ops.length || ops.length > 300) return ack({ ok:false });
+    const applied = []; let budget = 4e6;
+    for (const op of ops) {
+      if (!op || typeof op !== 'object') continue;
+      if (op.t === 'p' || op.t === 's') {
+        const d = op.d, size = jsonSize(d, op.t === 'p' ? 1.5e6 : 5e5);
+        if (!d || typeof d !== 'object' || Array.isArray(d) || d.id === undefined || String(d.id).length > 120 || size < 0 || (budget -= size) < 0) continue;
+        const key = op.t === 'p' ? 'parts' : 'scripts', list = Array.isArray(map[key]) ? map[key] : (map[key] = []);
+        const i = list.findIndex(x => x && String(x.id) === String(d.id));
+        if (i >= 0) list[i] = d; else if (list.length < 20000) list.push(d); else continue;
+        applied.push({ t:op.t, d });
+      } else if (op.t === 'pd' || op.t === 'sd') {
+        const id = String(op.id ?? '').slice(0, 120), key = op.t === 'pd' ? 'parts' : 'scripts';
+        if (!id || !Array.isArray(map[key])) continue;
+        map[key] = map[key].filter(x => !x || String(x.id) !== id);
+        applied.push({ t:op.t, id });
+      } else if (op.t === 'l') {
+        if (!op.d || typeof op.d !== 'object' || Array.isArray(op.d) || jsonSize(op.d, 4096) < 0) continue;
+        map.lighting = op.d; applied.push({ t:'l', d:op.d });
+      } else if (op.t === 'n') {
+        const name = String(op.d ?? '').trim().slice(0, 80) || 'Proyecto sin nombre';
+        map.name = name; applied.push({ t:'n', d:name });
+      } else if (op.t === 'x') {
+        if (op.k !== 'settings' && op.k !== 'guis') continue;
+        const okType = op.k === 'guis' ? Array.isArray(op.d) : (op.d && typeof op.d === 'object' && !Array.isArray(op.d));
+        const size = jsonSize(op.d, 1e6);
+        if (!okType || size < 0 || (budget -= size) < 0) continue;
+        map[op.k] = op.d;
+        if (op.k === 'settings') { const n = Number(op.d.maxPlayers); if (Number.isFinite(n)) map.maxPlayers = Math.max(1, Math.min(200, Math.floor(n))); }
+        applied.push({ t:'x', k:op.k, d:op.d });
+      }
+    }
+    if (!applied.length) return ack({ ok:true, rev:sess.rev });
+    sess.rev++; map.updated = new Date().toISOString(); scheduleSave();
+    socket.to(teamChannel(mapId)).emit('team_ops', { from:socket.id, userId:user.id, rev:sess.rev, ops:applied });
+    ack({ ok:true, rev:sess.rev });
+  });
+  socket.on('team_sel', ({ id } = {}) => {
+    const mapId = socket.data.teamMapId, sess = mapId && teamSessions[mapId], me = sess?.members.get(socket.id);
+    if (!me || !rateOk(socket, 'teamsel', 20)) return;
+    me.sel = id == null ? null : String(id).slice(0, 120);
+    socket.to(teamChannel(mapId)).emit('team_sel', { socketId:socket.id, id:me.sel });
+  });
+  socket.on('team_chat', ({ text } = {}) => {
+    const mapId = socket.data.teamMapId, sess = mapId && teamSessions[mapId], me = sess?.members.get(socket.id);
+    text = String(text || '').trim().slice(0, 300);
+    if (!me || !text || !rateOk(socket, 'teamchat', 5)) return;
+    io.to(teamChannel(mapId)).emit('team_chat', { socketId:socket.id, username:me.username, color:me.color, text, at:Date.now() });
+  });
+
+  // ── API para apps y juegos HTML (SDK window.Crix) ──
+  socket.on('app_hello', (_, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket);
+    if (!ctx) return ack({ ok:false, reason:'not_joined' });
+    ack({ ok:true, socketId:socket.id, mapId:ctx.meta.mapId, instanceId:ctx.meta.instanceId, maxPlayers:maxPlayersFor(ctx.map),
+      players:roomPlayers(ctx.room).map(publicPlayer), state:ctx.room.appState || {} });
+  });
+  socket.on('app_send', ({ type, data, to } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
+    if (typeof type !== 'string' || !APP_KEY_RE.test(type)) return ack({ ok:false, err:'Tipo de mensaje inválido' });
+    if (data !== undefined && jsonSize(data, 8192) < 0) return ack({ ok:false, err:'Mensaje demasiado grande (máx. 8 KB)' });
+    if (!rateOk(socket, 'appsend', 90)) return ack({ ok:false, err:'Demasiados mensajes por segundo' });
+    const p = ctx.room.players[socket.id], msg = { from:publicPlayer(p), type, data: data === undefined ? null : data };
+    if (typeof to === 'string' && to) {
+      const target = roomPlayers(ctx.room).find(q => q.socketId === to || q.userId === to);
+      if (!target) return ack({ ok:false, err:'Esa persona no está en la sala' });
+      io.to(target.socketId).emit('app_msg', msg);
+    } else socket.to(gameChannel(ctx.meta.mapId, ctx.meta.instanceId)).emit('app_msg', msg);
+    ack({ ok:true });
+  });
+  socket.on('app_state_set', ({ key, value } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
+    if (typeof key !== 'string' || !APP_KEY_RE.test(key)) return ack({ ok:false, err:'Clave inválida' });
+    if (!rateOk(socket, 'appstate', 40)) return ack({ ok:false, err:'Demasiados cambios por segundo' });
+    const st = ctx.room.appState || (ctx.room.appState = {});
+    if (value === null || value === undefined) delete st[key];
+    else {
+      if (jsonSize(value, 16384) < 0) return ack({ ok:false, err:'Valor demasiado grande (máx. 16 KB)' });
+      if (!(key in st) && Object.keys(st).length >= 64) return ack({ ok:false, err:'Hay demasiadas claves (máx. 64)' });
+      st[key] = value;
+      if (jsonSize(st, 131072) < 0) { delete st[key]; return ack({ ok:false, err:'El estado de la sala está lleno (máx. 128 KB)' }); }
+    }
+    io.to(gameChannel(ctx.meta.mapId, ctx.meta.instanceId)).emit('app_state', { key, value: value === undefined ? null : value, by:socket.data.user?.id || socket.id });
+    ack({ ok:true });
+  });
+  // Guardado por persona y por app (queda en el servidor, no en el navegador).
+  socket.on('app_data_get', (_, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para usar el guardado' });
+    ack({ ok:true, data: DB.appData?.[ctx.meta.mapId]?.[user.id]?.data ?? null });
+  });
+  socket.on('app_data_set', ({ data } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para usar el guardado' });
+    if (!rateOk(socket, 'appdata', 4)) return ack({ ok:false, err:'Guardando demasiado seguido' });
+    DB.appData = DB.appData || {};
+    const bucket = DB.appData[ctx.meta.mapId] || (DB.appData[ctx.meta.mapId] = {});
+    if (data === null || data === undefined) delete bucket[user.id];
+    else {
+      if (jsonSize(data, 65536) < 0) return ack({ ok:false, err:'El guardado supera los 64 KB' });
+      if (!bucket[user.id] && Object.keys(bucket).length >= 5000) return ack({ ok:false, err:'Esta app llegó al límite de guardados' });
+      bucket[user.id] = { data, updated:Date.now() };
+    }
+    scheduleSave(); ack({ ok:true });
+  });
+  // Rankings: mejor puntaje por persona. mode 'max' (más alto gana, por defecto) o 'min' (más bajo gana, p. ej. tiempos).
+  socket.on('app_score_submit', ({ board, score, mode } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para guardar puntajes' });
+    if (typeof board !== 'string' || !APP_KEY_RE.test(board) || !Number.isFinite(Number(score))) return ack({ ok:false, err:'Puntaje inválido' });
+    if (!rateOk(socket, 'appscore', 4)) return ack({ ok:false, err:'Demasiados envíos' });
+    const value = Math.max(-1e12, Math.min(1e12, Number(score)));
+    DB.appScores = DB.appScores || {};
+    const boards = DB.appScores[ctx.meta.mapId] || (DB.appScores[ctx.meta.mapId] = {});
+    if (!boards[board] && Object.keys(boards).length >= 20) return ack({ ok:false, err:'Hay demasiados rankings en esta app (máx. 20)' });
+    const b = boards[board] || (boards[board] = { mode: mode === 'min' ? 'min' : 'max', entries:{} });
+    const cur = b.entries[user.id];
+    if (!cur && Object.keys(b.entries).length >= 5000) return ack({ ok:false, err:'El ranking está lleno' });
+    const better = !cur || (b.mode === 'min' ? value < cur.score : value > cur.score);
+    if (better) b.entries[user.id] = { score:value, username:user.username, at:Date.now() };
+    else if (cur.username !== user.username) cur.username = user.username;
+    scheduleSave(); ack({ ok:true, improved:better, best:b.entries[user.id].score });
+  });
+  socket.on('app_score_top', ({ board, n } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
+    if (typeof board !== 'string' || !APP_KEY_RE.test(board)) return ack({ ok:false, err:'Ranking inválido' });
+    if (!rateOk(socket, 'appscoretop', 6)) return ack({ ok:false, err:'Demasiadas consultas' });
+    const b = DB.appScores?.[ctx.meta.mapId]?.[board];
+    if (!b) return ack({ ok:true, mode:'max', top:[], me:null });
+    const sorted = Object.entries(b.entries).map(([id, e]) => ({ id, username:e.username, score:e.score }))
+      .sort((x, y) => b.mode === 'min' ? x.score - y.score : y.score - x.score);
+    const top = sorted.slice(0, Math.max(1, Math.min(50, Number(n) || 10))).map((e, i) => ({ ...e, rank:i + 1 }));
+    const mi = user ? sorted.findIndex(e => e.id === user.id) : -1;
+    ack({ ok:true, mode:b.mode, top, me: mi >= 0 ? { rank:mi + 1, score:sorted[mi].score } : null });
+  });
+
   socket.on('user_online', ({ userId, username, color }) => {
     const user = socket.data.user;
     if (!user || user.id !== userId) return;
@@ -1694,6 +1949,7 @@ io.on('connection', socket => {
   });
 
   socket.on('disconnect', () => {
+    teamLeave(socket);
     const meta = connSockets[socket.id];
     if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
     if (meta?.userId) {
@@ -1752,7 +2008,7 @@ function leaveRoom(socket, mapId, instanceId) {
   if(Object.keys(room.players).length){sendRoomPlayersToRunner(room);}
   else{
     if(scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'stop',roomId:roomKey(mapId,instanceId)});
-    room.scriptStarted=false;room.scriptStatus='stopped';room.pendingReset=true;
+    room.scriptStarted=false;room.scriptStatus='stopped';room.pendingReset=true;room.appState=null;
   }
   socket.leave(channel);
   const meta = connSockets[socket.id];
