@@ -21,6 +21,8 @@ const MAX_COMMANDS_PER_SECOND = 100;
 const MAX_TICK_BUDGET_MS = 35;
 const MAX_SCRIPT_CALL_MS = 25;
 const TICK_MS = 50;
+const PLAYER_HALF_W = 0.5;
+const PLAYER_HEIGHT = 3.05;
 
 function send(message) {
   if (process.connected) process.send(message);
@@ -83,6 +85,10 @@ function normalizePlayers(players) {
     x:finite(player.x), y:finite(player.y), z:finite(player.z), ry:finite(player.ry,-0,-1000,1000),
     position:{x:finite(player.x),y:finite(player.y),z:finite(player.z)}, rotationY:finite(player.ry),
     moving:!!player.moving, onGround:!!player.onGround,
+    // Velocidad estimada (studs/s) y caja del jugador (el origen x,y,z está en los pies; mide 1 × 3.05 × 1).
+    velocity:{x:finite(player.vx,0,-1e4,1e4),y:finite(player.vy,0,-1e4,1e4),z:finite(player.vz,0,-1e4,1e4)},
+    height:PLAYER_HEIGHT, size:{x:2*PLAYER_HALF_W,y:PLAYER_HEIGHT,z:2*PLAYER_HALF_W},
+    bounds:{min:{x:finite(player.x)-PLAYER_HALF_W,y:finite(player.y),z:finite(player.z)-PLAYER_HALF_W},max:{x:finite(player.x)+PLAYER_HALF_W,y:finite(player.y)+PLAYER_HEIGHT,z:finite(player.z)+PLAYER_HALF_W}},
   }));
 }
 
@@ -100,13 +106,15 @@ function emitSceneCommand(room, command, payload) {
   if (room.commandTimes.length >= MAX_COMMANDS_PER_SECOND) throw new Error('Límite de cambios del mundo alcanzado');
   room.commandTimes.push(now);
   const safePayload = cloneJson(payload, {});
+  const seq = ++room.cmdSeq;
   if (command === 'createPart') {
     if (room.parts.size >= MAX_PARTS) throw new Error('La instancia alcanzó el máximo de piezas');
     const roomSuffix=room.instanceId.replace(/[^a-z0-9]/ig,'').slice(-12)||'room';
     const id = `server-${roomSuffix}-${++room.nextPartId}`;
     const data = normalizePart(id, safePayload.data || {});
     room.parts.set(id, data);
-    send({ type:'sceneCommand', roomId:room.id, command, payload:{ id, data } });
+    room.partSeq.set(id, seq);
+    send({ type:'sceneCommand', roomId:room.id, command, seq, payload:{ id, data } });
     return id;
   }
   const id = String(safePayload.id || '').slice(0,120);
@@ -122,12 +130,14 @@ function emitSceneCommand(room, command, payload) {
       for (const axis of ['x','y','z']) if (patch.size[axis] !== undefined || patch.size[axis.toUpperCase()] !== undefined) merged['s'+axis] = patch.size[axis] ?? patch.size[axis.toUpperCase()];
     }
     room.parts.set(id, normalizePart(id, merged));
-    send({ type:'sceneCommand', roomId:room.id, command, payload:{ id, patch:cloneJson(patch,{}) } });
+    room.partSeq.set(id, seq);
+    send({ type:'sceneCommand', roomId:room.id, command, seq, payload:{ id, patch:cloneJson(patch,{}) } });
     return true;
   }
   if (command === 'destroyPart') {
     room.parts.delete(id);
-    send({ type:'sceneCommand', roomId:room.id, command, payload:{ id } });
+    room.partSeq.delete(id);
+    send({ type:'sceneCommand', roomId:room.id, command, seq, payload:{ id } });
     return true;
   }
   throw new Error('Operación de mundo desconocida');
@@ -142,6 +152,16 @@ function bootstrapSource(modules) {
     const __getPlayers = __crixGetPlayers;
     const __getParts = __crixGetParts;
     const __log = __crixLog;
+    const __getPart = __crixGetPart;
+    const __watch = __crixWatch;
+    const __handlers = { touched:new Map(), touchEnded:new Map(), impact:new Map() };
+    function __on(kind, key, fn, minSpeed) {
+      if (typeof fn !== 'function') throw new TypeError('El evento necesita una función');
+      const name = String(key);
+      if (!__handlers[kind].has(name)) __handlers[kind].set(name, []);
+      __handlers[kind].get(name).push({ fn, minSpeed: Math.max(0, Number(minSpeed) || 0) });
+      __watch(name);
+    }
     const __moduleSources = ${JSON.stringify(modules)};
     const __moduleCache = new Map();
     const math = Math;
@@ -150,13 +170,21 @@ function bootstrapSource(modules) {
       updatePart: (id, patch) => __emit('updatePart', { id, patch: patch || {} }),
       destroyPart: id => __emit('destroyPart', { id }),
       getPlayer: () => __getPlayers()[0] || null,
-      getPlayers: () => __getPlayers()
+      getPlayers: () => __getPlayers(),
+      getPart: key => __getPart(String(key)),
+      onTouched: (name, fn) => __on('touched', name, fn, 0),
+      onTouchEnded: (name, fn) => __on('touchEnded', name, fn, 0),
+      onImpact: (name, fn, minSpeed) => __on('impact', name, fn, minSpeed === undefined ? 2 : minSpeed)
     };
     game.CreatePart = game.createPart;
     game.UpdatePart = game.updatePart;
     game.DestroyPart = game.destroyPart;
     game.GetPlayer = game.getPlayer;
     game.GetPlayers = game.getPlayers;
+    game.GetPart = game.getPart;
+    game.OnTouched = game.onTouched;
+    game.OnTouchEnded = game.onTouchEnded;
+    game.OnImpact = game.onImpact;
     Object.freeze(game);
     const workspace = Object.freeze({
       getChildren: () => __getParts(),
@@ -189,6 +217,26 @@ function bootstrapSource(modules) {
         if (waiter.left<=0) { __waiters.splice(index,1); try { waiter.callback(); } catch (err) { error(err && err.message || err); } }
       }
     }
+    function __runHandlers(kind, key, info, player) {
+      const list = __handlers[kind].get(key); if (!list) return;
+      for (const handler of list.slice()) {
+        if (kind === 'impact' && info.speed < handler.minSpeed) continue;
+        try { if (kind === 'impact') handler.fn(info); else handler.fn(player, info); }
+        catch (err) { error('Evento ' + kind + ' (' + key + '): ' + (err && err.message || err)); }
+      }
+    }
+    function __crixDispatch(events) {
+      for (const ev of events) {
+        const kind = ev.phase === 'end' ? 'touchEnded' : 'touched';
+        const player = ev.other && ev.other.kind === 'player' ? (__getPlayers().find(item => item.userId === ev.other.userId) || ev.other) : null;
+        const info = { phase: ev.phase, part: ev.part, other: ev.other, player, speed: ev.speed || 0, normal: ev.normal, velocity: ev.velocity };
+        const keys = ev.part.id === ev.part.name ? [ev.part.id] : [ev.part.id, ev.part.name];
+        for (const key of keys) {
+          __runHandlers(kind, key, info, player);
+          if (ev.phase === 'begin') __runHandlers('impact', key, info, player);
+        }
+      }
+    }
     function __crixInvoke(eventName, dt, index) {
       const script=__crixScripts[index]; if (!script || script.disabled) return;
       try {
@@ -199,7 +247,7 @@ function bootstrapSource(modules) {
         }
       } catch (err) { script.disabled=true; error(script.name+': '+(err && err.stack || err)); }
     }
-    delete globalThis.__crixEmit; delete globalThis.__crixGetPlayers; delete globalThis.__crixGetParts; delete globalThis.__crixLog;
+    delete globalThis.__crixEmit; delete globalThis.__crixGetPlayers; delete globalThis.__crixGetParts; delete globalThis.__crixLog; delete globalThis.__crixGetPart; delete globalThis.__crixWatch;
   `;
 }
 
@@ -219,6 +267,7 @@ function createRoom(message) {
     id:String(message.roomId), mapId:String(message.mapId), instanceId:String(message.instanceId),
     isolate, context, players:normalizePlayers(message.players), parts:new Map(), scripts,
     disabledScripts:new Set(), commandTimes:[], logs:[], nextPartId:0, busy:false, timer:null,
+    cmdSeq:0, partSeq:new Map(), watchKeys:new Set(),
   };
   for (const part of (Array.isArray(message.parts) ? message.parts : []).slice(0,MAX_PARTS)) {
     if (!part || part.type === 'Spawn' || part.isNPC) continue;
@@ -229,6 +278,8 @@ function createRoom(message) {
   jail.setSync('__crixEmit',new ivm.Callback((command,payload)=>emitSceneCommand(room,String(command),payload),{sync:true}));
   jail.setSync('__crixGetPlayers',new ivm.Callback(()=>room.players,{sync:true}));
   jail.setSync('__crixGetParts',new ivm.Callback(()=>Array.from(room.parts.values()),{sync:true}));
+  jail.setSync('__crixGetPart',new ivm.Callback(key=>{const name=String(key);return room.parts.get(name)||Array.from(room.parts.values()).find(part=>part.name===name)||null;},{sync:true}));
+  jail.setSync('__crixWatch',new ivm.Callback(key=>{const name=String(key).slice(0,120);if(room.watchKeys.size>=200||room.watchKeys.has(name))return;room.watchKeys.add(name);send({type:'watch',roomId:room.id,key:name});},{sync:true}));
   jail.setSync('__crixLog',new ivm.Callback((cls,text)=>output(room,room.currentScriptName || 'Servidor',text,cls),{sync:true}));
   context.evalSync(bootstrapSource(modules),{timeout:1000});
   const enabled = [];
@@ -291,6 +342,14 @@ function invokeWithTimeout(room,eventName,index,dt,timeout) {
   } finally { room.currentScriptName=''; }
 }
 
+function dispatchContacts(room,events) {
+  if (room.isolate.isDisposed || !Array.isArray(events) || !events.length) return;
+  room.currentScriptName='Servidor';
+  try { room.context.evalSync('globalThis.__crixDispatch('+JSON.stringify(events.slice(0,60))+');',{timeout:MAX_SCRIPT_CALL_MS}); }
+  catch (error) { output(room,'Servidor','Error en eventos de contacto: '+error.message,'err'); }
+  finally { room.currentScriptName=''; }
+}
+
 function stopRoom(roomId) {
   const room=rooms.get(String(roomId)); if (!room) return;
   if (room.timer) clearInterval(room.timer);
@@ -309,10 +368,17 @@ if (ivm) {
         const room=rooms.get(String(message.roomId)); if (room) room.players=normalizePlayers(message.players);
       } else if (message.type==='worldPart') {
         const room=rooms.get(String(message.roomId));
-        if (room && message.part?.id) room.parts.set(String(message.part.id),normalizePart(message.part.id,message.part));
-      } else if (message.type==='worldPosition') {
-        const room=rooms.get(String(message.roomId)),part=room?.parts.get(String(message.part?.id||''));
-        if(part){part.x=finite(message.part.x,part.x);part.y=finite(message.part.y,part.y);part.z=finite(message.part.z,part.z);}
+        // Si el script ya cambió esta pieza después de lo que el servidor alcanzó a aplicar, el mensaje llega viejo: se ignora.
+        if (room && message.part?.id && (Number(message.appliedSeq)||0) >= (room.partSeq.get(String(message.part.id))||0)) room.parts.set(String(message.part.id),normalizePart(message.part.id,message.part));
+      } else if (message.type==='worldPositions') {
+        const room=rooms.get(String(message.roomId)),applied=Number(message.appliedSeq)||0;
+        if (room) for (const update of Array.isArray(message.parts)?message.parts:[]) {
+          const part=room.parts.get(String(update?.id||''));
+          if (!part || applied < (room.partSeq.get(part.id)||0)) continue;
+          part.x=finite(update.x,part.x);part.y=finite(update.y,part.y);part.z=finite(update.z,part.z);
+        }
+      } else if (message.type==='contacts') {
+        const room=rooms.get(String(message.roomId)); if (room) dispatchContacts(room,message.events);
       } else if (message.type==='worldRemove') {
         const room=rooms.get(String(message.roomId)); if (room) room.parts.delete(String(message.id || ''));
       } else if (message.type==='stop') stopRoom(message.roomId);

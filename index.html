@@ -2231,12 +2231,12 @@ function applyNetworkPartUpsert(part) {
   if(!gScene||!part||part.type==='Spawn'||part.isNPC)return;
   const id=String(part.id||'');if(!id)return;
   const existing=runtimeObjects.get(id);
-  if(!existing){_createGameScriptPart(id,part);return;}
+  if(!existing){if(part.sx===undefined)return;_createGameScriptPart(id,part);return;}
   const visualChanged=['type','sx','sy','sz','color','material','transparent','rx','ry','rz'].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
   if(visualChanged){_updateGameScriptPart(id,part);return;}
   existing.data=normalizeGamePart(id,{...existing.data,...part});
   existing.mesh.position.set(existing.data.x,existing.data.y,existing.data.z);
-  existing.mesh.rotation.set(THREE.MathUtils.degToRad(existing.data.rx),THREE.MathUtils.degToRad(existing.data.ry),THREE.MathUtils.degToRad(existing.data.rz));
+  existing.mesh.rotation.set(existing.data.rx||0,existing.data.ry||0,existing.data.rz||0);
   if(existing.data.anchored)existing.velocity.set(0,0,0);
   _syncRuntimeCollider(existing);
 }
@@ -4380,7 +4380,7 @@ function codeKeydown(e) {
 }
 // ── Autocompletado ──
 const CODE_COMPLETIONS = {
-  'game.': [['createPart','({ name, type, position:{x,y,z}, size:{x,y,z}, color, anchored })','Crea una pieza'],['updatePart','(id, { x, y, z, color, transparent… })','Modifica una pieza'],['destroyPart','(id)','Elimina una pieza'],['getPlayer','()','Datos del jugador'],['findPart','(nombre)','Busca una pieza por nombre'],['on','(evento, fn)','Eventos: died, won, coin'],['onTouched','(nombrePieza, fn)','Cuando el jugador toca la pieza'],['onKey','(tecla, fn)','Al apretar una tecla'],['player','','Control del jugador'],['gui','','Interfaces']],
+  'game.': [['createPart','({ name, type, position:{x,y,z}, size:{x,y,z}, color, anchored })','Crea una pieza'],['updatePart','(id, { x, y, z, color, transparent… })','Modifica una pieza'],['destroyPart','(id)','Elimina una pieza'],['getPlayer','()','Datos del jugador'],['findPart','(nombre)','Busca una pieza por nombre'],['on','(evento, fn)','Eventos: died, won, coin'],['onTouched','(nombrePieza, fn)','Cuando el jugador toca la pieza'],['onTouchEnded','(nombrePieza, fn)','Cuando deja de tocarla (Script de servidor)'],['onImpact','(nombrePieza, fn(info), velocidadMin)','Golpe contra la pieza con su velocidad (Script de servidor)'],['getPart','(idONombre)','Estado actual de una pieza (Script de servidor)'],['onKey','(tecla, fn)','Al apretar una tecla'],['player','','Control del jugador'],['gui','','Interfaces']],
   'gui.': [['get','(nombre)','Elemento: .text .visible .value .onClick(fn)'],['show','(nombre)','Muestra pantalla o elemento'],['hide','(nombre)','Oculta pantalla o elemento'],['toast','(texto, segundos)','Aviso en pantalla']],
   'localPlayer.': [['setSpeed','(porcentaje)','100 = normal'],['setJump','(porcentaje)','100 = normal'],['teleport','(x, y, z)',''],['damage','(n)',''],['heal','(n)',''],['setHealth','(n)',''],['kill','()',''],['respawn','()',''],['addCoins','(n)',''],['setCoins','(n)',''],['setCheckpoint','(x, y, z)',''],['say','(texto)','Aviso en pantalla'],['health','','Vida actual'],['maxHealth','',''],['coins','',''],['deaths','',''],['position','','{x,y,z}']],
   'workspace.': [['findFirstChild','(nombre)',''],['getChildren','()','Todas las piezas'],['createPart','(props)',''],['updatePart','(id, patch)',''],['destroyPart','(id)','']],
@@ -4435,6 +4435,7 @@ const CODE_DOCS_HTML = '<h4>Tipos de script</h4><p><b>LocalScript</b>: corre en 
 '<h4>Piezas</h4><pre>const id = game.createPart({\n  name: "Caja", type: "Block",\n  position: {x:0,y:5,z:0}, size: {x:2,y:2,z:2},\n  color: "#ff4d6d", anchored: false\n});\ngame.updatePart(id, { y: 10, transparent: 0.5 });\ngame.destroyPart(id);\ngame.findPart("Puerta");  // {id, position, size…}\nworkspace.getChildren();</pre><p>Las piezas están <b>ancladas</b> salvo que pongas <code>anchored: false</code> (entonces caen).</p>'+
 '<h4>Jugador</h4><pre>localPlayer.setSpeed(150);   // %\nlocalPlayer.setJump(120);\nlocalPlayer.teleport(0, 10, 0);\nlocalPlayer.damage(20); localPlayer.heal(10);\nlocalPlayer.addCoins(5); localPlayer.kill();\nlocalPlayer.setCheckpoint(x, y, z);\nlocalPlayer.health / .coins / .deaths</pre>'+
 '<h4>Eventos</h4><pre>game.onTouched("Pieza", () => { });\ngame.onKey("e", () => { });  // "space", "shift"…\ngame.on("died", () => { });  // won, coin</pre>'+
+'<h4>Contactos e impactos (Script de servidor)</h4><pre>game.onTouched("Pieza", (jugador, info) => { });  // jugador es null si la toca otra pieza\ngame.onTouchEnded("Pieza", (jugador, info) => { });\ngame.onImpact("Pieza", info => { }, 5);  // solo golpes &ge; 5 studs/s\nconst p = game.getPart("Pieza");  // estado actual</pre><p><code>info</code>: <code>speed</code> (studs/s), <code>normal</code> (de la otra pieza hacia esta), <code>velocity</code>, <code>part</code> y <code>other</code> ({kind:"player"|"part", name, x, y, z…}).</p>'+
 '<h4>GUI</h4><pre>const txt = gui.get("Puntos");\ntxt.text = "Puntos: 10";\ntxt.visible = false;\ngui.get("Barra").value = 0.5;\ngui.get("Boton").onClick(() => { });\ngui.get("Caja").onSubmit(v => { });\ngui.show("Menu"); gui.hide("Menu");\ngui.toast("¡Hola!", 3);</pre><p>Propiedades: <code>text visible value x y w h color bg opacity fontSize image</code>.</p>'+
 '<h4>Utilidades</h4><pre>task.wait(1);\ntask.delay(2, fn);\nconst id = task.every(1, fn); task.cancel(id);\nmath.random(1, 10); math.clamp(v, 0, 1);\nmath.lerp(a, b, t); math.dist(p1, p2);\ntime()  // segundos</pre>'+
 '<h4>Comportamientos sin código</h4><p>Seleccioná una pieza y elegí un <b>Comportamiento</b>: lava, trampolín, checkpoint, acelerador, moneda, cura, teletransporte o meta. En ⚙ Juego ajustás velocidad, salto, gravedad y vida.</p>';

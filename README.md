@@ -221,6 +221,17 @@ const ground = workspace.findFirstChild("Suelo");
 
 Las piezas con `anchored: false` reciben gravedad del servidor; las piezas con `canCollide: false` atraviesan el escenario y el jugador. Las posiciones de piezas se sincronizan con los demás jugadores. La física actual resuelve gravedad y colisiones verticales sencillas; todavía no es un sistema físico completo. El proceso limita cada instancia a 8 `Script`, 500 piezas, 16 MB de memoria de isolate como referencia, 25 ms por evento y 20 instancias con scripts activas por proceso. Cada callback tiene presupuesto de CPU para que un bucle infinito no congele el servidor web.
 
+**Física y contactos en el servidor.** La gravedad de las piezas con `anchored: false` corre en `world-physics.js` a 60 pasos por segundo (los mismos valores que el cliente) y usa la caja de cada pieza tal como se dibuja: con su rotación y con el origen real de cada forma (la cuña tiene el origen en la base). Una pieza apoyada acompaña a su soporte, así que ascensores y plataformas movidas con `updatePart` la llevan consigo; si un script cambia a mano la posición de una pieza dinámica, se descarta su velocidad. Los `Script` pueden enterarse de los choques:
+
+```js
+game.onTouched("Lava", (jugador, info) => { });   // jugador es null si la toca otra pieza
+game.onTouchEnded("Lava", (jugador, info) => { });
+game.onImpact("Caja", info => { }, 5);            // solo golpes de al menos 5 studs/s (por defecto 2)
+const caja = game.getPart("Caja");                // estado actual, también por id
+```
+
+`info` trae `speed` (velocidad relativa en studs/s; en un aterrizaje es la velocidad exacta de caída), `normal` (de la otra pieza hacia esta), `velocity` (relativa), `part` y `other` (`{ kind: "player" | "part", name, x, y, z… }`). Los toques se calculan solo para las piezas que algún script registró por nombre o id, usan la caja barrida entre ticks (una bala rápida no atraviesa una pared fina; un salto de más de 16 studs en un tick se considera teletransporte) y no se disparan por solapamientos que ya existían al crear la pieza. Los jugadores que llegan a `onUpdate` incluyen `velocity`, `height`, `size` y `bounds` (el origen `x, y, z` está en los pies).
+
 **Límites actuales:** JavaScript es el lenguaje con soporte completo. CrixScript conserva una conversión básica de sintaxis tipo Lua; no es un intérprete completo. Los `Script` sí se ejecutan en el servidor y replican el mundo de su instancia; `LocalScript` es local, por lo que el estado que crean (GUI, monedas, piezas creadas por un LocalScript) es de cada jugador y no se comparte con los demás. Todavía no hay `RemoteEvent` reales entre cliente y servidor, almacenamiento persistente por jugador (DataStore), sonido ni animaciones personalizadas; los elementos *Sound*, *Bloom*, *Blur* y *SunRays* del Explorador son marcadores. `ServerScriptService` y `LocalScriptService` distinguen el tipo de ejecución, aunque la jerarquía de servicios todavía es básica. `isolated-vm` limita memoria y tiempo, pero ejecutar código público requiere mantener Node y el módulo nativo actualizados; para alojar scripts de personas desconocidas a gran escala conviene correr `script-runner.js` en un contenedor sin privilegios separado del servidor web. Esto todavía no incluye todas las capacidades de Roblox Studio o Unity, ni intérpretes para todos los lenguajes, binario o ensamblador.
 
 Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor de rigging, huesos ni animación.

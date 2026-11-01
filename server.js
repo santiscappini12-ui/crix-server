@@ -7,6 +7,7 @@ const https    = require('https');
 const crypto   = require('crypto');
 const { fork } = require('node:child_process');
 const persist  = require('./persist');
+const worldPhysics = require('./world-physics');
 
 if (persist.enabled && !persist.restored) {
   console.error('[PERSIST] Hay almacenamiento externo configurado: arrancá con "npm start" (start.js) para restaurar los datos antes de iniciar el servidor.');
@@ -173,10 +174,13 @@ function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId])
 function gameChannel(mapId, instanceId) { return `game:${encodeURIComponent(mapId)}:${instanceId}`; }
 function getRoom(mapId, instanceId) {
   const key = roomKey(mapId, instanceId);
-  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[], worldParts:null, basePartIds:new Set(), changedPartIds:new Set(), removedPartIds:new Set(), physicsVelocities:{}, scriptStarted:false, scriptStatus:'stopped', pendingReset:false, commandTimes:[] };
+  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[], worldParts:null, basePartIds:new Set(), changedPartIds:new Set(), removedPartIds:new Set(), physicsVelocities:{}, scriptStarted:false, scriptStatus:'stopped', pendingReset:false, commandTimes:[], watched:new Set(), appliedSeq:0, phys:null };
   return rooms[key];
 }
 function roomPlayers(room) { return Object.values(room.players); }
+// Velocidad de cada jugador (studs/s), estimada con sus últimas posiciones; no viaja a los demás clientes.
+const playerVelocity = new WeakMap();
+function playersForRunner(room) { return roomPlayers(room).map(player => { const v = playerVelocity.get(player) || {x:0,y:0,z:0}; return { ...player, vx:v.x, vy:v.y, vz:v.z }; }); }
 function log(t,d) { console.log(`[${new Date().toLocaleTimeString()}] ${t}:`, d); }
 
 function normalizeRoomPart(id, source = {}) {
@@ -208,7 +212,7 @@ function initializeRoomWorld(room, map) {
     const id=String(source.id||`map-part-${index}`),part=normalizeRoomPart(id,source);
     room.worldParts[id]=part;room.basePartIds.add(id);
   }
-  room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];
+  room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];room.watched=new Set();room.appliedSeq=0;room.phys=null;
 }
 
 function roomWorldSnapshot(room) {
@@ -238,12 +242,13 @@ function startRoomServerScripts(room,map) {
   const runner=ensureScriptRunner();
   if(!runner){room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError||'No se pudo iniciar el entorno de scripts.'});return;}
   room.scriptStarted=true;room.scriptStatus='starting';
-  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Array.isArray(map.parts)?map.parts:[],players:roomPlayers(room)});
+  room.watched=new Set();room.appliedSeq=0;
+  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Object.values(room.worldParts||{}),players:playersForRunner(room)});
 }
 
 function sendRoomPlayersToRunner(room) {
   if(!scriptRunner?.connected||!room?.scriptStarted)return;
-  scriptRunner.send({type:'players',roomId:roomKey(room.mapId,room.instanceId),players:roomPlayers(room)});
+  scriptRunner.send({type:'players',roomId:roomKey(room.mapId,room.instanceId),players:playersForRunner(room)});
 }
 
 function handleScriptRunnerMessage(message) {
@@ -265,7 +270,8 @@ function handleScriptRunnerMessage(message) {
     io.to(gameChannel(room.mapId,room.instanceId)).emit('script_output',{script:String(message.script||'Script').slice(0,80),text:String(message.text||'').slice(0,500),cls:message.cls==='warn'?'warn':message.cls==='err'?'err':''});
     return;
   }
-  if(message.type==='sceneCommand')applyServerScriptCommand(room,message.command,message.payload||{});
+  if(message.type==='watch'){if(room.watched.size<200)room.watched.add(String(message.key||'').slice(0,120));return;}
+  if(message.type==='sceneCommand'){room.appliedSeq=Math.max(room.appliedSeq||0,Number(message.seq)||0);applyServerScriptCommand(room,message.command,message.payload||{});}
 }
 
 function applyServerScriptCommand(room,command,payload) {
@@ -287,8 +293,8 @@ function applyServerScriptCommand(room,command,payload) {
     if(patch.size)for(const axis of ['x','y','z'])if(patch.size[axis]!==undefined||patch.size[axis.toUpperCase()]!==undefined)merged['s'+axis]=patch.size[axis]??patch.size[axis.toUpperCase()];
     const part=normalizeRoomPart(id,merged);room.worldParts[id]=part;
     if(room.basePartIds.has(id))room.changedPartIds.add(id);
-    if(part.anchored)room.physicsVelocities[id]=0;
-    scriptRunner?.send({type:'worldPart',roomId:roomKey(room.mapId,room.instanceId),part});
+    if(part.anchored||part.y!==current.y)worldPhysics.resetBody(room,id);
+    scriptRunner?.send({type:'worldPart',roomId:roomKey(room.mapId,room.instanceId),part,appliedSeq:room.appliedSeq||0});
     io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'upsertPart',payload:{part}});
     return;
   }
@@ -302,32 +308,19 @@ function applyServerScriptCommand(room,command,payload) {
 }
 
 function stepServerWorldPhysics() {
+  const now=Date.now();
   for(const room of Object.values(rooms)){
-    if(!Object.keys(room.players).length||!room.worldParts)continue;
-    const parts=Object.values(room.worldParts);
-    for(const part of parts){
-      if(part.type==='Spawn'||part.anchored||part.isNPC)continue;
-      const velocity=Math.max(-0.8,(room.physicsVelocities[part.id]||0)-0.018);
-      const oldY=part.y,oldBottom=oldY-part.sy/2,oldTop=oldY+part.sy/2;
-      part.y+=velocity;room.physicsVelocities[part.id]=velocity;
-      if(part.canCollide){
-        for(const other of parts){
-          if(other.id===part.id||other.type==='Spawn'||!other.canCollide)continue;
-          const overlapX=Math.abs(part.x-other.x)<(part.sx+other.sx)/2;
-          const overlapZ=Math.abs(part.z-other.z)<(part.sz+other.sz)/2;
-          if(!overlapX||!overlapZ)continue;
-          const bottom=part.y-part.sy/2,top=part.y+part.sy/2,otherBottom=other.y-other.sy/2,otherTop=other.y+other.sy/2;
-          if(velocity<=0&&oldBottom>=otherTop-0.08&&bottom<otherTop){part.y=otherTop+part.sy/2;room.physicsVelocities[part.id]=0;break;}
-          if(velocity>0&&oldTop<=otherBottom+0.08&&top>otherBottom){part.y=otherBottom-part.sy/2;room.physicsVelocities[part.id]=0;break;}
-        }
+    if(!Object.keys(room.players).length||!room.worldParts){if(room.phys)room.phys.lastAt=0;continue;}
+    const roomId=roomKey(room.mapId,room.instanceId),channel=gameChannel(room.mapId,room.instanceId);
+    const result=worldPhysics.stepRoom(room,now,playersForRunner(room));
+    if(result.changed.length){
+      for(const update of result.changed){
+        if(room.basePartIds.has(update.id))room.changedPartIds.add(update.id);
+        io.to(channel).emit('runtime_scene',{command:'upsertPart',payload:{part:update}});
       }
-      if(Math.abs(part.y-oldY)>0.0001){
-        if(room.basePartIds.has(part.id))room.changedPartIds.add(part.id);
-        const positionUpdate={id:part.id,x:part.x,y:part.y,z:part.z};
-        scriptRunner?.send({type:'worldPosition',roomId:roomKey(room.mapId,room.instanceId),part:positionUpdate});
-        io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'upsertPart',payload:{part:positionUpdate}});
-      }
+      scriptRunner?.send({type:'worldPositions',roomId,parts:result.changed,appliedSeq:room.appliedSeq||0});
     }
+    if(result.events.length&&scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'contacts',roomId,events:result.events});
   }
 }
 setInterval(stepServerWorldPhysics,50);
@@ -1894,7 +1887,10 @@ io.on('connection', socket => {
     const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id]) return;
     const p = room.players[socket.id];
     const bounded=(value,previous,min=-10000,max=10000)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):previous;};
+    const prevX=p.x,prevY=p.y,prevZ=p.z,moveNow=Date.now(),moveDt=(moveNow-(p.moveAt||0))/1000;
     p.x=bounded(data?.x,p.x);p.y=bounded(data?.y,p.y);p.z=bounded(data?.z,p.z);
+    if(p.moveAt&&moveDt>0.01&&moveDt<1)playerVelocity.set(p,{x:(p.x-prevX)/moveDt,y:(p.y-prevY)/moveDt,z:(p.z-prevZ)/moveDt});else playerVelocity.set(p,{x:0,y:0,z:0});
+    Object.defineProperty(p,'moveAt',{value:moveNow,writable:true,enumerable:false,configurable:true});
     p.ry=bounded(data?.ry,p.ry,-1000,1000);p.anim=bounded(data?.anim,p.anim,-10,10);p.moving=!!data?.moving;p.onGround=!!data?.onGround;
     sendRoomPlayersToRunner(room);
     socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
