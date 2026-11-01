@@ -97,6 +97,50 @@ En esta versión las instancias son salas separadas coordinadas por el proceso N
 - Los videos (MP4, WebM u OGG; hasta 60 MB) se suben como archivo binario con barra de progreso, se validan por su formato real (no por el nombre) y se guardan como archivos en disco junto a la base de datos, no dentro del JSON. Se reproducen por streaming con soporte de rangos (se puede adelantar y retroceder) y la app genera una miniatura automática. Los videos antiguos guardados como base64 se migran solos al iniciar el servidor.
 - La foto de perfil se cambia desde el perfil propio. Crix la recorta a 256 × 256, la comprime y la muestra en perfiles públicos y listas de usuarios; se guarda junto a la cuenta en el servidor.
 
+## Modo equipo (creación en conjunto)
+
+Cualquier proyecto (mapa 3D o app HTML) puede tener **colaboradores**. El creador los agrega desde **👥 Equipo** (barra del editor, o el editor de apps) escribiendo su nombre de usuario; hasta 20 personas por proyecto.
+
+- **Co-edición en vivo** de mapas: quienes están en el editor ven al instante las piezas que agrega, mueve, escala o borra el resto, y también los scripts, la iluminación, los ajustes y las pantallas GUI. Cada persona ve de qué color es la pieza que está seleccionando cada integrante, y hay un **chat del equipo**. Si dos personas tocan la misma pieza a la vez gana el último cambio.
+- **El servidor es la fuente de verdad** mientras hay una sesión activa (`team_join` / `team_ops`): aplica cada cambio sobre el mapa, lo reenvía al resto y lo guarda (con un pequeño retraso). Un guardado completo (`POST /api/maps`) no pisa las partes, scripts ni luces durante una sesión, así que el botón *Guardar* de alguien con datos viejos no deshace el trabajo del resto. Si se corta la conexión, al volver se fusionan los cambios sin perder lo que esa persona editó mientras tanto.
+- **Permisos**: quienes colaboran pueden ver (aunque sea privado), editar, guardar y subir texturas. Solo el creador (o un admin) puede borrar el proyecto, cambiar su visibilidad o administrar el equipo; si se quita a alguien, se lo saca de la sesión en el momento.
+- En el perfil de cada juego aparece **✏️ Editar (equipo)** para quien colabora, y en 👥 Equipo hay una lista de *Proyectos en los que colaborás*. Las apps HTML comparten permisos y chat, pero su código se guarda completo (gana el último guardado).
+- API: `GET/POST /api/maps/:id/team` (`{ "add": "usuario" }` o `{ "remove": "idUsuario" }`), `GET /api/maps/:id/edit-state`; eventos Socket.IO `team_join`, `team_leave`, `team_ops`, `team_sel`, `team_chat`.
+
+## Apps y juegos HTML con servidor y multijugador (SDK `Crix`)
+
+Los archivos `.html` que se suben desde la PC (o las apps creadas en Crix) corren en un iframe aislado, sin acceso a la cuenta ni a la red. Crix les inyecta automáticamente un objeto global **`window.Crix`** que usa por detrás la misma sala de multijugador de los juegos: cada vez que alguien toca **Jugar** se crea una instancia, y **Unirme** / *Instancias activas* entran a la misma sala. No hay que importar nada ni cambiar el archivo.
+
+```js
+Crix.ready.then(async () => {
+  Crix.me            // { id, username, color, socketId }
+  Crix.online        // false si se abrió sin iniciar sesión (modo solo)
+  Crix.players       // todas las personas de la sala (incluida esta)
+  Crix.isHost        // la persona que entró primero; pasa sola a otra si se va
+
+  Crix.send('mover', { x: 1 });            // a todos los demás (máx. 8 KB)
+  Crix.send('golpe', { dmg: 5 }, otroId);  // a una sola persona (socketId o id de cuenta)
+  Crix.on('message:mover', (data, from) => {});
+
+  Crix.state.set('turno', 'ana');          // estado compartido de la sala (null borra la clave)
+  Crix.on('state:turno', valor => {});
+  Crix.state.get('turno'); Crix.state.all();
+
+  const partida = await Crix.save.get();   // guardado propio en el servidor (64 KB, requiere cuenta)
+  await Crix.save.set({ nivel: 3 });
+
+  await Crix.leaderboard.submit('puntos', 120);         // se conserva el mejor puntaje
+  await Crix.leaderboard.submit('tiempo', 41.2, 'min'); // 'min': gana el más bajo
+  const { top, me } = await Crix.leaderboard.top('puntos', 10);
+
+  Crix.on('join', p => {}).on('leave', p => {}).on('players', lista => {}).on('host', soyHost => {});
+});
+```
+
+Todas las funciones que hablan con el servidor devuelven una promesa con `{ ok, ... }` (o `{ ok:false, err }`). Si la app se abre sin sesión, `Crix.online` es `false`, la sala es solo para esa persona y `Crix.state` funciona localmente. Un ejemplo completo está en `examples/crix-multiplayer-demo.html`.
+
+Límites (para que una app no pueda saturar el servidor): 90 mensajes/s por persona, estado compartido de hasta 64 claves y 128 KB por sala, 20 rankings por app y 5000 entradas por ranking, guardados de hasta 64 KB por persona. El estado de la sala se borra cuando se va la última persona. El servidor solo reenvía entre personas de la misma instancia y nunca expone el token de sesión al iframe. Eventos Socket.IO: `app_hello`, `app_send`, `app_state_set`, `app_data_get/set`, `app_score_submit`, `app_score_top`.
+
 ## Llamadas de voz y video
 
 Desde cualquier conversación se puede iniciar una **llamada de voz** o una **videollamada** con WebRTC real: se ve quién llama, se acepta o rechaza, hay timbre, silenciar micrófono, apagar cámara, cronómetro y avisos claros (rechazada, ocupado, sin respuesta, se cortó la conexión, falta el permiso del micrófono o la cámara). El audio y el video viajan directo entre las dos personas con cifrado DTLS-SRTP; el servidor solo retransmite la negociación (SDP e ICE) y lleva el estado de la llamada, y comprueba que quien envía señales sea realmente parte de una llamada aceptada.
