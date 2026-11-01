@@ -14,4 +14,4 @@ RUN npm ci --omit=dev
 COPY --chown=node:node . .
 
 EXPOSE 8080
-CMD ["npm", "start"]
+CMD ["node", "--no-node-snapshot", "start.js"]
