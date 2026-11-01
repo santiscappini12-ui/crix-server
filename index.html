@@ -566,7 +566,25 @@ input,select,textarea{font-family:var(--font);}
     <div class="field-grp"><label class="field-lbl">Nombre</label><input class="inp" id="app-name" maxlength="80"></div>
     <div class="field-grp"><label class="field-lbl">Visibilidad</label><select class="inp" id="app-privacy"><option value="public">🌍 Público</option><option value="private">🔒 Privado</option></select></div>
     <div class="field-grp" style="flex:1;min-height:0"><label class="field-lbl">Código HTML de la app</label><textarea class="inp" id="app-source" spellcheck="false" maxlength="1000000" style="height:48vh;resize:vertical;font-family:var(--mono);font-size:12px"></textarea></div>
-    <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-app-editor')">Cancelar</button><button class="btn btn-p" onclick="saveAppSource()">💾 Guardar y publicar</button></div>
+    <div class="mo-btns"><button class="btn btn-g" onclick="teamOpenModal()">👥 Equipo</button><button class="btn btn-g" onclick="closeModal('mo-app-editor')">Cancelar</button><button class="btn btn-p" onclick="saveAppSource()">💾 Guardar y publicar</button></div>
+  </div>
+</div>
+<div class="mo-overlay" id="mo-team">
+  <div class="mo-box" style="width:min(520px,94vw);max-height:90vh;overflow:auto">
+    <h3>👥 Equipo del proyecto</h3>
+    <div id="team-proj" style="font-size:12px;color:var(--text3)"></div>
+    <div class="field-grp" id="team-online-wrap"><label class="field-lbl">Editando ahora</label><div id="team-online" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>
+    <div class="field-grp"><label class="field-lbl">Colaboradores</label>
+      <div id="team-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div id="team-add-row" style="display:flex;gap:6px;margin-top:8px"><input class="inp" id="team-add-name" placeholder="Nombre de usuario" maxlength="40" onkeydown="if(event.key==='Enter')teamAdd()"><button class="btn btn-p" onclick="teamAdd()">Agregar</button></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">Quienes están en el equipo editan este proyecto con vos en tiempo real. El creador sigue siendo el único que puede borrarlo o cambiar su visibilidad.</div>
+    </div>
+    <div class="field-grp" id="team-chat-wrap"><label class="field-lbl">Chat del equipo</label>
+      <div id="team-chat" style="height:130px;overflow:auto;background:rgba(255,255,255,.04);border-radius:8px;padding:8px;font-size:12px"></div>
+      <div style="display:flex;gap:6px;margin-top:6px"><input class="inp" id="team-chat-inp" maxlength="300" placeholder="Escribí al equipo…" onkeydown="if(event.key==='Enter')teamSendChat()"><button class="btn btn-g" onclick="teamSendChat()">Enviar</button></div>
+    </div>
+    <div class="field-grp"><label class="field-lbl">Proyectos en los que colaborás</label><div id="team-shared" style="display:flex;flex-direction:column;gap:6px"></div></div>
+    <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-team')">Cerrar</button></div>
   </div>
 </div>
 <!-- ═══ DISCOVER ═══ -->
@@ -665,6 +683,7 @@ input,select,textarea{font-family:var(--font);}
   <input class="hub-project-name" id="hub-project-name" value="Mi Primer Mapa" aria-label="Nombre del proyecto" onchange="setStudioProjectName(this.value)">
   <span class="hub-hint">RMB orbitar · Shift+arrastrar desplazar · rueda acercar · Ctrl+Z deshacer · F enfocar</span>
   <div class="hub-actions">
+    <button class="st-btn" id="team-btn" onclick="teamOpenModal()" title="Equipo del proyecto">👥 Equipo<span id="team-pill"></span></button>
     <button class="hub-history-btn" id="hub-undo" onclick="studioUndo()" title="Deshacer (Ctrl+Z)" disabled>↶</button>
     <button class="hub-history-btn" id="hub-redo" onclick="studioRedo()" title="Rehacer (Ctrl+Y)" disabled>↷</button>
     <button class="st-btn green" onclick="stuSave()">💾 Guardar</button>
@@ -1006,7 +1025,7 @@ function setMaps(m)  {
   DB.set('maps', m); BC.postMessage({ type: 'map_update' });
   if (!CLOUD_READY || !ME || !DB.get('token')) return;
   Object.entries(m).forEach(([id, map]) => {
-    if (map?.authorId === ME.id && JSON.stringify(previous[id]) !== JSON.stringify(map))
+    if (teamCanEdit(map) && JSON.stringify(previous[id]) !== JSON.stringify(map))
       apiRequest('/api/maps', { method:'POST', body:map }).catch(() => {});
   });
   Object.entries(previous).forEach(([id, map]) => {
@@ -1461,7 +1480,7 @@ function createNewApp() {
 }
 function openAppEditor(id) {
   const app = getMaps()[id];
-  if (!app || (app.authorId !== ME.id && !isAdmin())) { showToast('No podés editar esta app'); return; }
+  if (!app || !teamCanEdit(app)) { showToast('No podés editar esta app'); return; }
   stMapId = id;
   document.getElementById('app-name').value = app.name || 'Mi App';
   document.getElementById('app-source').value = app.htmlContent || '';
@@ -1470,7 +1489,7 @@ function openAppEditor(id) {
 }
 function saveAppSource() {
   const maps = getMaps(); const app = maps[stMapId];
-  if (!app || (app.authorId !== ME.id && !isAdmin())) { showToast('No podés editar esta app'); return; }
+  if (!app || !teamCanEdit(app)) { showToast('No podés editar esta app'); return; }
   const source = document.getElementById('app-source').value;
   if (!source.trim()) { showToast('La app necesita código HTML'); return; }
   if (source.length > 1000000) { showToast('El código debe ser menor a 1 MB'); return; }
@@ -1481,6 +1500,7 @@ function saveAppSource() {
   setMaps(maps); closeModal('mo-app-editor'); renderHome(); showToast('✅ App guardada');
 }
 function exitIframe() {
+  crixApp.active = false; try { if (typeof netLeaveGame === 'function') netLeaveGame(); } catch {}
   document.getElementById('s-iframe').classList.remove('active');
   document.getElementById('game-iframe').src = '';
   document.getElementById('s-home').classList.add('active');
@@ -2258,7 +2278,7 @@ function playMap(mapId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById('nav').style.display = 'none';
     document.getElementById('s-iframe').classList.add('active');
-    const blob = new Blob([m.htmlContent], {type: 'text/html'});
+    const blob = new Blob([crixInjectSdk(m.htmlContent)], {type: 'text/html'});
     document.getElementById('game-iframe').src = URL.createObjectURL(blob);
     return;
   }
@@ -2338,6 +2358,7 @@ function netConnect() {
   socket.on('player_left',({socketId})=>{const rp=remotePlayers[socketId];if(rp){if(gScene)gScene.remove(rp.group);addGMsg(`← ${rp.data.username} salió`,'sys');delete remotePlayers[socketId];}updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});
   socket.on('pong_res',ts=>{const ping=Date.now()-ts,pill=document.getElementById('g-net-pill');if(pill)pill.textContent=`🟢 ${Object.keys(remotePlayers).length+1}p · ${ping}ms`;});
+  crixAppBindSocket(); teamBindSocket();
   socket.on('new_private_msg', function({ convId, msg }) {
     if(!msg?.e2ee||msg.e2ee.v!==1)return;
     const convs = getConvs();
@@ -2402,10 +2423,395 @@ window.playMap = async function(mapId, instanceId = null) {
     } catch (err) { console.warn('[NET] No se pudo reservar una instancia:', err.message); }
   }
   netServerScriptsActive=!!(targetInstanceId&&ME&&!stPlaytesting&&!getMaps()[mapId]?.isHtmlGame);
+  crixAppReset(!!getMaps()[mapId]?.isHtmlGame, !!(targetInstanceId && ME));
   try { await registerMapTextures(getMaps()[mapId]); } catch {}
   _origPlayMap(mapId);
   setTimeout(() => { if (targetInstanceId) netJoinGame(mapId, targetInstanceId); _patchGameLoopWithNet(); }, 200);
 };
+
+// ═══ SDK Crix para apps y juegos HTML (window.Crix) ═══
+// Las apps corren en un iframe aislado (sin permisos de red ni de la cuenta). Este puente les presta, por postMessage,
+// la sala de multijugador, el estado compartido, el guardado por persona y los rankings del servidor, sin darles nunca el token.
+function crixSdkMain() {   // se ejecuta DENTRO del iframe de la app
+  if (window.Crix) return;
+  var seq = 0, pending = {}, handlers = {}, info = null, players = [], state = {}, readyDone = false, resolveReady, lastHost = null;
+  var ready = new Promise(function (r) { resolveReady = r; });
+  function post(m) { m.crix = 1; try { parent.postMessage(m, '*'); } catch (e) {} }
+  function call(op, args) {
+    return new Promise(function (res) {
+      var id = ++seq; pending[id] = res; post({ id: id, op: op, args: args || {} });
+      setTimeout(function () { if (pending[id]) { delete pending[id]; res({ ok: false, err: 'Sin respuesta del servidor' }); } }, 12000);
+    });
+  }
+  function emit(ev, a, b) { (handlers[ev] || []).slice().forEach(function (fn) { try { fn(a, b); } catch (e) { console.error('[Crix]', e); } }); }
+  function sorted() { return players.slice().sort(function (a, b) { return (a.joinedAt - b.joinedAt) || (a.socketId < b.socketId ? -1 : 1); }); }
+  function checkHost() { var s = sorted(), h = s.length ? s[0].socketId : null; if (h !== lastHost) { lastHost = h; emit('host', api.isHost, s[0] || null); } }
+  var api = {
+    ready: ready,
+    get me() { return info ? info.me : null; },
+    get online() { return !!(info && info.online); },
+    get room() { return info ? info.room : null; },
+    get players() { return players.slice(); },
+    get host() { var s = sorted(); return s.length ? s[0] : null; },
+    get isHost() { var s = sorted(); return !!info && s.length > 0 && s[0].socketId === info.me.socketId; },
+    on: function (ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); return api; },
+    off: function (ev, fn) { handlers[ev] = (handlers[ev] || []).filter(function (f) { return f !== fn; }); return api; },
+    send: function (type, data, to) { return call('send', { type: type, data: data, to: to }); },
+    state: {
+      get: function (k) { return state[k]; },
+      all: function () { return JSON.parse(JSON.stringify(state)); },
+      set: function (k, v) { return call('stateSet', { key: k, value: v }); },
+      remove: function (k) { return call('stateSet', { key: k, value: null }); }
+    },
+    save: {
+      get: function () { return call('dataGet').then(function (r) { return r.ok ? r.data : null; }); },
+      set: function (d) { return call('dataSet', { data: d }); }
+    },
+    leaderboard: {
+      submit: function (board, score, mode) { return call('scoreSubmit', { board: board, score: score, mode: mode }); },
+      top: function (board, n) { return call('scoreTop', { board: board, n: n }); }
+    }
+  };
+  window.addEventListener('message', function (e) {
+    if (e.source !== parent) return;
+    var m = e.data; if (!m || m.crix !== 1) return;
+    if (m.reply) { var r = pending[m.id]; if (r) { delete pending[m.id]; r(m.result); } return; }
+    if (m.ev === 'hello') {
+      info = m.info; players = m.players || []; state = m.state || {};
+      if (!readyDone) { readyDone = true; resolveReady(api); emit('ready', api); } else emit('reconnect', api);
+      emit('players', api.players); checkHost();
+    } else if (m.ev === 'join' && m.player) {
+      if (!players.some(function (p) { return p.socketId === m.player.socketId; })) players.push(m.player);
+      emit('join', m.player); emit('players', api.players); checkHost();
+    } else if (m.ev === 'leave') {
+      var gone = players.filter(function (p) { return p.socketId === m.socketId; })[0] || { socketId: m.socketId };
+      players = players.filter(function (p) { return p.socketId !== m.socketId; });
+      emit('leave', gone); emit('players', api.players); checkHost();
+    } else if (m.ev === 'message' && m.msg) {
+      emit('message', m.msg); emit('message:' + m.msg.type, m.msg.data, m.msg.from);
+    } else if (m.ev === 'state') {
+      if (m.value === null) delete state[m.key]; else state[m.key] = m.value;
+      emit('state', m.key, m.value); emit('state:' + m.key, m.value);
+    }
+  });
+  window.Crix = api;
+  post({ op: 'hello' });
+}
+function crixInjectSdk(html) {
+  html = String(html || ''); if (html.indexOf('data-crix-sdk') >= 0) return html;
+  const tag = '<script data-crix-sdk>(' + crixSdkMain.toString() + ')();<\/script>';
+  for (const re of [/<head[^>]*>/i, /<html[^>]*>/i, /<!doctype[^>]*>/i]) {
+    const m = re.exec(html); if (m) return html.slice(0, m.index + m[0].length) + tag + html.slice(m.index + m[0].length);
+  }
+  return tag + html;
+}
+var crixApp = { active:false, online:false, helloDone:false, localState:{} };
+function crixAppReset(isHtml, online) { crixApp = { active:!!isHtml, online:!!(isHtml && online), helloDone:false, localState:{}, tries:0 }; }
+function crixAppPush(payload) {
+  if (!crixApp.active) return;
+  const f = document.getElementById('game-iframe');
+  try { if (f && f.contentWindow) f.contentWindow.postMessage(Object.assign({ crix:1 }, payload), '*'); } catch {}
+}
+function crixAppMe(socketId) { return { id: ME ? ME.id : 'guest', username: ME ? ME.username : 'Invitado', color: (ME && ME.color) || '#5b8def', socketId: socketId || 'local' }; }
+function crixAppHelloOffline() {
+  crixApp.online = false; crixApp.helloDone = true;
+  const me = crixAppMe('local');
+  crixAppPush({ ev:'hello', info:{ online:false, me, room:null }, players:[{ ...me, joinedAt:0 }], state:crixApp.localState });
+}
+function crixAppHello() {
+  if (!crixApp.active) return;
+  if (!crixApp.online || !ME || !socket) return crixAppHelloOffline();
+  if (!socket.connected) { setTimeout(crixAppHello, 400); return; }
+  socket.timeout(4000).emit('app_hello', {}, (err, res) => {
+    if (!crixApp.active) return;
+    if (!err && res && res.ok) {
+      crixApp.helloDone = true;
+      crixAppPush({ ev:'hello', info:{ online:true, me:crixAppMe(res.socketId), room:{ mapId:res.mapId, instanceId:res.instanceId, maxPlayers:res.maxPlayers } }, players:res.players || [], state:res.state || {} });
+    } else if (++crixApp.tries < 40) setTimeout(crixAppHello, 250);   // todavía entrando a la sala
+    else crixAppHelloOffline();
+  });
+}
+const CRIX_APP_OPS = { send:'app_send', stateSet:'app_state_set', dataGet:'app_data_get', dataSet:'app_data_set', scoreSubmit:'app_score_submit', scoreTop:'app_score_top' };
+window.addEventListener('message', e => {
+  const f = document.getElementById('game-iframe');
+  if (!crixApp.active || !f || e.source !== f.contentWindow) return;
+  const m = e.data; if (!m || m.crix !== 1 || typeof m.op !== 'string') return;
+  if (m.op === 'hello') { crixApp.tries = 0; crixAppHello(); return; }
+  const ev = CRIX_APP_OPS[m.op], id = m.id; if (!ev || id === undefined) return;
+  const args = (m.args && typeof m.args === 'object') ? m.args : {};
+  const reply = result => { try { e.source.postMessage({ crix:1, reply:1, id, result }, '*'); } catch {} };
+  if (!crixApp.online) {
+    if (m.op === 'stateSet' && typeof args.key === 'string') {   // modo solo: el estado vive en esta pestaña
+      if (args.value == null) delete crixApp.localState[args.key]; else crixApp.localState[args.key] = args.value;
+      crixAppPush({ ev:'state', key:args.key, value: args.value == null ? null : args.value }); return reply({ ok:true });
+    }
+    return reply({ ok:false, err: ME ? 'Esta app se abrió sin sala del servidor' : 'Iniciá sesión en Crix para usar el servidor' });
+  }
+  if (!socket || !socket.connected) return reply({ ok:false, err:'Sin conexión con el servidor' });
+  socket.timeout(8000).emit(ev, args, (err, res) => reply(err ? { ok:false, err:'Sin respuesta del servidor' } : res));
+});
+function crixAppBindSocket() {
+  if (!socket || socket._crixBound) return; socket._crixBound = true;
+  socket.on('app_msg', msg => crixAppPush({ ev:'message', msg }));
+  socket.on('app_state', ({ key, value }) => crixAppPush({ ev:'state', key, value }));
+  socket.on('player_joined', p => crixAppPush({ ev:'join', player:{ id:p.userId, socketId:p.socketId, username:p.username, color:p.color, joinedAt:p.joinedAt } }));
+  socket.on('player_left', ({ socketId }) => crixAppPush({ ev:'leave', socketId }));
+  socket.on('join_ack', () => { if (crixApp.active && crixApp.online && crixApp.helloDone) crixAppHello(); });   // volvió a entrar tras un corte
+}
+
+// ═══ MODO EQUIPO: creación en conjunto en tiempo real ═══
+function teamCanEdit(map) { return !!(map && ME && (map.authorId === ME.id || isAdmin() || (map.collaborators || []).includes(ME.id))); }
+var team = { on:false, joining:false, wantOn:false, mapId:null, rev:0, base:null, members:new Map(), buf:[], timer:null, applying:false, helpers:new Map(), lastSel:null, chat:[], info:null, unread:0 };
+function teamPartKey(d) { return JSON.stringify(d, (k, v) => (k === 'meshData' && typeof v === 'string') ? v.length + ':' + v.slice(0, 24) + v.slice(-24) : v); }
+function teamCapture() {
+  const parts = new Map(), data = new Map(), scripts = new Map(), sdata = new Map();
+  for (const p of stParts) {
+    const d = p.data; if (!d) continue;
+    if (d.id === undefined || d.id === null || d.id === '') d.id = 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const id = String(d.id); parts.set(id, teamPartKey(d)); data.set(id, d);
+  }
+  for (const sc of stScripts) {
+    if (!sc) continue; if (!sc.id) sc.id = 'scr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    scripts.set(String(sc.id), JSON.stringify(sc)); sdata.set(String(sc.id), sc);
+  }
+  const map = getMaps()[stMapId] || {};
+  return { parts, data, scripts, sdata, light:JSON.stringify(stLighting), name:map.name || '', settings:JSON.stringify(stSettings), guis:JSON.stringify(stGuis) };
+}
+function teamPartById(id) { return stParts.find(p => p.data && String(p.data.id) === String(id)); }
+function teamTick() {
+  if (!team.on || team.applying || !socket || !socket.connected || !team.base || !stScene) return;
+  const cur = teamCapture(), b = team.base, ops = [];
+  for (const [id, j] of cur.parts) if (b.parts.get(id) !== j) ops.push({ t:'p', d:cur.data.get(id) });
+  for (const id of b.parts.keys()) if (!cur.parts.has(id)) ops.push({ t:'pd', id });
+  for (const [id, j] of cur.scripts) if (b.scripts.get(id) !== j) ops.push({ t:'s', d:cur.sdata.get(id) });
+  for (const id of b.scripts.keys()) if (!cur.scripts.has(id)) ops.push({ t:'sd', id });
+  if (cur.light !== b.light) ops.push({ t:'l', d:stLighting });
+  if (cur.name !== b.name) ops.push({ t:'n', d:cur.name });
+  if (cur.settings !== b.settings) ops.push({ t:'x', k:'settings', d:stSettings });
+  if (cur.guis !== b.guis) ops.push({ t:'x', k:'guis', d:stGuis });
+  const selId = selPart && selPart.data ? String(selPart.data.id) : null;
+  if (selId !== team.lastSel) { team.lastSel = selId; socket.emit('team_sel', { id:selId }); }
+  teamUpdateHelpers();
+  if (!ops.length) return;
+  team.base = cur;
+  for (let i = 0; i < ops.length; i += 200) {
+    socket.timeout(8000).emit('team_ops', { ops:ops.slice(i, i + 200) }, (err, res) => {
+      if (err || !res || res.ok === false) { if (team.on) { showToast('👥 Se perdió la sesión de equipo, reconectando…'); const keep = team.mapId; team.on = false; clearInterval(team.timer); setTimeout(() => { if (team.wantOn && stMapId === keep) teamJoin(true); }, 1200); } }
+    });
+  }
+}
+function teamRefreshExplorerSoon() { clearTimeout(team._rx); team._rx = setTimeout(() => { try { refreshExplorer(); } catch {} }, 120); }
+function teamApplyOps(ops) {
+  if (!stScene || !Array.isArray(ops)) return;
+  team.applying = true; let touched = false; const base = team.base;
+  try {
+    for (const op of ops) {
+      if (!op) continue;
+      if (op.t === 'p' && op.d && op.d.id !== undefined) {
+        const id = String(op.d.id), old = teamPartById(id), wasSel = !!old && selPart === old;
+        if (wasSel && typeof gizmoDragging !== 'undefined' && gizmoDragging) continue;      // no se le pisa la pieza que se está arrastrando
+        if (old) { stScene.remove(old.mesh); stParts = stParts.filter(x => x !== old); }
+        const entry = addPartMesh({ ...op.d });
+        if (wasSel) { try { selectPart(entry); } catch {} }
+        if (base) base.parts.set(id, teamPartKey(entry.data));
+        touched = true;
+      } else if (op.t === 'pd') {
+        const id = String(op.id), old = teamPartById(id);
+        if (old) { if (selPart === old) deselect(); stScene.remove(old.mesh); stParts = stParts.filter(x => x !== old); touched = true; }
+        if (base) base.parts.delete(id);
+      } else if (op.t === 's' && op.d && op.d.id !== undefined) {
+        const id = String(op.d.id), i = stScripts.findIndex(x => x && String(x.id) === id), copy = { ...op.d };
+        if (i >= 0) stScripts[i] = copy; else stScripts.push(copy);
+        if (base) base.scripts.set(id, JSON.stringify(copy));
+        touched = true;
+      } else if (op.t === 'sd') {
+        const id = String(op.id); stScripts = stScripts.filter(x => !x || String(x.id) !== id);
+        if (base) base.scripts.delete(id); touched = true;
+      } else if (op.t === 'l') {
+        stLighting = normalizeLighting(op.d); try { applyLighting(); } catch {}
+        if (base) base.light = JSON.stringify(stLighting);
+      } else if (op.t === 'n') {
+        const maps = getMaps(); if (maps[stMapId]) { maps[stMapId].name = op.d; DB.set('maps', maps); }
+        const t = document.getElementById('hub-project-name'); if (t) t.value = op.d;
+        if (base) base.name = op.d;
+      } else if (op.t === 'x') {
+        if (op.k === 'settings') { stSettings = { ...(op.d || {}) }; if (base) base.settings = JSON.stringify(stSettings); }
+        else if (op.k === 'guis') { stGuis = JSON.parse(JSON.stringify(op.d || [])); if (base) base.guis = JSON.stringify(stGuis); }
+      }
+    }
+  } finally { team.applying = false; }
+  if (touched) teamRefreshExplorerSoon();
+  teamUpdateHelpers();
+}
+function teamLoadState(m, rev, merge) {
+  team.rev = rev;
+  if (!merge) {
+    team.applying = true;
+    try {
+      const maps = getMaps(); maps[stMapId] = { ...(maps[stMapId] || {}), ...m }; DB.set('maps', maps);
+      deselect();
+      stScripts = (m.scripts || []).map(x => ({ ...x })); stSettings = { ...(m.settings || {}) }; stGuis = JSON.parse(JSON.stringify(m.guis || []));
+      stLighting = normalizeLighting(m.lighting);
+      clearSt(); (m.parts || []).forEach(d => addPartMesh({ ...d }));
+      const t = document.getElementById('hub-project-name'); if (t) t.value = m.name || 'Proyecto sin nombre';
+      refreshExplorer(); applyLighting();
+      team.base = teamCapture();
+    } finally { team.applying = false; }
+    return;
+  }
+  // Reconexión: se trae lo que cambió en el servidor y solo se aplica donde esta persona no tocó nada (lo suyo se envía en el próximo ciclo).
+  const cur = teamCapture(), b = team.base, ops = [];
+  const sp = new Map((m.parts || []).map(d => [String(d.id), d]));
+  for (const [id, d] of sp) if (cur.parts.get(id) === b.parts.get(id) && cur.parts.get(id) !== teamPartKey(d)) ops.push({ t:'p', d });
+  for (const id of cur.parts.keys()) if (!sp.has(id) && b.parts.has(id) && cur.parts.get(id) === b.parts.get(id)) ops.push({ t:'pd', id });
+  const ss = new Map((m.scripts || []).map(d => [String(d.id), d]));
+  for (const [id, d] of ss) if (cur.scripts.get(id) === b.scripts.get(id) && cur.scripts.get(id) !== JSON.stringify(d)) ops.push({ t:'s', d });
+  for (const id of cur.scripts.keys()) if (!ss.has(id) && b.scripts.has(id) && cur.scripts.get(id) === b.scripts.get(id)) ops.push({ t:'sd', id });
+  if (cur.light === b.light && JSON.stringify(normalizeLighting(m.lighting)) !== cur.light) ops.push({ t:'l', d:m.lighting || {} });
+  if (cur.name === b.name && (m.name || '') !== cur.name) ops.push({ t:'n', d:m.name });
+  teamApplyOps(ops);
+}
+async function teamJoin(reconnect) {
+  if (!socket || !socket.connected || !ME || !stMapId || team.joining) return;
+  const mapId = stMapId, map = getMaps()[mapId]; if (!map || !teamCanEdit(map)) return;
+  if (team.on && team.mapId === mapId) return;
+  if (team.mapId && team.mapId !== mapId) teamLeaveLocal();
+  team.joining = true; team.buf = []; team.wantOn = true;
+  const keepBase = reconnect && team.base && team.mapId === mapId;
+  try {
+    const r = await new Promise(res => socket.timeout(6000).emit('team_join', { mapId }, (err, x) => res(err ? { ok:false, err:'El servidor no respondió' } : x)));
+    if (!r || !r.ok) throw new Error((r && r.err) || 'No se pudo unir al equipo');
+    team.mapId = mapId; team.members = new Map((r.members || []).map(m => [m.socketId, m]));
+    const st = await apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/edit-state');
+    if (stMapId !== mapId) throw new Error('cambió');
+    teamLoadState(st.map, st.rev, keepBase);
+    team.on = true; team.joining = false;
+    for (const b of team.buf.splice(0)) if (b.rev > team.rev) { team.rev = b.rev; teamApplyOps(b.ops); }
+    clearInterval(team.timer); team.timer = setInterval(teamTick, 400);
+    team.lastSel = null; teamRenderUi();
+    if (team.members.size > 1) showToast('👥 Editando en equipo (' + team.members.size + ' personas)');
+  } catch (err) {
+    team.joining = false; if (socket) socket.emit('team_leave');
+    if (err.message !== 'cambió') showToast('👥 ' + err.message);
+  }
+  team.joining = false; teamRenderUi();
+}
+function teamLeaveLocal() {
+  clearInterval(team.timer); if (socket && team.mapId) socket.emit('team_leave');
+  if (stScene) for (const h of team.helpers.values()) stScene.remove(h);
+  team.helpers.clear(); team.on = false; team.joining = false; team.wantOn = false; team.mapId = null; team.base = null; team.members = new Map(); team.lastSel = null;
+  teamRenderUi();
+}
+function teamUpdateHelpers() {
+  if (!stScene || !socket) return;
+  for (const [sid, h] of [...team.helpers]) {
+    const m = team.members.get(sid), part = m && m.sel ? teamPartById(m.sel) : null;
+    if (!part) { stScene.remove(h); team.helpers.delete(sid); continue; }
+    if (h.userData.target !== part.mesh) { stScene.remove(h); team.helpers.delete(sid); continue; }
+    h.update();
+  }
+  for (const [sid, m] of team.members) {
+    if (sid === socket.id || !m.sel || team.helpers.has(sid)) continue;
+    const part = teamPartById(m.sel); if (!part) continue;
+    try { const h = new THREE.BoxHelper(part.mesh, m.color || '#f97316'); h.userData.target = part.mesh; stScene.add(h); team.helpers.set(sid, h); } catch {}
+  }
+}
+function teamBindSocket() {
+  if (!socket || socket._teamBound) return; socket._teamBound = true;
+  socket.on('team_member', ev => {
+    if (!team.on && !team.joining) return;
+    if (ev.action === 'join') { team.members.set(ev.socketId, { socketId:ev.socketId, userId:ev.userId, username:ev.username, color:ev.color, sel:null }); showToast('👥 ' + ev.username + ' entró a editar'); }
+    else { const m = team.members.get(ev.socketId); team.members.delete(ev.socketId); if (m) showToast('👥 ' + m.username + ' salió'); }
+    teamRenderUi();
+  });
+  socket.on('team_ops', ({ rev, ops }) => {
+    if (team.joining) { team.buf.push({ rev, ops }); return; }
+    if (!team.on || rev <= team.rev) return;
+    team.rev = rev; teamApplyOps(ops);
+  });
+  socket.on('team_sel', ({ socketId, id }) => { const m = team.members.get(socketId); if (m) { m.sel = id; teamRenderUi(); } });
+  socket.on('team_chat', msg => {
+    team.chat.push(msg); if (team.chat.length > 80) team.chat.shift();
+    const open = document.getElementById('mo-team')?.classList.contains('open');
+    if (!open && msg.socketId !== socket.id) { team.unread++; showToast('💬 ' + msg.username + ': ' + msg.text.slice(0, 80)); }
+    teamRenderChat(); teamRenderUi();
+  });
+  socket.on('team_kicked', () => { teamLeaveLocal(); showToast('Ya no sos parte del equipo de este proyecto', 5000); });
+  socket.on('team_invite', ({ mapName, from }) => { showToast('👥 ' + from + ' te sumó al proyecto "' + mapName + '"', 6000); liveRefresh('maps'); });
+  socket.on('connect', () => { if (team.wantOn && team.mapId && stMapId === team.mapId) { team.on = false; teamJoin(true); } });
+  socket.on('disconnect', () => { if (team.on) { team.on = false; clearInterval(team.timer); teamRenderUi(); } });
+}
+function teamAutoJoin() {
+  const m = getMaps()[stMapId]; if (!m || !ME) return;
+  if (team.mapId && team.mapId !== stMapId) teamLeaveLocal();
+  if (teamCanEdit(m) && ((m.collaborators || []).length > 0 || m.authorId !== ME.id)) teamJoin();
+  teamRenderUi();
+}
+const _origInitStudio = window.initStudio;
+window.initStudio = function () { _origInitStudio(); teamAutoJoin(); };
+const _origGoTab = window.goTab;
+window.goTab = function (t, extra) { if (t !== 'studio' && team.wantOn && !stPlaytesting) teamLeaveLocal(); return _origGoTab(t, extra); };
+function teamRenderUi() {
+  const pill = document.getElementById('team-pill');
+  if (pill) pill.textContent = team.on ? ' · ' + team.members.size + (team.unread ? ' 💬' + team.unread : '') : '';
+  const box = document.getElementById('team-online'), wrap = document.getElementById('team-online-wrap'), chat = document.getElementById('team-chat-wrap');
+  if (wrap) wrap.style.display = team.on ? '' : 'none';
+  if (chat) chat.style.display = team.on ? '' : 'none';
+  if (box) box.innerHTML = [...team.members.values()].map(m => {
+    const part = m.sel ? teamPartById(m.sel) : null;
+    return '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.06);font-size:12px"><span style="width:9px;height:9px;border-radius:50%;background:' + esc(m.color || '#5b8def') + '"></span>' + esc(m.username) + (m.socketId === socket?.id ? ' (vos)' : '') + (part ? ' · ✏️ ' + esc(String(part.data.name || part.data.type || 'pieza')) : '') + '</span>';
+  }).join('');
+}
+function teamRenderChat() {
+  const el = document.getElementById('team-chat'); if (!el) return;
+  el.innerHTML = team.chat.map(m => '<div><b style="color:' + esc(m.color || '#9aa6bf') + '">' + esc(m.username) + '</b> ' + esc(m.text) + '</div>').join('');
+  el.scrollTop = el.scrollHeight;
+}
+function teamSendChat() {
+  const inp = document.getElementById('team-chat-inp'); const text = inp.value.trim(); if (!text || !team.on) return;
+  socket.emit('team_chat', { text }); inp.value = '';
+}
+async function teamLoadInfo() {
+  const mapId = stMapId; if (!mapId || !ME) return;
+  const list = document.getElementById('team-list'), proj = document.getElementById('team-proj'), addRow = document.getElementById('team-add-row');
+  const map = getMaps()[mapId]; if (proj) proj.textContent = map ? 'Proyecto: ' + (map.name || 'Sin nombre') : '';
+  try {
+    const r = await apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/team');
+    team.info = r;
+    if (addRow) addRow.style.display = r.canManage ? 'flex' : 'none';
+    const row = (u, tag, rm) => '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.05)"><span style="width:9px;height:9px;border-radius:50%;background:' + esc(u.color || '#5b8def') + '"></span><span style="flex:1;font-size:13px">' + esc(u.username) + ' <span style="color:var(--text3);font-size:11px">' + tag + '</span></span>' + (rm ? '<button class="btn btn-red" style="padding:3px 10px;font-size:11px" onclick="teamRemove(\'' + esc(u.id) + '\')">Quitar</button>' : '') + '</div>';
+    if (list) list.innerHTML = row(r.owner, 'creador', false) + (r.team.length ? r.team.map(u => row(u, 'colaborador', r.canManage)).join('') : '<div style="font-size:12px;color:var(--text3)">Todavía no hay colaboradores.</div>');
+  } catch (err) { if (list) list.innerHTML = '<div style="font-size:12px;color:var(--text3)">' + esc(err.message) + '</div>'; }
+}
+function teamRenderShared() {
+  const el = document.getElementById('team-shared'); if (!el || !ME) return;
+  const mine = Object.values(getMaps()).filter(m => m && m.authorId !== ME.id && (m.collaborators || []).includes(ME.id));
+  el.innerHTML = mine.length ? mine.map(m => '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.05)"><span style="flex:1;font-size:13px">' + esc(m.name || 'Sin nombre') + ' <span style="color:var(--text3);font-size:11px">de ' + esc(m.authorName || 'alguien') + (m.isHtmlGame ? ' · app' : '') + '</span></span><button class="btn btn-g" style="padding:3px 10px;font-size:11px" onclick="closeModal(\'mo-team\');editMap(\'' + esc(m.id) + '\')">Abrir</button></div>').join('')
+    : '<div style="font-size:12px;color:var(--text3)">Cuando alguien te sume a su proyecto, aparece acá.</div>';
+}
+function teamOpenModal() {
+  if (!ME) { showToast('Iniciá sesión para usar el modo equipo'); return; }
+  team.unread = 0; openModal('mo-team'); teamRenderUi(); teamRenderChat(); teamRenderShared();
+  if (stMapId && getMaps()[stMapId]) teamLoadInfo(); else { const l = document.getElementById('team-list'); if (l) l.innerHTML = '<div style="font-size:12px;color:var(--text3)">Abrí un proyecto en el editor para administrar su equipo.</div>'; const a = document.getElementById('team-add-row'); if (a) a.style.display = 'none'; }
+}
+async function teamAdd() {
+  const inp = document.getElementById('team-add-name'), name = inp.value.trim(); if (!name || !stMapId) return;
+  try {
+    const r = await apiRequest('/api/maps/' + encodeURIComponent(stMapId) + '/team', { method:'POST', body:{ add:name } });
+    inp.value = ''; const maps = getMaps(); if (maps[stMapId]) { maps[stMapId].collaborators = r.team.map(t => t.id); DB.set('maps', maps); }
+    showToast('✅ ' + name + ' se sumó al equipo'); await teamLoadInfo();
+    const onStudio = document.getElementById('s-studio')?.classList.contains('active');
+    if (onStudio && !team.on && !getMaps()[stMapId]?.isHtmlGame) teamJoin();
+  } catch (err) { showToast(err.message); }
+}
+async function teamRemove(userId) {
+  if (!stMapId) return;
+  try {
+    const r = await apiRequest('/api/maps/' + encodeURIComponent(stMapId) + '/team', { method:'POST', body:{ remove:userId } });
+    const maps = getMaps(); if (maps[stMapId]) { maps[stMapId].collaborators = r.team.map(t => t.id); DB.set('maps', maps); }
+    await teamLoadInfo();
+  } catch (err) { showToast(err.message); }
+}
 ensureDefaultMaps();
 // Traspaso desde la app instalada: Safari entra con un código de un solo uso en #handoff=… y atiende la llamada.
 const _handoffTok = (() => { try { const m = /[#&]handoff=([A-Za-z0-9_-]{20,100})/.exec(location.hash); if (m) { history.replaceState(null, '', location.pathname + location.search); return m[1]; } } catch {} return ''; })();
@@ -2805,6 +3211,7 @@ function openGamePage(mapId) {
   privBadge.style.background = privColor.replace(')', ',.15)').replace('var(','rgba(').replace('--green','34,211,166').replace('--yellow','245,158,11').replace('--acc2','139,92,246').replace('--red','239,68,68');
   // Botones
   const isOwner = m.authorId === ME.id;
+  const isCollab = !isOwner && (m.collaborators || []).includes(ME.id);
   const canPlay = canPlayMap(m);
   const liked = (ME.liked||[]).includes(mapId);
   document.getElementById('gp-actions').innerHTML =
@@ -2813,7 +3220,7 @@ function openGamePage(mapId) {
                '<button class="btn btn-g" style="opacity:.5;cursor:not-allowed">🔒 Sin acceso</button>')+
     '<button class="btn btn-g" id="gp-like-btn" onclick="toggleLike(\''+mapId+'\',this)">'+
     (liked?'❤️':'🤍')+' '+(m.likes||0)+'</button>'+
-    (isOwner ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editMap(\''+mapId+'\')">✏️ Editar</button>' : '')+
+    ((isOwner || isCollab) ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editMap(\''+mapId+'\')">✏️ Editar'+(isCollab?' (equipo)':'')+'</button>' : '')+
     (isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');deleteMap(\''+mapId+'\')">🗑️ Borrar</button>' : '')+
     (isAdmin() && !isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');banUser(\''+m.authorId+'\')">🚫 Banear autor</button>' : '');
   openModal('mo-game-page');
