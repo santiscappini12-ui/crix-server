@@ -136,12 +136,25 @@ function areFriends(a, b) {
   const ua = DB.users[a], ub = DB.users[b];
   return !!(ua && ub && a !== b && (ua.friends || []).includes(b) && (ub.friends || []).includes(a));
 }
+// Cómo terminó la última llamada de cada persona (2 min): si estaba sin conexión justo cuando la otra rechazó/cortó, lo recibe
+// al volver (call_sync) y la pantalla no queda en "Llamando…" para siempre.
+const callOutcomes = new Map();   // userId → { peer, event, reason, at }
+function rememberOutcome(userId, peerId, event, reason) { callOutcomes.set(userId, { peer:peerId, event, reason:reason || '', at:Date.now() }); }
+setInterval(() => { const now = Date.now(); for (const [k, v] of callOutcomes) if (now - v.at > 120000) callOutcomes.delete(k); }, 60000).unref?.();
+const CALL_STALE_RING_MS = 55000;                        // una llamada que sigue "sonando" pasado esto quedó huérfana
+function dropStaleRinging(userId) {
+  const c = calls.get(userId);
+  if (c && !c.accepted && Date.now() - (c.startedAt || 0) > CALL_STALE_RING_MS) clearCall(userId);
+}
 function clearCall(userId, notify) {
   const c = calls.get(userId); if (!c) return null;
   clearTimeout(c.timer); clearInterval(c.ring); clearTimeout(c.dcTimer); calls.delete(userId);
   const other = calls.get(c.peer);
   if (other && other.peer === userId) { clearTimeout(other.timer); clearInterval(other.ring); clearTimeout(other.dcTimer); calls.delete(c.peer); }
-  if (notify) { const target = onlineUsers[c.peer]; if (target) io.to(target.socketId).emit(notify.event, { from:userId, reason:notify.reason }); }
+  if (notify) {
+    rememberOutcome(c.peer, userId, notify.event, notify.reason);
+    const target = onlineUsers[c.peer]; if (target) io.to(target.socketId).emit(notify.event, { from:userId, reason:notify.reason });
+  }
   // Si la llamada no llegó a atenderse y la cortó/perdió quien llamaba, se cancela el timbre en los
   // dispositivos de quien recibía y queda un aviso de llamada perdida.
   if (!c.accepted && c.caller && push.has(c.peer)) {
@@ -716,6 +729,20 @@ async function fetchJson(url, opts = {}, ms = 6000) {
 // Normaliza lo que se haya puesto en CRIX_TURN_URL: acepta "turn:host:3478", "host:3478", solo "host" (se expande a UDP+TCP+TLS 443,
 // que es lo que ExpressTURN publica) y separa por coma, espacio o salto de línea. Una URL mal formada hacía que
 // RTCPeerConnection lanzara SyntaxError en el navegador y la llamada ni siquiera arrancaba.
+// Conjunto completo que publica ExpressTURN: UDP 3478, TCP 3478, TCP 80 y TLS 443. Las redes que bloquean UDP o puertos
+// raros solo pasan por 80/443, así que tenerlos todos es lo que evita que la llamada se quede sin ruta.
+function standardTurnSet(host) {
+  return ['turn:' + host + ':3478?transport=udp', 'turn:' + host + ':3478?transport=tcp', 'turn:' + host + ':80?transport=tcp', 'turns:' + host + ':443?transport=tcp'];
+}
+// Si CRIX_TURN_URL apunta a ExpressTURN con una sola URL (por ejemplo solo UDP 3478), se completan las demás.
+function completeExpressTurn(urls) {
+  const hosts = new Set();
+  for (const u of urls) { const m = u.match(/^turns?:([^:?\/]+)/i); if (m && /(^|\.)expressturn\.com$/i.test(m[1])) hosts.add(m[1]); }
+  // La URL "pelada" (turn:host:3478, sin transport) queda cubierta por el conjunto completo: no se repite.
+  const out = urls.filter(u => { const m = u.match(/^turn:([^:?\/]+):3478$/i); return !(m && hosts.has(m[1])); });
+  for (const h of hosts) for (const u of standardTurnSet(h)) if (!out.includes(u)) out.push(u);
+  return out;
+}
 function normalizeTurnUrls(raw) {
   const out = [];
   const add = u => { if (u && !out.includes(u)) out.push(u); };
@@ -726,12 +753,10 @@ function normalizeTurnUrls(raw) {
     const hp = item.replace(/^\/\//, '').replace(/\/+$/, '');
     if (!hp) continue;
     if (/:\d+$/.test(hp)) { add('turn:' + hp); continue; }             // host:puerto
-    add('turn:' + hp + ':3478?transport=udp');                           // solo host → conjunto estándar
-    add('turn:' + hp + ':3478?transport=tcp');
-    add('turns:' + hp + ':443?transport=tcp');
+    for (const u of standardTurnSet(hp)) add(u);                          // solo host → conjunto estándar
   }
   // Un turn: sin transport también se ofrece por TCP y los turns: siempre por TCP (si no, algunos navegadores los ignoran).
-  return out.map(u => (/^turns:/.test(u) && !/transport=/.test(u)) ? u + (u.includes('?') ? '&' : '?') + 'transport=tcp' : u);
+  return completeExpressTurn(out.map(u => (/^turns:/.test(u) && !/transport=/.test(u)) ? u + (u.includes('?') ? '&' : '?') + 'transport=tcp' : u));
 }
 function turnCreds() { return { user: String(process.env.CRIX_TURN_USER || '').trim(), pass: String(process.env.CRIX_TURN_PASS || '').trim() }; }
 async function buildIceServers() {
@@ -751,6 +776,7 @@ async function buildIceServers() {
       // Un STUN del mismo proveedor ayuda a descubrir la IP pública; cada URL de TURN va en su propia entrada
       // (si una falla por puerto bloqueado, las demás siguen sirviendo).
       for (const u of urls) if (/^stuns?:/.test(u)) out.push({ urls:[u] });
+      if (urls.some(u => /expressturn\.com/i.test(u))) out.push({ urls:['stun:stun.expressturn.com:3478'] });
       const turnUrls = urls.filter(u => /^turns?:/.test(u));
       if (turnUrls.length) { out.push({ urls:turnUrls, username:user, credential:pass }); turn = true; if (source === 'stun') source = 'custom'; }
     }
@@ -848,7 +874,8 @@ app.get('/api/ice', requireAuth, async (req, res) => {
 // Diagnóstico del TURN: abrir https://TU-APP/api/ice/test estando con sesión iniciada.
 app.get('/api/ice/test', requireAuth, async (req, res) => {
   const t = await testTurn(); const ice = await getIceServers();
-  res.json({ ok:true, hasTurn:ice.turn, source:ice.source, urls:(ice.servers || []).flatMap(x => x.urls), ...t });
+  res.json({ ok:true, hasTurn:ice.turn, source:ice.source, urls:(ice.servers || []).flatMap(x => x.urls), ...t,
+    note:'Esta prueba corre desde el SERVIDOR. Si tu hosting bloquea UDP/puertos de salida puede decir "sin respuesta" aunque los teléfonos sí lleguen al TURN. Si ni así conectan, la llamada sigue por el modo respaldo (a través del servidor).' });
 });
 
 // ── Gente en línea ahora (visible para todos) ──
@@ -1409,21 +1436,26 @@ io.on('connection', socket => {
   // ── Llamadas de voz y video (señalización WebRTC) ──
   // El audio y el video van directo entre las dos personas (cifrado DTLS-SRTP); el servidor solo
   // retransmite la negociación (SDP e ICE) y lleva el estado: sonando, ocupado, aceptada, terminada.
-  socket.on('call_invite', ({ to, type } = {}) => {
-    const me = socket.data.user; to = String(to || ''); if (!me || !to || to === me.id) return;
+  const ackFn = cb => (typeof cb === 'function' ? cb : () => {});
+  socket.on('call_invite', ({ to, type } = {}, cb) => {
+    const ack = ackFn(cb);
+    const me = socket.data.user; to = String(to || ''); if (!me || !to || to === me.id) return ack({ ok:false, reason:'invalid' });
+    dropStaleRinging(me.id); dropStaleRinging(to);
     const target = onlineUsers[to];
-    if (!areFriends(me.id, to)) return socket.emit('call_unavailable', { from:to, reason:'not_friends' });
-    if (!DB.users[to] || DB.users[to].banned || (!target && !push.has(to))) return socket.emit('call_unavailable', { from:to, reason:'offline' });
-    if (calls.has(me.id)) return socket.emit('call_unavailable', { from:to, reason:'self_busy' });
-    if (calls.has(to)) return socket.emit('call_busy', { from:to });
+    if (!areFriends(me.id, to)) { socket.emit('call_unavailable', { from:to, reason:'not_friends' }); return ack({ ok:false, reason:'not_friends' }); }
+    if (!DB.users[to] || DB.users[to].banned || (!target && !push.has(to))) { socket.emit('call_unavailable', { from:to, reason:'offline' }); return ack({ ok:false, reason:'offline' }); }
+    if (calls.has(me.id)) { socket.emit('call_unavailable', { from:to, reason:'self_busy' }); return ack({ ok:false, reason:'self_busy' }); }
+    if (calls.has(to)) { socket.emit('call_busy', { from:to }); return ack({ ok:false, reason:'busy' }); }
+    callOutcomes.delete(me.id); callOutcomes.delete(to);
     const timer = setTimeout(() => {
       const c = calls.get(me.id); if (!c || c.accepted) return;
       clearCall(me.id, { event:'call_end', reason:'timeout' });
+      rememberOutcome(me.id, to, 'call_end', 'timeout');
       const mine = onlineUsers[me.id]; if (mine) io.to(mine.socketId).emit('call_end', { from:to, reason:'timeout' });
     }, 45000);
-    const callType = type === 'video' ? 'video' : 'audio';
-    calls.set(me.id, { peer:to, caller:true, accepted:false, type:callType, timer });
-    calls.set(to, { peer:me.id, caller:false, accepted:false, type:callType, timer });
+    const callType = type === 'video' ? 'video' : 'audio', startedAt = Date.now();
+    calls.set(me.id, { peer:to, caller:true, accepted:false, type:callType, timer, startedAt });
+    calls.set(to, { peer:me.id, caller:false, accepted:false, type:callType, timer, startedAt });
     if (target) io.to(target.socketId).emit('call_invite', { from:me.id, fromName:me.username, type:callType });
     // Si la persona no tiene Crix abierto, el teléfono/PC suena igual con una notificación de llamada.
     // Con la app cerrada solo puede sonar la notificación del sistema (el service worker no reproduce audio),
@@ -1446,24 +1478,62 @@ io.on('connection', socket => {
         notifyPush(to, ringPayload(), { ttl:10, urgency:'high', topic:ringTopic });
       }, RING_EVERY_MS);
     }
+    ack({ ok:true, ringing:!!target });
   });
-  socket.on('call_accept', ({ to } = {}) => {
+  // Aceptar es idempotente: si el aviso a quien llamó se perdió (socket reconectando) el cliente reintenta y se le vuelve a
+  // avisar; antes el segundo intento se descartaba y los dos quedaban esperando hasta cortarse por tiempo.
+  socket.on('call_accept', ({ to } = {}, cb) => {
+    const ack = ackFn(cb);
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
-    if (!c || c.peer !== to) return socket.emit('call_end', { from:to, reason:'gone' });   // la llamada ya no existe: que la pantalla no quede colgada
-    if (c.caller || c.accepted) return;
-    clearTimeout(c.timer); clearInterval(c.ring); c.accepted = true; const other = calls.get(to); if (other) other.accepted = true;
-    const target = onlineUsers[to]; if (target) io.to(target.socketId).emit('call_accept', { from:me.id }); else log('CALL', 'accept de ' + me.username + ' sin socket de quien llamó (' + to + ')');
+    if (!c || c.peer !== to) { socket.emit('call_end', { from:to, reason:'gone' }); return ack({ ok:false, reason:'gone' }); }   // la llamada ya no existe: que la pantalla no quede colgada
+    if (c.caller) return ack({ ok:false, reason:'caller' });
+    if (!c.accepted) {
+      clearTimeout(c.timer); clearInterval(c.ring); clearTimeout(c.dcTimer); c.accepted = true;
+      const other = calls.get(to); if (other) { other.accepted = true; clearTimeout(other.dcTimer); }
+    }
+    const target = onlineUsers[to];
+    if (target) io.to(target.socketId).emit('call_accept', { from:me.id }); else log('CALL', 'accept de ' + me.username + ' sin socket de quien llamó (' + to + ')');
+    ack({ ok:true, callerOnline:!!target });
   });
-  socket.on('call_decline', ({ to } = {}) => {
+  socket.on('call_decline', ({ to } = {}, cb) => {
+    const ack = ackFn(cb);
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
-    if (!c || c.peer !== to) return socket.emit('call_end', { from:to, reason:'gone' });
-    if (c.caller || c.accepted) return;
+    if (!c || c.peer !== to) return ack({ ok:true, already:true });   // ya no existe: el rechazo igual queda "hecho" (un reintento no debe pisar otra llamada)
+    if (c.caller || c.accepted) return ack({ ok:false });
     clearCall(me.id, { event:'call_decline' });
+    ack({ ok:true });
   });
-  socket.on('call_end', ({ to } = {}) => {
+  socket.on('call_end', ({ to } = {}, cb) => {
+    const ack = ackFn(cb);
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
-    if (!c || c.peer !== to) return;   // ya estaba cortada: nada que avisar
+    if (!c || c.peer !== to) return ack({ ok:true, already:true });   // ya estaba cortada: nada que avisar
     clearCall(me.id, { event:'call_end', reason:'hangup' });
+    ack({ ok:true });
+  });
+  // Al reconectar, el cliente pregunta si su llamada sigue viva; si no, se le dice cómo terminó.
+  socket.on('call_sync', ({ peer } = {}, cb) => {
+    const ack = ackFn(cb);
+    const me = socket.data.user; peer = String(peer || ''); if (!me || !peer) return ack({ alive:false });
+    const c = calls.get(me.id);
+    if (c && c.peer === peer) return ack({ alive:true, accepted:!!c.accepted });
+    const o = callOutcomes.get(me.id);
+    ack({ alive:false, outcome: o && o.peer === peer ? { event:o.event, reason:o.reason } : null });
+  });
+  // Modo respaldo: si WebRTC no logra conectar (TURN bloqueado, red restringida, hosting sin UDP…) el audio y el video bajan
+  // de calidad pero viajan por este mismo socket, que ya funcionó para hacer sonar la llamada. Solo se retransmite entre
+  // las dos personas de una llamada aceptada, con tope de tamaño y de ritmo.
+  const CALL_MEDIA_MAX = { a:6000, v:100000, h:32 };
+  socket.on('call_media', msg => {
+    const me = socket.data.user; if (!me || !msg || typeof msg !== 'object') return;
+    const to = String(msg.to || ''), k = msg.k === 'v' ? 'v' : msg.k === 'h' ? 'h' : 'a';
+    const c = calls.get(me.id); if (!c || !c.accepted || c.peer !== to) return;
+    let d = msg.d; if (d instanceof ArrayBuffer) d = Buffer.from(d); else if (ArrayBuffer.isView(d) && !Buffer.isBuffer(d)) d = Buffer.from(d.buffer, d.byteOffset, d.byteLength);
+    if (!Buffer.isBuffer(d) || !d.length || d.length > CALL_MEDIA_MAX[k]) return;
+    const now = Date.now(), rl = c.rl || (c.rl = { t:now, a:0, v:0, h:0, bytes:0 });
+    if (now - rl.t >= 1000) { rl.t = now; rl.a = rl.v = rl.h = 0; rl.bytes = 0; }
+    if (++rl[k] > (k === 'a' ? 60 : k === 'v' ? 15 : 8) || (rl.bytes += d.length) > 450000) return;
+    const target = onlineUsers[to]; if (!target) return;
+    io.to(target.socketId).volatile.emit('call_media', { from:me.id, k, s:msg.s | 0, d });
   });
   socket.on('call_signal', ({ to, kind, sdp, candidate } = {}) => {
     const me = socket.data.user, c = me && calls.get(me.id); to = String(to || '');
@@ -1628,7 +1698,13 @@ io.on('connection', socket => {
     if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
     if (meta?.userId) {
       const presence = onlineUsers[meta.userId];
-      if (presence?.socketId === socket.id) {
+      // ¿Hay otra pestaña/dispositivo de la misma cuenta conectado? Entonces la cuenta sigue en línea y se le pasa la posta;
+      // antes, cerrar la pestaña más nueva dejaba a la cuenta "desconectada" (sin recibir llamadas) con otra abierta.
+      const otherSid = presence?.socketId === socket.id
+        ? Object.keys(connSockets).find(sid => sid !== socket.id && connSockets[sid]?.userId === meta.userId && io.sockets.sockets.get(sid)?.connected)
+        : null;
+      if (otherSid) { presence.socketId = otherSid; }
+      else if (presence?.socketId === socket.id) {
         const ringing = calls.get(meta.userId);
         const handing = !!(ringing && !ringing.caller && !ringing.accepted && handoffLive(meta.userId));   // traspaso a Safari en curso
         const keepRinging = handing || (ringing && !ringing.caller && !ringing.accepted && push.has(meta.userId));
@@ -1642,6 +1718,13 @@ io.on('connection', socket => {
             const cur = calls.get(uid);
             if (cur && cur === ringing && !onlineUsers[uid]) clearCall(uid, { event:'call_end', reason:'disconnect' });
           }, CALL_DISCONNECT_GRACE_MS);
+        } else if (ringing && ringing.caller && !ringing.accepted) {
+          // Quien llamaba perdió la conexión un instante (cambio de red, túnel): se le da margen para volver antes de cortar.
+          const uid = meta.userId; clearTimeout(ringing.dcTimer);
+          ringing.dcTimer = setTimeout(() => {
+            const cur = calls.get(uid);
+            if (cur && cur === ringing && !onlineUsers[uid]) clearCall(uid, { event:'call_end', reason:'disconnect' });
+          }, 12000);
         } else if (!keepRinging) clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
         else if (!handing) {
           // La app pasó a segundo plano y se cortó el socket sin avisar visibilidad: el teléfono tiene que sonar ahora.

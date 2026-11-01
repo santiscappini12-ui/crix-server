@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v12';
+const CACHE_NAME = 'crix-shell-v13';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-72.png'];
 const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-72.png';
