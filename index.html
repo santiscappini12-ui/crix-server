@@ -2407,7 +2407,22 @@ window.playMap = async function(mapId, instanceId = null) {
   setTimeout(() => { if (targetInstanceId) netJoinGame(mapId, targetInstanceId); _patchGameLoopWithNet(); }, 200);
 };
 ensureDefaultMaps();
-if (DB.get('token') && trySession()) restoreSession();
+// Traspaso desde la app instalada: Safari entra con un código de un solo uso en #handoff=… y atiende la llamada.
+const _handoffTok = (() => { try { const m = /[#&]handoff=([A-Za-z0-9_-]{20,100})/.exec(location.hash); if (m) { history.replaceState(null, '', location.pathname + location.search); return m[1]; } } catch {} return ''; })();
+async function handoffRedeem(tok) {
+  try {
+    const r = await fetch('/api/handoff/redeem', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ token: tok }) }).then(x => x.json());
+    if (!r.ok) throw new Error(r.err || 'No se pudo entrar');
+    const users = getUsers(); users[r.user.id] = r.user; DB.set('users', users); DB.set('session', r.user.id); DB.set('token', r.token);
+    _pendingNotif = { type:'call', from: String(r.peerId || ''), action:'accept' };   // el flujo de notificaciones atiende apenas llega el timbre
+    if (trySession()) restoreSession(); else throw new Error('No se pudo entrar');
+  } catch (e) {
+    showToast((e && e.message) || 'No se pudo pasar la llamada a Safari', 5000);
+    if (DB.get('token') && trySession()) restoreSession(); else { DB.del('session'); document.getElementById('s-auth').classList.add('active'); }
+  }
+}
+if (_handoffTok) handoffRedeem(_handoffTok);
+else if (DB.get('token') && trySession()) restoreSession();
 else { DB.del('session'); document.getElementById('s-auth').classList.add('active'); }
 document.getElementById('a-p').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 document.getElementById('r-p2').addEventListener('keydown', e => { if(e.key==='Enter') doRegister(); });
@@ -4383,6 +4398,7 @@ function callRender() {
   else html = (st.status === 'connecting' && callPipSupported() ? btn('🗗', callInPip() ? '#3b5bdb' : '#2a2f3e', 'callTogglePip()', 'Ventana flotante: la llamada sigue activa aunque salgas de Crix', 'pip-btn', 'nomini' + (ios && !callInPip() ? ' hot' : '')) : '') + btn('📵', 'var(--red)', 'callHangup()', 'Colgar');
   document.getElementById('call-btns').innerHTML = html;
   callPipHint(st);
+  callHandoffHint(st);
   if (st.status !== 'incoming') callPipCardStart();
 }
 ['call-remote', 'call-pip'].forEach(id => { const v = document.getElementById(id); if (!v) return;
@@ -4405,6 +4421,7 @@ function callWakeLockRelease() { try { if (_wakeLock) _wakeLock.release(); } cat
 var _pipCanvas = null;
 function callPipCardVideo() { return document.getElementById('call-pip'); }
 function callPipSupported() {
+  if (typeof isIOSDevice === 'function' && isIOSDevice() && typeof isStandalone === 'function' && isStandalone()) return false;   // bug de iOS: no hay PiP en la app instalada
   const v = callPipCardVideo() || document.createElement('video');
   if (document.pictureInPictureEnabled && v.requestPictureInPicture) return true;
   // iPhone/iPad (también en la PWA instalada): la API es webkitSetPresentationMode. webkitSupportsPresentationMode() devuelve false
@@ -4454,6 +4471,49 @@ function callPipHint(st) {
   el.textContent = '📲 Tocá acá antes de salir de Crix: abre la ventana flotante y así el micrófono sigue funcionando en segundo plano.';
   el.style.display = 'block';
 }
+// ── Traspaso a Safari (iPhone con la app instalada) ──
+// La ventana flotante no funciona en la app instalada (bug de iOS), pero sí en Safari. Mientras suena la llamada se pide un código
+// de un solo uso al servidor y el botón abre Safari con él: Safari inicia sesión solo y atiende.
+function callHandoffEligible(st) { return !!st && st.status === 'incoming' && typeof isIOSDevice === 'function' && isIOSDevice() && typeof isStandalone === 'function' && isStandalone(); }
+function callHandoffHint(st) {
+  let el = document.getElementById('call-handoff');
+  if (!callHandoffEligible(st)) { if (el) el.style.display = 'none'; return; }
+  const c = document.getElementById('call-center'); if (!c) return;
+  if (!el) { el = document.createElement('div'); el.id = 'call-handoff'; c.appendChild(el); }
+  if (!st._handoff) {
+    st._handoff = { loading: true };
+    apiRequest('/api/handoff', { method:'POST', body:{} })
+      .then(r => { st._handoff = { url: location.origin + '/#handoff=' + r.token, exp: Date.now() + (r.ttl || 60000) - 4000 }; })
+      .catch(() => { st._handoff = { failed: true }; })
+      .finally(() => { if (_callState === st) callHandoffHint(st); });
+  }
+  const h = st._handoff, bs = 'display:block;width:100%;margin-top:8px;padding:10px;border:0;border-radius:10px;font-weight:700;font-size:14px;color:#fff;background:#22c55e';
+  el.style.cssText = 'display:block;max-width:290px;margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(34,197,94,.16);border:1px solid rgba(34,197,94,.6);color:#d9fbe5;font-size:12.5px;line-height:1.4;text-align:center';
+  let html = '<div>📲 En iPhone conviene atender en Safari: así la llamada sigue cuando salís de Crix.</div>';
+  if (h.url) html += '<button style="' + bs + '" onclick="callHandoffOpen()">Atender en Safari</button>';
+  else if (h.failed) html += '<div style="margin-top:6px;opacity:.8">No se pudo preparar el traspaso. Podés atender acá.</div>';
+  else html += '<div style="margin-top:6px;opacity:.8">Preparando…</div>';
+  if (h.fallback) html += '<div style="margin-top:8px">¿No se abrió Safari? Copiá el enlace y pegalo en Safari (vale 1 minuto).</div><button style="' + bs + ';background:#3b5bdb" onclick="callHandoffCopy()">Copiar enlace</button>';
+  el.innerHTML = html;
+}
+function callHandoffOpen() {
+  const st = _callState, h = st && st._handoff; if (!h || !h.url) return;
+  if (Date.now() > h.exp) { st._handoff = null; callHandoffHint(st); return; }   // venció: se pide otro
+  h.opened = Date.now();
+  location.href = h.url.replace(/^http/, 'x-safari-http');
+  setTimeout(() => { if (_callState === st && document.visibilityState === 'visible') { h.fallback = true; callHandoffHint(st); } }, 1500);
+}
+async function callHandoffCopy() {
+  const st = _callState, h = st && st._handoff; if (!h || !h.url) return;
+  try { await navigator.clipboard.writeText(h.url); showToast('Enlace copiado. Pegalo en Safari.', 4000); } catch { showToast('No se pudo copiar el enlace'); }
+}
+// Al volver a la app instalada con la llamada ya pasada a Safari, se cierra la pantalla local sin colgar (la llamada sigue en Safari).
+document.addEventListener('visibilitychange', () => {
+  const st = _callState;
+  if (document.visibilityState === 'visible' && st && st.status === 'incoming' && st._handoff && st._handoff.opened && Date.now() - st._handoff.opened > 2500) {
+    callCleanup(); showToast('La llamada sigue en Safari.', 4000);
+  }
+});
 function callInPip() {
   const rv = document.getElementById('call-remote'), cv = callPipCardVideo();
   return !!document.pictureInPictureElement || (rv && rv.webkitPresentationMode === 'picture-in-picture') || (cv && cv.webkitPresentationMode === 'picture-in-picture');
