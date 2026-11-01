@@ -582,6 +582,38 @@ app.post('/api/logout', requireAuth, (req, res) => {
   res.json({ ok:true });
 });
 
+// ── Traspaso de una llamada entrante a Safari (iPhone con la app instalada) ──
+// La app instalada (PWA) no puede mantener el micrófono en segundo plano en iOS; Safari sí (con la ventana flotante).
+// La app pide un código de un solo uso mientras suena la llamada, abre Safari con ese código en el fragmento (#), y
+// Safari lo canjea por una sesión propia. El código vive en memoria, vence a los 60 s y solo se emite con una llamada sonando.
+const handoffs = new Map();   // hash del código → { userId, peerId, expiresAt }
+const HANDOFF_TTL_MS = 60000;
+function handoffLive(userId) {
+  const now = Date.now();
+  for (const [k, v] of handoffs) { if (v.expiresAt <= now) handoffs.delete(k); else if (v.userId === userId) return true; }
+  return false;
+}
+app.post('/api/handoff', requireAuth, (req, res) => {
+  const c = calls.get(req.user.id);
+  if (!c || c.caller || c.accepted) return res.status(409).json({ ok:false, err:'No hay una llamada entrante para pasar a Safari' });
+  let live = 0; for (const v of handoffs.values()) if (v.userId === req.user.id && v.expiresAt > Date.now()) live++;
+  if (live >= 3) return res.status(429).json({ ok:false, err:'Demasiados códigos activos' });
+  const token = crypto.randomBytes(32).toString('base64url');
+  handoffs.set(tokenHash(token), { userId: req.user.id, peerId: c.peer, expiresAt: Date.now() + HANDOFF_TTL_MS });
+  res.json({ ok:true, token, ttl: HANDOFF_TTL_MS });
+});
+app.post('/api/handoff/redeem', (req, res) => {
+  if (authLimited(req, res)) return;
+  const token = typeof req.body?.token === 'string' ? req.body.token.slice(0, 200) : '';
+  const key = tokenHash(token), h = token ? handoffs.get(key) : null;
+  if (h) handoffs.delete(key);   // un solo uso
+  if (!h || h.expiresAt <= Date.now()) return res.status(410).json({ ok:false, err:'El enlace venció. Volvé a intentarlo desde la llamada.' });
+  const user = DB.users[h.userId];
+  if (!user || user.banned) return res.status(403).json({ ok:false, err:'Cuenta no disponible' });
+  log('HANDOFF', user.username);
+  res.json({ ok:true, user: safeUser(user), token: issueSession(user), peerId: h.peerId });
+});
+
 // ── GET usuario ──
 app.get('/api/user/:id', (req, res) => {
   const u = DB.users[req.params.id];
@@ -1598,7 +1630,8 @@ io.on('connection', socket => {
       const presence = onlineUsers[meta.userId];
       if (presence?.socketId === socket.id) {
         const ringing = calls.get(meta.userId);
-        const keepRinging = ringing && !ringing.caller && !ringing.accepted && push.has(meta.userId);
+        const handing = !!(ringing && !ringing.caller && !ringing.accepted && handoffLive(meta.userId));   // traspaso a Safari en curso
+        const keepRinging = handing || (ringing && !ringing.caller && !ringing.accepted && push.has(meta.userId));
         const keepActive = ringing && ringing.accepted;
         if (keepActive) {
           // Llamada en curso: el media es P2P y sigue aunque la señalización se corte (app en segundo plano,
@@ -1610,7 +1643,7 @@ io.on('connection', socket => {
             if (cur && cur === ringing && !onlineUsers[uid]) clearCall(uid, { event:'call_end', reason:'disconnect' });
           }, CALL_DISCONNECT_GRACE_MS);
         } else if (!keepRinging) clearCall(meta.userId, { event:'call_end', reason:'disconnect' });
-        else {
+        else if (!handing) {
           // La app pasó a segundo plano y se cortó el socket sin avisar visibilidad: el teléfono tiene que sonar ahora.
           const caller = DB.users[ringing.peer];
           push.send(meta.userId, { type:'call', from:ringing.peer, fromName:caller?.username || 'Alguien', callType:ringing.type || 'audio',
