@@ -4273,7 +4273,9 @@ function callFbStop(st) {
   (fb.nodes || []).forEach(n => { try { n.onaudioprocess = null; n.disconnect(); } catch {} });
   try { if (fb.out) fb.out.disconnect(); } catch {}
   if (fb.vid) { try { fb.vid.pause(); fb.vid.srcObject = null; fb.vid.remove(); } catch {} }
-  if (fb.rstream) { fb.rstream.getTracks().forEach(t => { try { t.stop(); } catch {} }); if (st.remote === fb.rstream) st.remote = st.rtcRemote || null; }
+  if (fb.rstream) { fb.rstream.getTracks().forEach(t => { try { t.stop(); } catch {} }); }
+  // Al volver a WebRTC siempre se toma el stream directo (antes, en llamadas de solo voz st.remote quedaba en null y el <audio> nunca se enganchaba).
+  if (!st.remote || st.remote === fb.rstream) st.remote = st.rtcRemote || null;
   const v = document.getElementById('call-remote'); if (v && !st.remote) { try { v.srcObject = null; } catch {} }
   if (_callState === st) { if (st.remote) callAttachRemote(); callRender(); }
 }
@@ -4483,7 +4485,8 @@ function callOnConnState(st) {
   if (c === 'connected' || i === 'connected' || i === 'completed') {
     clearTimeout(st.discTimer); clearTimeout(st.connTimer); clearTimeout(st.hintTimer); clearTimeout(st.fbTimer); clearTimeout(st.fbTimer2); st.hint = ''; st.triedRestart = false;
     if (st.viaServer) callFbStop(st);                    // WebRTC ya conectó: se apaga el respaldo y se vuelve al audio/video directo
-    if (st.status !== 'active') callMarkActive(st); else { callAttachRemote(); callUpdateStatus(); }
+    if (!st.viaServer && st.rtcRemote && st.remote !== st.rtcRemote) st.remote = st.rtcRemote;
+    if (st.status !== 'active') { callMarkActive(st); callAttachRemote(); } else { callAttachRemote(); callUpdateStatus(); }
     callSendState(st);
   } else if (c === 'failed' || i === 'failed') {
     // Se intenta recuperar la ruta (cambio de red, vuelta de segundo plano) y, sin esperar, la llamada sigue por el servidor.
