@@ -2092,20 +2092,312 @@ function setScriptLanguage(language) {
 function setScriptEvent(eventName) { const s = stScripts.find(x => x.id === activeScriptId); if (s) { s.event = eventName; saveActiveScript(); } }
 function updateLineNums() { const lines = document.getElementById('code-ta').value.split('\n').length; document.getElementById('code-nums').textContent = Array.from({length:lines},(_,i)=>i+1).join('\n'); }
 function codeKeydown(e) { if (e.key === 'Tab') { e.preventDefault(); const ta = document.getElementById('code-ta'); const s = ta.selectionStart; ta.value = ta.value.substring(0,s) + '  ' + ta.value.substring(ta.selectionEnd); ta.selectionStart = ta.selectionEnd = s + 2; updateLineNums(); } }
-function compileCrixScript(source) {
-  return String(source||'').replace(/--[^\n]*/g,'')
-    .replace(/\bfunction\s+([\w$]+(?:\.[\w$]+)*)\s*\(([^)]*)\)/g,'function $1($2) {')
-    .replace(/\blocal\s+(\w+)/g,'let $1')
-    .replace(/\bif\b\s*(.*?)\s*then/g,'if ($1) {')
-    .replace(/\bwhile\s+(.*?)\s+do/g,'while ($1) {')
-    .replace(/\bthen\b/g,'').replace(/\bdo\b/g,'{')
-    .replace(/\bnot\s+/g,'!').replace(/\band\s+/g,'&& ')
-    .replace(/\bor\s+/g,'|| ').replace(/\bnil\b/g,'null')
-    .replace(/\bprint\b/g,'env.print').replace(/\bwarn\b/g,'env.warn')
-    .replace(/\berror\b/g,'env.error').replace(/\bworkspace\b/g,'env.workspace')
-    .replace(/\bmath\b/g,'env.math').replace(/\btonumber\b/g,'env.tonumber')
-    .replace(/\btostring\b/g,'env.tostring').replace(/\.\./g,'+')
-    .replace(/\bgame\b/g,'env.game').replace(/\bend\b/g,'}');
+function __compileCrix(source) {
+  const src = String(source || '');
+  const toks = [];
+  let i = 0, line = 1;
+  const isIdStart = c => /[A-Za-z_$]/.test(c), isId = c => /[\w$]/.test(c), isDigit = c => /[0-9]/.test(c);
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '\n') { toks.push({ t: 'nl', v: '\n', line }); line++; i++; continue; }
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === '-' && src[i + 1] === '-') {
+      const m = /^--\[(=*)\[/.exec(src.slice(i, i + 40));
+      if (m) {
+        const close = ']' + m[1] + ']', end = src.indexOf(close, i + m[0].length);
+        const stop = end < 0 ? src.length : end + close.length;
+        const breaks = (src.slice(i, stop).match(/\n/g) || []).length;
+        for (let b = 0; b < breaks; b++) toks.push({ t: 'nl', v: '\n', line: line + b });
+        line += breaks; i = stop; continue;
+      }
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== c && src[j] !== '\n') { if (src[j] === '\\') j++; j++; }
+      toks.push({ t: 'str', v: src.slice(i, j + 1), line }); i = j + 1; continue;
+    }
+    if (c === '[') {
+      const m = /^\[(=*)\[/.exec(src.slice(i, i + 40));
+      if (m) {
+        const close = ']' + m[1] + ']', end = src.indexOf(close, i + m[0].length);
+        const stop = end < 0 ? src.length : end;
+        let body = src.slice(i + m[0].length, stop);
+        if (body[0] === '\n') body = body.slice(1);
+        toks.push({ t: 'str', v: '`' + body.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${') + '`', line });
+        line += (src.slice(i, stop).match(/\n/g) || []).length; i = end < 0 ? src.length : end + close.length; continue;
+      }
+    }
+    if (isDigit(c) || (c === '.' && isDigit(src[i + 1] || ''))) {
+      const m = /^(0[xX][0-9a-fA-F]+|\d*\.?\d+(?:[eE][+-]?\d+)?)/.exec(src.slice(i));
+      toks.push({ t: 'num', v: m[0], line }); i += m[0].length; continue;
+    }
+    if (isIdStart(c)) {
+      let j = i + 1; while (j < src.length && isId(src[j])) j++;
+      toks.push({ t: 'id', v: src.slice(i, j), line }); i = j; continue;
+    }
+    const three = src.slice(i, i + 3), two = src.slice(i, i + 2);
+    if (three === '...') { toks.push({ t: 'op', v: three, line }); i += 3; continue; }
+    if (['==', '~=', '<=', '>=', '..', '+=', '-=', '*=', '/=', '%=', '=>', '!=', '&&', '||'].includes(two)) { toks.push({ t: 'op', v: two, line }); i += 2; continue; }
+    toks.push({ t: 'op', v: c, line }); i++;
+  }
+
+  // ── Utilidades de búsqueda sobre tokens ──
+  const sig = k => { while (k < toks.length && toks[k].t === 'nl') k++; return k; };
+  const open = { '(': ')', '[': ']', '{': '}' };
+  // Índice del cierre que corresponde a la apertura en `k`.
+  function matching(k) {
+    const stack = [];
+    for (let j = k; j < toks.length; j++) {
+      const v = toks[j].t === 'op' ? toks[j].v : '';
+      if (open[v]) stack.push(open[v]);
+      else if (v === ')' || v === ']' || v === '}') { stack.pop(); if (!stack.length) return j; }
+    }
+    return toks.length - 1;
+  }
+  // ¿La llave en `k` abre un objeto (tiene `clave =` o `[expr] =` a su nivel) o una lista?
+  function braceIsObject(k) {
+    const end = matching(k);
+    let depth = 0;
+    for (let j = k + 1; j < end; j++) {
+      const tk = toks[j], v = tk.t === 'op' ? tk.v : '';
+      if (open[v]) { depth++; if (depth === 1 && v === '[') { const m = matching(j); const n = sig(m + 1); if (toks[n] && toks[n].t === 'op' && toks[n].v === '=') return true; } continue; }
+      if (v === ')' || v === ']' || v === '}') { depth--; continue; }
+      if (depth === 0 && tk.t === 'id') { const n = sig(j + 1); if (toks[n] && toks[n].t === 'op' && toks[n].v === '=' && !(toks[n + 1] && toks[n + 1].v === '=')) return true; }
+    }
+    return false;
+  }
+  // Fin de la "expresión de la línea" desde `k`: primer salto de línea fuera de paréntesis (o token de cierre de bloque).
+  function lineEnd(k) {
+    let depth = 0;
+    for (let j = k; j < toks.length; j++) {
+      const v = toks[j].t === 'op' ? toks[j].v : '';
+      if (open[v]) depth++; else if (v === ')' || v === ']' || v === '}') depth--;
+      if (depth <= 0 && toks[j].t === 'nl') return j;
+      if (depth <= 0 && toks[j].t === 'id' && (toks[j].v === 'end' || toks[j].v === 'else' || toks[j].v === 'elseif')) return j;
+    }
+    return toks.length;
+  }
+  // Tokens (como lista) entre dos índices, ya traducidos recursivamente.
+  const sub = (a, b) => compileTokens(toks.slice(a, b));
+
+  const BLOCK_START = new Set(['if', 'while', 'for', 'function', 'repeat']);
+  let tmp = 0;
+  const out = [];
+  const stack = []; // tipos de bloque abiertos: 'brace' | 'until'
+
+  function compileTokens(list) {
+    // Traducción recursiva de un fragmento (expresiones). Reutiliza el mismo algoritmo en una instancia aislada.
+    const saved = { toks: toks.slice(), out: out.slice(), stack: stack.slice() };
+    toks.length = 0; toks.push(...list); out.length = 0; stack.length = 0;
+    run();
+    const result = out.join('');
+    toks.length = 0; toks.push(...saved.toks); out.length = 0; out.push(...saved.out); stack.length = 0; stack.push(...saved.stack);
+    return result.trim();
+  }
+
+  function emitFunctionHead(k) {
+    // toks[k] es `function`. Devuelve el índice del `(` de los parámetros.
+    let j = sig(k + 1);
+    if (toks[j] && toks[j].t === 'op' && toks[j].v === '(') { out.push('function '); return j; }
+    // function a.b.c(…) | function a:b(…) | function nombre(…)
+    const parts = []; let colon = false;
+    while (toks[j] && (toks[j].t === 'id' || (toks[j].t === 'op' && (toks[j].v === '.' || toks[j].v === ':')))) {
+      if (toks[j].v === ':') colon = true;
+      parts.push(toks[j].v); j++;
+    }
+    const name = parts.join('').replace(':', '.');
+    out.push(parts.length === 1 ? 'function ' + name : name + ' = function ');
+    void colon;
+    return j;
+  }
+
+  const NO_SEMI_AFTER = new Set(['function', 'local', 'if', 'elseif', 'while', 'for', 'not', 'and', 'or', 'return', 'then', 'do', 'else', 'repeat', 'until', 'in', 'end']);
+  const NO_SEMI_BEFORE = new Set(['and', 'or', 'then', 'do', 'in', 'end', 'else', 'elseif', 'until']);
+  let skipSemiAt = -1;
+  function run() {
+    skipSemiAt = -1;
+    for (let k = 0; k < toks.length; k++) {
+      const tk = toks[k];
+      if (tk.t === 'nl') { out.push('\n'); continue; }
+      const prev = toks[k - 1];
+      if (k !== skipSemiAt && prev && prev.t !== 'nl' && tk.t === 'id' && !NO_SEMI_BEFORE.has(tk.v) &&
+          (prev.t === 'str' || prev.t === 'num' || (prev.t === 'id' && !NO_SEMI_AFTER.has(prev.v)) || (prev.t === 'op' && (prev.v === ')' || prev.v === ']' || prev.v === '}')))) out.push(';');
+      if (tk.t === 'str' || tk.t === 'num') { out.push(tk.v); continue; }
+      if (tk.t === 'op') {
+        const v = tk.v;
+        if (v === '~=') out.push(' !== ');
+        else if (v === '==') out.push(' === ');
+        else if (v === '!=') out.push(' !== ');
+        else if (v === '..') out.push(' + ');
+        else if (v === '^') out.push(' ** ');
+        else if (v === '#') {
+          // #x, #x.y, #obj[1], #f(x)
+          let j = sig(k + 1), end = j;
+          while (end < toks.length) {
+            const n = toks[end];
+            if (n.t === 'id') { end++; }
+            else if (n.t === 'op' && (n.v === '.' || n.v === ':')) { end++; }
+            else if (n.t === 'op' && (n.v === '(' || n.v === '[')) { end = matching(end) + 1; }
+            else break;
+          }
+          out.push('__len(' + sub(j, end) + ')'); k = end - 1;
+        } else if (v === '{') {
+          const end = matching(k), isObj = braceIsObject(k);
+          let body = '';
+          // Contenido: claves `nombre =` → `nombre:`; `[e] =` → `[e]:`
+          const inner = toks.slice(k + 1, end);
+          const fixed = [];
+          let depth = 0;
+          for (let q = 0; q < inner.length; q++) {
+            const it = inner[q], iv = it.t === 'op' ? it.v : '';
+            if (open[iv]) depth++; else if (iv === ')' || iv === ']' || iv === '}') depth--;
+            if (isObj && depth === 0 && it.t === 'op' && it.v === '=' && !(inner[q + 1] && inner[q + 1].v === '=') && !(inner[q - 1] && ['=', '~', '<', '>'].includes(inner[q - 1].v))) { fixed.push({ t: 'op', v: ':', objKey: true, line: it.line }); continue; }
+            fixed.push(it);
+          }
+          body = compileTokens(fixed);
+          out.push(isObj ? '{' + body + '}' : '[' + body + ']'); k = end;
+        } else if (v === ':') {
+          // obj:metodo(...) → obj.metodo(...)   (en tablas, `clave =` ya viene marcada como clave)
+          out.push(tk.objKey ? ':' : '.');
+        } else if ((v === '-' || v === '+') && /[-+]$/.test(out[out.length - 1] || '')) out.push(' ' + v);
+        else out.push(v);
+        continue;
+      }
+      // identificadores y palabras clave
+      const w = tk.v;
+      switch (w) {
+        case 'local': {
+          let j = sig(k + 1);
+          if (toks[j] && toks[j].v === 'function') { k = j - 1; break; }
+          // local a, b = x, y
+          const names = []; let q = j;
+          while (toks[q] && toks[q].t === 'id') { names.push(toks[q].v); q = sig(q + 1); if (toks[q] && toks[q].v === ',') q = sig(q + 1); else break; }
+          if (names.length > 1) {
+            if (toks[q] && toks[q].t === 'op' && toks[q].v === '=') {
+              const end = lineEnd(q + 1);
+              out.push('let [' + names.join(', ') + '] = __mv(' + sub(q + 1, end) + ')'); k = end - 1;
+            } else { out.push('let ' + names.join(', ')); k = q - 1; }
+          } else out.push('let ');
+          if (names.length > 1) break;
+          break;
+        }
+        case 'function': {
+          const paren = emitFunctionHead(k);
+          const close = matching(paren);
+          const params = sub(paren + 1, close).replace(/\.\.\./g, '...args');
+          // método con dos puntos: no agrega parámetro; `self` se traduce a `this`.
+          out.push('(' + params + ') {'); stack.push('brace'); k = close; skipSemiAt = k + 1;
+          break;
+        }
+        case 'if': { const end = findKeyword(k + 1, 'then'); out.push('if (' + sub(k + 1, end) + ') {'); stack.push('brace'); k = end; break; }
+        case 'elseif': { const end = findKeyword(k + 1, 'then'); out.push('} else if (' + sub(k + 1, end) + ') {'); k = end; break; }
+        case 'else': out.push('} else {'); break;
+        case 'while': { const end = findKeyword(k + 1, 'do'); out.push('while (' + sub(k + 1, end) + ') {'); stack.push('brace'); k = end; break; }
+        case 'for': {
+          const doIdx = findKeyword(k + 1, 'do');
+          const head = toks.slice(k + 1, doIdx);
+          const inIdx = head.findIndex(t => t.t === 'id' && t.v === 'in');
+          if (inIdx >= 0) {
+            const names = head.slice(0, inIdx).filter(t => t.t === 'id').map(t => t.v);
+            const expr = compileTokens(head.slice(inIdx + 1));
+            const direct = /^i?pairs\(/.test(expr);
+            out.push('for (const [' + (names.length === 1 ? names[0] + ', __' + (++tmp) : names.join(', ')) + '] of ' + (direct ? expr : '__iter(' + expr + ')') + ') {');
+          } else {
+            const name = head[0].v;
+            const eq = head.findIndex(t => t.t === 'op' && t.v === '=');
+            const rest = head.slice(eq + 1), parts = []; let cur = [], depth = 0;
+            for (const t of rest) {
+              const v = t.t === 'op' ? t.v : '';
+              if (open[v]) depth++; else if (v === ')' || v === ']' || v === '}') depth--;
+              if (v === ',' && depth === 0) { parts.push(cur); cur = []; } else cur.push(t);
+            }
+            parts.push(cur);
+            const n = ++tmp, a = compileTokens(parts[0]), b = compileTokens(parts[1] || []), s = parts[2] ? compileTokens(parts[2]) : '1';
+            out.push('for (let ' + name + ' = ' + a + ', __e' + n + ' = ' + b + ', __s' + n + ' = ' + s + '; __s' + n + ' > 0 ? ' + name + ' <= __e' + n + ' : ' + name + ' >= __e' + n + '; ' + name + ' += __s' + n + ') {');
+          }
+          stack.push('brace'); k = doIdx; break;
+        }
+        case 'do': out.push('{'); stack.push('brace'); break;
+        case 'repeat': out.push('do {'); stack.push('until'); break;
+        case 'until': {
+          const end = lineEnd(k + 1);
+          out.push('} while (!(' + sub(k + 1, end) + '))'); stack.pop(); k = end - 1; break;
+        }
+        case 'end': out.push('}'); stack.pop(); break;
+        case 'then': case 'in': break; // ya consumidos
+        case 'and': out.push(' && '); break;
+        case 'or': out.push(' || '); break;
+        case 'not': out.push('!'); break;
+        case 'nil': out.push('null'); break;
+        case 'self': out.push('this'); break;
+        case 'return': {
+          // return a, b  →  return [a, b]
+          const end = lineEnd(k + 1);
+          const seg = toks.slice(k + 1, end);
+          let depth = 0, commas = false;
+          for (const t of seg) { const v = t.t === 'op' ? t.v : ''; if (open[v]) depth++; else if (v === ')' || v === ']' || v === '}') depth--; if (v === ',' && depth === 0) commas = true; }
+          if (commas) { out.push('return [' + compileTokens(seg) + ']'); k = end - 1; } else out.push('return ');
+          break;
+        }
+        case 'elif': out.push(w); break;
+        default: out.push(w);
+      }
+      // Espacio de separación entre palabras/identificadores consecutivos
+      const next = toks[k + 1];
+      if (next && (next.t === 'id' || next.t === 'num' || next.t === 'str') && /[\w$]$/.test(out[out.length - 1] || '')) out.push(' ');
+    }
+  }
+
+  function findKeyword(from, word) {
+    let depth = 0;
+    for (let j = from; j < toks.length; j++) {
+      const t = toks[j], v = t.t === 'op' ? t.v : '';
+      if (open[v]) depth++; else if (v === ')' || v === ']' || v === '}') depth--;
+      if (depth === 0 && t.t === 'id' && t.v === word) return j;
+      if (depth === 0 && t.t === 'id' && word === 'then' && (t.v === 'end')) return j;
+    }
+    return toks.length - 1;
+  }
+  void BLOCK_START;
+
+  run();
+  return out.join('');
+}
+
+const CRIXSCRIPT_PRELUDE = `
+const __len = v => v == null ? 0 : (typeof v === 'string' || Array.isArray(v)) ? v.length : Object.keys(v).length;
+const __mv = (...a) => a.length === 1 && Array.isArray(a[0]) ? a[0] : a;
+const __iter = v => { if (v && typeof v[Symbol.iterator] === 'function' && !(typeof v === 'string')) { if (Array.isArray(v)) return v.entries(); return v[Symbol.iterator](); } if (v && v.__pairs) return v.__pairs; return Object.entries(v || {}); };
+const pairs = v => Array.isArray(v) ? Array.from(v.entries()).concat(Object.entries(v).filter(([k]) => !/^\\d+$/.test(k))) : Object.entries(v || {});
+const ipairs = v => Array.from((v || []).entries());
+const type = v => v === null || v === undefined ? 'nil' : Array.isArray(v) ? 'table' : typeof v === 'object' ? 'table' : typeof v === 'function' ? 'function' : typeof v;
+const select = (n, ...a) => n === '#' ? a.length : a.slice(n - 1);
+const unpack = v => v;
+const table = {
+  insert: (t, a, b) => { if (b === undefined) t.push(a); else t.splice(a, 0, b); },
+  remove: (t, i) => i === undefined ? t.pop() : t.splice(i, 1)[0],
+  concat: (t, s) => t.join(s === undefined ? '' : s),
+  sort: (t, f) => t.sort(f ? (a, b) => (f(a, b) ? -1 : f(b, a) ? 1 : 0) : undefined),
+  unpack: t => t, clear: t => { t.length = 0; }, find: (t, v) => { const i = t.indexOf(v); return i < 0 ? null : i; }
+};
+const os = { time: () => Math.floor(Date.now() / 1000), clock: () => Date.now() / 1000 };
+const string = {
+  upper: s => String(s).toUpperCase(), lower: s => String(s).toLowerCase(), len: s => String(s).length,
+  sub: (s, i, j) => String(s).substring(i - 1, j === undefined ? undefined : j), rep: (s, n) => String(s).repeat(Math.max(0, n)),
+  split: (s, sep) => String(s).split(sep), find: (s, p) => { const i = String(s).indexOf(p); return i < 0 ? null : [i + 1, i + String(p).length]; },
+  format: (f, ...a) => { let n = 0; return String(f).replace(/%(-?\\d*)(?:\\.(\\d+))?([dsfxXgi%])/g, (m, w, p, c) => { if (c === '%') return '%'; const v = a[n++]; let r = c === 'd' || c === 'i' ? String(Math.trunc(Number(v))) : c === 'f' ? Number(v).toFixed(p === undefined ? 6 : Number(p)) : c === 'x' ? Number(v).toString(16) : c === 'X' ? Number(v).toString(16).toUpperCase() : String(v); const width = Math.abs(parseInt(w || '0', 10)) || 0; if (/^0/.test(w || '')) r = r.padStart(width, '0'); else if ((w || '').startsWith('-')) r = r.padEnd(width); else r = r.padStart(width); return r; }); }
+};
+for (const [name, fn] of Object.entries({ upper: s => s.toUpperCase(), lower: s => s.toLowerCase(), len: s => s.length })) { try { Object.defineProperty(String.prototype, name, { value: function () { return fn(String(this)); }, configurable: true }); } catch (_) {} }
+`;
+
+
+// Cada script se envuelve en su propio ámbito para que sus variables (type, table, string…) no choquen con la biblioteca tipo Lua.
+function compileCrixScript(source, isModule) {
+  const code = __compileCrix(source), lib = CRIXSCRIPT_PRELUDE.replace(/\n/g, ' ');
+  if (isModule) return lib + ' return (function(){' + code + '\n})();';
+  return lib + ' const __u=(function(){' + code + '\n;return{onStart:typeof onStart===\'function\'?onStart:undefined,onUpdate:typeof onUpdate===\'function\'?onUpdate:undefined,onStop:typeof onStop===\'function\'?onStop:undefined};})(); const onStart=__u.onStart,onUpdate=__u.onUpdate,onStop=__u.onStop;';
 }
 const SCRIPT_WORKER_SOURCE = `
 for (const key of ['fetch','XMLHttpRequest','WebSocket','EventSource','importScripts']) { try { self[key] = undefined; } catch (_) {} }
@@ -2136,6 +2428,8 @@ game.on = (name, fn) => { if (typeof fn === 'function') { const key = String(nam
 game.onTouched = (partName, fn) => { game.on('touched:' + String(partName), fn); send('watch', {name:String(partName)}); };
 game.onKey = (key, fn) => game.on('key:' + String(key).toLowerCase(), fn);
 game.findPart = name => workspace.findFirstChild(name);
+game.fireServer = (name, data) => sendCommand('remote', {name:String(name).slice(0,40), data:data===undefined?null:data});
+game.onServerEvent = (name, fn) => game.on('remote:' + String(name), fn);
 const guiState = {};
 const guiHandle = name => new Proxy({}, {
   get: (target, key) => { if (key === 'onClick') return fn => game.on('gui:' + name + ':click', fn); if (key === 'onSubmit') return fn => game.on('gui:' + name + ':submit', fn); if (key === 'name') return name; const state = guiState[name] || (cfg.gui || {})[name] || {}; return state[key]; },
@@ -2168,7 +2462,7 @@ self.onmessage = async message => { const data=message.data||{}; if(data.type===
 };`;
 function scriptPartsSnapshot(parts) { return (parts||[]).map((part,index)=>({id:String(part.id||'map-part-'+index),name:part.name||'Part',type:part.type||'Block',x:part.x||0,y:part.y||0,z:part.z||0,sx:part.sx||4,sy:part.sy||4,sz:part.sz||4,color:part.color||'#888888',anchored:part.anchored!==false,canCollide:part.canCollide!==false,transparent:part.transparent||0,material:part.material||'SmoothPlastic',isNPC:!!part.isNPC})); }
 function scriptPlayerSnapshot() { const p=gPlayer?gPlayer.position:{x:0,y:0,z:0}; return {position:{x:p.x,y:p.y,z:p.z},x:p.x,y:p.y,z:p.z,rotationY:gPlayer?gPlayer.rotation.y:0,velocityY:gVelY,onGround:!!gOnGround,health:gState.health,maxHealth:gState.maxHealth,coins:gState.coins,deaths:gState.deaths}; }
-function makeScriptWorker(script, parts, mode, eventName, player, allScripts=[]) { const language=script.language||'crixscript'; const code=language==='crixscript'?compileCrixScript(script.code||''):(script.code||''); const modules=(allScripts||[]).filter(item=>item.type==='ModuleScript').map(item=>({id:item.id,name:item.name,code:(item.language||'crixscript')==='crixscript'?compileCrixScript(item.code||''):(item.code||'')})); const blobUrl=URL.createObjectURL(new Blob([SCRIPT_WORKER_SOURCE],{type:'text/javascript'})); const worker=new Worker(blobUrl); const config={id:script.id||script.name||'script',name:script.name||'Script',code,mode,event:eventName,modules,gui:(typeof guiElementsSnapshot==='function'?guiElementsSnapshot():{}),parts:scriptPartsSnapshot(parts),player:player||scriptPlayerSnapshot()}; return {worker,blobUrl,code,language,config}; }
+function makeScriptWorker(script, parts, mode, eventName, player, allScripts=[]) { const language=script.language||'crixscript'; const code=language==='crixscript'?compileCrixScript(script.code||''):(script.code||''); const modules=(allScripts||[]).filter(item=>item.type==='ModuleScript').map(item=>({id:item.id,name:item.name,code:(item.language||'crixscript')==='crixscript'?compileCrixScript(item.code||'',true):(item.code||'')})); const blobUrl=URL.createObjectURL(new Blob([SCRIPT_WORKER_SOURCE],{type:'text/javascript'})); const worker=new Worker(blobUrl); const config={id:script.id||script.name||'script',name:script.name||'Script',code,mode,event:eventName,modules,gui:(typeof guiElementsSnapshot==='function'?guiElementsSnapshot():{}),parts:scriptPartsSnapshot(parts),player:player||scriptPlayerSnapshot()}; return {worker,blobUrl,code,language,config}; }
 function runScript(scriptOverride, partsOverride) {
   if (!scriptOverride) saveActiveScript();
   const script=scriptOverride||stScripts.find(x=>x.id===activeScriptId);
@@ -2321,9 +2615,73 @@ function _buildHumanoid(color) {
   return { group:g, parts };
 }
 function _spawnPlayer(pos) { const built = _buildHumanoid(ME.color||'#5b8def'); const g = built.group; g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = built.parts; gVelY = 0; gOnGround = false; gTargetRY = 0; }
-function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; gAnimT += 0.016; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } _prevPos.copy(gPlayer.position); const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; if (moving) { const dir = new THREE.Vector3(mx,0,mz).normalize().applyAxisAngle(new THREE.Vector3(0,1,0), gCamTheta); gPlayer.position.x += dir.x * G_SPD; gPlayer.position.z += dir.z * G_SPD; gTargetRY = Math.atan2(dir.x, dir.z); } let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * 0.2; gVelY -= G_GRAV; gPlayer.position.y += gVelY; gOnGround = false; for (const col of gColliders) { col.box.setFromObject(col.mesh); const feet = gPlayer.position.y; const head = feet + AV_H; const pBox = new THREE.Box3( new THREE.Vector3(gPlayer.position.x - AV_HW, feet, gPlayer.position.z - AV_HD), new THREE.Vector3(gPlayer.position.x + AV_HW, head, gPlayer.position.z + AV_HD) ); if (!pBox.intersectsBox(col.box)) continue; const overY = Math.min(head, col.box.max.y) - Math.max(feet, col.box.min.y); const overX = Math.min(gPlayer.position.x+AV_HW, col.box.max.x) - Math.max(gPlayer.position.x-AV_HW, col.box.min.x); const overZ = Math.min(gPlayer.position.z+AV_HD, col.box.max.z) - Math.max(gPlayer.position.z-AV_HD, col.box.min.z); if (overY <= overX && overY <= overZ) { if (gVelY <= 0 && feet < col.box.max.y && head > col.box.max.y) { gPlayer.position.y = col.box.max.y; gVelY = 0; gOnGround = true; } else if (gVelY > 0 && head > col.box.min.y && feet < col.box.min.y) { gPlayer.position.y = col.box.min.y - AV_H; gVelY = 0; } } else { gPlayer.position.x = _prevPos.x; gPlayer.position.z = _prevPos.z; } } _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y=t;const rig=npc.mesh.userData.rig;if(rig){const swing=Math.sin(t*3)*0.45;rig.armL.rotation.x=swing;rig.armR.rotation.x=-swing;rig.legL.rotation.x=-swing;rig.legR.rotation.x=swing;} }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
+function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; const _nowT = performance.now(); const _frameDt = Math.min(0.1, Math.max(0, (_nowT - (_gameLoop._last || _nowT)) / 1000)); _gameLoop._last = _nowT; gAnimT += _frameDt; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; gAcc += Math.min(100, _frameDt * 1000); let _steps = 0; while (gAcc >= PHYS_STEP_MS && _steps < 6) { gAcc -= PHYS_STEP_MS; _steps++; _stepPlayer(mx, mz, moving); } if (_steps === 6) gAcc = 0; let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * Math.min(1, 12 * _frameDt); _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y=t;const rig=npc.mesh.userData.rig;if(rig){const swing=Math.sin(t*3)*0.45;rig.armL.rotation.x=swing;rig.armR.rotation.x=-swing;rig.legL.rotation.x=-swing;rig.legR.rotation.x=swing;} }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
 function _setupGameInput() { window.addEventListener('keydown', e => { if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return; gKeys[e.code] = true; if (e.code === 'Space') { e.preventDefault(); _tryJump(); } if (e.code === 'Escape') exitGame(); }); window.addEventListener('keyup', e => delete gKeys[e.code]); let cDrag = false, cx2=0, cy2=0; window.addEventListener('mousedown', e => { if (e.button===2 && document.getElementById('s-game').classList.contains('active')) { cDrag=true; cx2=e.clientX; cy2=e.clientY; } }); window.addEventListener('mouseup', e => { if (e.button===2) cDrag=false; }); window.addEventListener('mousemove', e => { if (!cDrag) return; gCamTheta -= (e.clientX-cx2)*0.01; gCamPhi = Math.max(0.08, Math.min(Math.PI/2.1, gCamPhi+(e.clientY-cy2)*0.01)); cx2=e.clientX; cy2=e.clientY; }); window.addEventListener('wheel', e => { if (document.getElementById('s-game').classList.contains('active')) gCamDist = Math.max(5,Math.min(60,gCamDist+e.deltaY*0.05)); }, {passive:true}); window.oncontextmenu = e => { if (document.getElementById('s-game').classList.contains('active')) e.preventDefault(); }; }
-function _tryJump() { if (gOnGround) { gVelY = G_JUMP; gOnGround = false; } }
+
+// ═══ Física del jugador (paso fijo de 1/60 s: igual en pantallas de 60, 120 o 144 Hz) ═══
+const PHYS_STEP_MS = 1000 / 60, STEP_UP = 0.7, MAX_FALL_PLAYER = 1.0;
+let gVelX = 0, gVelZ = 0, gCoyote = 0, gJumpBuf = 0, gGround = null, gAcc = 0;
+// Caja de un collider; solo se recalcula si la pieza se movió, rotó o cambió de tamaño. Guarda cuánto se desplazó (_dx/_dy/_dz) para llevar al jugador encima.
+function _colBox(col) {
+  const m = col.mesh, p = m.position, r = m.rotation, sc = m.scale, k = col._k;
+  if (!k || k[0] !== p.x || k[1] !== p.y || k[2] !== p.z || k[3] !== r.x || k[4] !== r.y || k[5] !== r.z || k[6] !== sc.x || k[7] !== sc.y || k[8] !== sc.z) {
+    const b = col.box, ox = (b.min.x + b.max.x) / 2, oy = b.min.y, oz = (b.min.z + b.max.z) / 2;
+    b.setFromObject(m);
+    if (k) { col._dx = (b.min.x + b.max.x) / 2 - ox; col._dy = b.min.y - oy; col._dz = (b.min.z + b.max.z) / 2 - oz; } else { col._dx = col._dy = col._dz = 0; }
+    col._k = [p.x, p.y, p.z, r.x, r.y, r.z, sc.x, sc.y, sc.z];
+  } else col._dx = col._dy = col._dz = 0;
+  return col.box;
+}
+function _pHit(x, y, z, skip) {
+  for (const col of gColliders) {
+    if (col === skip) continue;
+    const b = col.box;
+    if (x + AV_HW > b.min.x + 1e-4 && x - AV_HW < b.max.x - 1e-4 && z + AV_HD > b.min.z + 1e-4 && z - AV_HD < b.max.z - 1e-4 && y + AV_H > b.min.y + 1e-4 && y < b.max.y - 1e-4) return col;
+  }
+  return null;
+}
+// Mueve en un eje y resuelve el choque: sube escalones bajos (≤ 0.7 studs) o, si no, se desliza por la pared.
+function _moveAxis(axis, d) {
+  if (!d) return;
+  const p = gPlayer.position; p[axis] += d;
+  for (let i = 0; i < 4; i++) {
+    const col = _pHit(p.x, p.y, p.z); if (!col) break;
+    const b = col.box, top = b.max.y;
+    if (top - p.y <= STEP_UP && top - p.y > 0.001 && gVelY <= 0.05 && !_pHit(p.x, top + 0.002, p.z, col)) { p.y = top; gVelY = Math.min(gVelY, 0); gOnGround = true; gGround = col; continue; }
+    if (axis === 'x') { p.x = d > 0 ? b.min.x - AV_HW - 1e-3 : b.max.x + AV_HW + 1e-3; gVelX = 0; }
+    else { p.z = d > 0 ? b.min.z - AV_HD - 1e-3 : b.max.z + AV_HD + 1e-3; gVelZ = 0; }
+  }
+}
+function _stepPlayer(mx, mz, moving) {
+  const p = gPlayer.position;
+  for (const col of gColliders) _colBox(col);
+  // Plataformas móviles: lo que está encima se mueve con ellas.
+  if (gGround && gOnGround && (gGround._dx || gGround._dy || gGround._dz) && gColliders.includes(gGround)) { p.x += gGround._dx; p.z += gGround._dz; if (gGround._dy > 0) p.y += gGround._dy; }
+  // Salto: margen de gracia al salir de un borde (coyote) y salto "guardado" si se pulsa justo antes de aterrizar.
+  if (gOnGround) gCoyote = 6; else if (gCoyote > 0) gCoyote--;
+  if (gJumpBuf > 0) gJumpBuf--;
+  if (gJumpBuf > 0 && gCoyote > 0) { gVelY = G_JUMP; gOnGround = false; gCoyote = 0; gJumpBuf = 0; }
+  // Aceleración: firme en el suelo, con algo de inercia en el aire (se conservan los impulsos de trampolines y lanzadores).
+  if (moving) {
+    const dir = new THREE.Vector3(mx, 0, mz).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), gCamTheta);
+    const k = gOnGround ? 0.6 : 0.2;
+    gVelX += (dir.x * G_SPD - gVelX) * k; gVelZ += (dir.z * G_SPD - gVelZ) * k;
+    gTargetRY = Math.atan2(dir.x, dir.z);
+  } else { const f = gOnGround ? 0.55 : 0.03; gVelX *= 1 - f; gVelZ *= 1 - f; if (Math.abs(gVelX) < 1e-3) gVelX = 0; if (Math.abs(gVelZ) < 1e-3) gVelZ = 0; }
+  _moveAxis('x', gVelX); _moveAxis('z', gVelZ);
+  // Vertical.
+  gVelY = Math.max(-MAX_FALL_PLAYER, gVelY - G_GRAV);
+  const prevFeet = p.y; p.y += gVelY; gOnGround = false; gGround = null;
+  for (let i = 0; i < 4; i++) {
+    const col = _pHit(p.x, p.y, p.z); if (!col) break;
+    const b = col.box;
+    if (gVelY <= 0 && prevFeet >= b.max.y - 0.15) { p.y = b.max.y; gVelY = 0; gOnGround = true; gGround = col; }
+    else if (gVelY > 0) { p.y = b.min.y - AV_H - 1e-3; gVelY = 0; }
+    else if (b.max.y - p.y <= 1.5) { p.y = b.max.y; gVelY = Math.max(gVelY, 0); gOnGround = true; gGround = col; }
+    else break;
+  }
+}
+function _tryJump() { gJumpBuf = 7; }
 function _setupMob() { const base = document.getElementById('joy-base'); const knob = document.getElementById('joy-knob'); const jBtn = document.getElementById('jump-btn'); const R = 42; let jId = null; base.addEventListener('touchstart', e=>{e.preventDefault();jId=e.changedTouches[0].identifier;},{passive:false}); base.addEventListener('touchmove', e=>{ e.preventDefault(); let t=null; for(let i=0;i<e.changedTouches.length;i++) if(e.changedTouches[i].identifier===jId) t=e.changedTouches[i]; if(!t)return; const r=base.getBoundingClientRect(); let dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2); const dist=Math.hypot(dx,dy); if(dist>R){dx=dx/dist*R;dy=dy/dist*R;} knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; joyPos={x:dx/R,y:dy/R}; },{passive:false}); const rst=()=>{knob.style.transform='translate(-50%,-50%)';joyPos={x:0,y:0};jId=null;}; base.addEventListener('touchend',e=>{e.preventDefault();rst();},{passive:false}); jBtn.addEventListener('touchstart',e=>{e.preventDefault();_tryJump();},{passive:false}); const cv=gRenderer.domElement; let ctId=null,ccx=0,ccy=0; cv.addEventListener('touchstart',e=>{ctId=e.changedTouches[0].identifier;ccx=e.changedTouches[0].clientX;ccy=e.changedTouches[0].clientY;},{passive:false}); cv.addEventListener('touchmove',e=>{ e.preventDefault(); for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(t.identifier===ctId){gCamTheta-=(t.clientX-ccx)*0.007;gCamPhi=Math.max(0.08,Math.min(Math.PI/2.1,gCamPhi+(t.clientY-ccy)*0.007));ccx=t.clientX;ccy=t.clientY;}} },{passive:false}); cv.addEventListener('touchend',()=>ctId=null); }
 let gChatMsgs = [];
 function addGMsg(text, cls='chat') { const el = document.getElementById('g-chat-msgs'); gChatMsgs.push({text,cls}); if (gChatMsgs.length > 50) gChatMsgs.shift(); el.innerHTML = gChatMsgs.map(m=>`<div class="g-msg ${m.cls}">${esc(m.text)}</div>`).join(''); el.scrollTop = el.scrollHeight; }
@@ -2351,6 +2709,8 @@ function netConnect() {
     else if(status==='ready'&&scriptCount)addGMsg(`🖥️ ${scriptCount} script(s) ejecutándose en el servidor`,'sys');
   });
   socket.on('runtime_scene',applyNetworkSceneEvent);
+  socket.on('script_remote',({name,data}={})=>{if(name)dispatchScriptEvent('remote:'+String(name),[data]);});
+  socket.on('server_player_cmd',command=>{if(gPlayer&&command&&typeof command==='object')_playerCommand(command);});
   socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
   socket.on('join_ack',({playerCount})=>{updateNetPill('🟢',`${playerCount} jugador${playerCount!==1?'es':''}`);addGMsg(`✅ Conectado (${playerCount} en sala)`,'sys');});
   socket.on('player_joined',playerData=>{spawnRemote(playerData);addGMsg(`→ ${playerData.username} entró`,'sys');updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
@@ -3894,7 +4254,7 @@ function damagePlayer(amount, source) {
   if (gState.health <= 0) respawnPlayer(source);
 }
 function healPlayer(amount) { gState.health = Math.min(gState.maxHealth, gState.health + amount); updateGameHud(); }
-function teleportPlayer(x, y, z) { if (!gPlayer) return; gPlayer.position.set(x, y, z); gVelY = 0; }
+function teleportPlayer(x, y, z) { if (!gPlayer) return; gPlayer.position.set(x, y, z); gVelY = 0; gVelX = 0; gVelZ = 0; }
 function respawnPlayer(source) {
   if (!gPlayer) return;
   gState.deaths++; gState.health = gState.maxHealth;
@@ -3966,12 +4326,15 @@ function _playerCommand(c) {
     case 'coins': gState.coins += Math.floor(n)||0; updateGameHud(); break;
     case 'setCoins': gState.coins = Math.max(0, Math.floor(n)||0); updateGameHud(); break;
     case 'checkpoint': gState.checkpoint = {id:'script', x:lim(c.x), y:lim(c.y), z:lim(c.z)}; break;
+    case 'launch': gVelX = Math.max(-3, Math.min(3, lim(c.x)/60)); gVelY = Math.max(-3, Math.min(3, lim(c.y)/60)); gVelZ = Math.max(-3, Math.min(3, lim(c.z)/60)); gOnGround = false; gCoyote = 0; break;
+    case 'message': gameBanner(String(c.text||'').slice(0,200), 3); break;
   }
 }
 function _handleExtendedCommand(run, message) {
   const c = message.command, payload = message.payload || {};
   if (c === 'player') { _playerCommand(payload); return true; }
   if (c === 'guiSet') { if (typeof guiSet === 'function') guiSet(String(payload.name||''), String(payload.prop||''), payload.value); return true; }
+  if (c === 'remote') { if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('script_remote', {name:String(payload.name||'').slice(0,40), data:payload.data}); return true; }
   if (c === 'toast') { gameBanner(String(payload.text||''), Number(payload.seconds)||3); return true; }
   return false;
 }

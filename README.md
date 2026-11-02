@@ -236,6 +236,29 @@ const caja = game.getPart("Caja");                // estado actual, también por
 
 Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor de rigging, huesos ni animación.
 
+## Motor de físicas y scripts (v2)
+
+### Físicas
+- **Jugador a paso fijo (60 Hz):** el movimiento ya no depende de los FPS (antes iba más rápido en monitores de 120/144 Hz). Incluye aceleración, inercia en el aire, *coyote time* y salto guardado, subida automática de escalones (hasta 0.7 studs), deslizamiento por las paredes (ya no se queda pegado), plataformas móviles que llevan al jugador, y las cajas de colisión solo se recalculan cuando una pieza se mueve.
+- **Piezas sueltas (`anchored:false`, servidor):** velocidad en los 3 ejes, fricción según material (hielo desliza, arena frena), rebote, arrastre, gravedad por pieza, choques con paredes y otras piezas, apilado, plataformas móviles que arrastran lo que llevan encima, y el jugador puede empujar piezas ligeras.
+- Propiedades por pieza (opcionales): `friction`, `bounce`, `drag` (0–1) y `gravityScale` (-5…5). Si no se indican, se usan los del material.
+- Los eventos de contacto (`onTouched`, etc.) ahora también se detectan en choques rápidos que ocurren entre dos ticks.
+
+### Scripts de servidor (nuevas funciones de `game`)
+- Física: `setVelocity(id, v)`, `applyImpulse(id, v)`, `getVelocity(id)`, `setPhysics(id, {friction, bounce, drag, gravityScale})` (velocidades en studs/s).
+- `raycast(origen, dirección, {maxDistance, ignore:[…], players:true})` → `{id, name, distance, point, normal}` o `null`.
+- `tween(id, {position, size, x, y, z, sx, sy, sz, rx, ry, rz, transparent}, segundos, easing, alTerminar)`; easings: `linear, quadIn, quadOut, quadInOut, sine, cubicOut, back, bounce`.
+- Búsqueda: `findParts(nombre|función)`, `getPartsByTag`, `addTag/removeTag/hasTag`, `getPartsInRadius`, `getPlayersInRadius`, `clonePart`, `destroyAfter`.
+- Jugadores: `onPlayerAdded(fn)`, `onPlayerRemoved(fn)` (o funciones globales `onPlayerAdded/onPlayerRemoved`), `teleportPlayer`, `launchPlayer`, `setPlayerSpeed`, `setPlayerJump`, `damagePlayer`, `healPlayer`, `setPlayerHealth`, `killPlayer`, `giveCoins`, `setPlayerCheckpoint`, `message`, `broadcast`.
+- Eventos entre cliente y servidor: en un LocalScript `game.fireServer("nombre", datos)` y `game.onServerEvent("nombre", fn)`; en el Script de servidor `game.onClientEvent("nombre", (jugador, datos) => …)`, `game.fireClient(jugador, "nombre", datos)` y `game.fireAllClients("nombre", datos)`. Límites: 4 KB por evento, 30/s por jugador. **Valida siempre los datos que llegan del cliente.**
+- Eventos entre scripts: `game.on(nombre, fn)` / `game.emit(nombre, …)`.
+- Temporizadores: `task.every(segundos, fn)`, `task.cancel(id)`, `task.spawn(fn)`; `task.delay` devuelve un id.
+- Utilidades: `Vector3.new(x,y,z)` (add, sub, mul, dot, cross, lerp, distance, magnitude, unit), `math.lerp/clamp/dist/round/random(a,b)`.
+- Un error ya no apaga el script a la primera: se registra y solo se desactiva tras 10 errores seguidos. Límite de cambios al mundo: 300/s.
+
+### CrixScript (nuevo traductor)
+Reescrito con tokens (`crixscript.js`): ya no rompe cadenas ni comentarios, y soporta `if/elseif/else`, `while`, `for i = a, b, paso`, `for k, v in pairs/ipairs`, `repeat … until`, `function` anónimas / con nombre / `a.b.c` / `a:b`, tablas `{a = 1}` y `{1, 2, 3}`, `~=`, `..`, `and/or/not`, `nil`, `#`, `^`, `a, b = x, y` y `return a, b`. Incluye `table.insert/remove/concat/sort`, `string.format/sub/upper/lower/split/rep` y `os.time`. **Las listas empiezan en 0** (son arreglos de JavaScript).
+
 ## API principal
 
 | Ruta | Uso |

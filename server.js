@@ -201,6 +201,8 @@ function normalizeRoomPart(id, source = {}) {
     behaviorValue:number(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),
     textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:number(source.texScale,4,0.25,64),texTint:source.texTint===true,
   };
+  for(const [key,lo,hi,fallback] of [['friction',0,1,0.15],['bounce',0,1,0.05],['drag',0,1,0.003],['gravityScale',-5,5,1]])if(source[key]!==undefined&&source[key]!==null)part[key]=number(source[key],fallback,lo,hi);
+  if(Array.isArray(source.tags))part.tags=source.tags.slice(0,8).map(tag=>String(tag).slice(0,40));
   if(type==='ImportedMesh'&&typeof source.meshData==='string'&&source.meshData.length<=2*1024*1024)part.meshData=source.meshData;
   return part;
 }
@@ -271,14 +273,33 @@ function handleScriptRunnerMessage(message) {
     return;
   }
   if(message.type==='watch'){if(room.watched.size<200)room.watched.add(String(message.key||'').slice(0,120));return;}
+  if(message.type==='playerCommand'){
+    const target=roomPlayers(room).find(player=>String(player.userId)===String(message.userId));
+    if(target)io.to(target.socketId).emit('server_player_cmd',{op:String(message.op||''),...(message.payload&&typeof message.payload==='object'?message.payload:{})});
+    return;
+  }
+  if(message.type==='remoteOut'){
+    const name=String(message.name||'');
+    if(message.userId==='*'){io.to(gameChannel(room.mapId,room.instanceId)).emit('script_remote',{name,data:message.data});return;}
+    const target=roomPlayers(room).find(player=>String(player.userId)===String(message.userId));
+    if(target)io.to(target.socketId).emit('script_remote',{name,data:message.data});
+    return;
+  }
   if(message.type==='sceneCommand'){room.appliedSeq=Math.max(room.appliedSeq||0,Number(message.seq)||0);applyServerScriptCommand(room,message.command,message.payload||{});}
 }
 
 function applyServerScriptCommand(room,command,payload) {
   const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
-  if(room.commandTimes.length>=100)return;
+  if(room.commandTimes.length>=300)return;
   room.commandTimes.push(now);
   const id=String(payload.id||'').slice(0,120);
+  if(command==='physVelocity'||command==='physImpulse'){
+    const part=room.worldParts?.[id],v=payload.v||{};
+    if(!part||part.anchored)return;           // solo las piezas sueltas (anchored:false) tienen física
+    const vector={};for(const axis of ['x','y','z'])if(v[axis]!==undefined)vector[axis]=Math.max(-500,Math.min(500,Number(v[axis])||0));
+    if(command==='physVelocity')worldPhysics.setVelocity(room,id,vector);else worldPhysics.addImpulse(room,id,vector);
+    return;
+  }
   if(command==='createPart'){
     if(Object.keys(room.worldParts||{}).length>=1000||!/^server-[a-z0-9-]{1,100}$/i.test(id)||room.worldParts[id])return;
     const part=normalizeRoomPart(id,payload.data||{});room.worldParts[id]=part;
@@ -1895,6 +1916,20 @@ io.on('connection', socket => {
     sendRoomPlayersToRunner(room);
     socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
       { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving });
+  });
+
+  // Evento remoto LocalScript → Script de servidor (game.fireServer en el cliente, game.onClientEvent en el servidor).
+  socket.on('script_remote', data => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id];
+    if (!room || !player || !room.scriptStarted || !scriptRunner?.connected) return;
+    const name = String(data?.name || '');
+    if (!/^[\w.:-]{1,40}$/.test(name)) return;
+    const now = Date.now(); player.remoteTimes = (player.remoteTimes || []).filter(time => now - time < 1000);
+    if (player.remoteTimes.length >= 30) return;                       // 30 eventos por segundo por jugador
+    player.remoteTimes.push(now);
+    let payload = null; try { const text = JSON.stringify(data?.data === undefined ? null : data.data); if (text.length > 4096) return; payload = JSON.parse(text); } catch (_) { return; }
+    scriptRunner.send({ type:'remote', roomId:roomKey(room.mapId, room.instanceId), userId:String(player.userId), name, data:payload });
   });
 
   socket.on('game_chat', data => {

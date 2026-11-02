@@ -21,6 +21,24 @@ const MAX_CATCHUP_STEPS = 12;
 const MAX_EVENTS_PER_TICK = 40;
 const LANDING_MIN_SPEED = 0; // todos los aterrizajes se registran; cada script filtra con minSpeed
 
+// Propiedades físicas por material (fricción = fracción de velocidad horizontal que se pierde por paso al deslizar
+// sobre él; rebote = fracción de velocidad que se conserva al chocar). Una pieza puede sobrescribirlas con
+// `friction`, `bounce`, `drag` y `gravityScale`.
+const MATERIALS = {
+  Ice: { friction: 0.012, bounce: 0.02 }, Glass: { friction: 0.05, bounce: 0.05 }, SmoothPlastic: { friction: 0.09, bounce: 0.05 },
+  Plastic: { friction: 0.1, bounce: 0.05 }, Neon: { friction: 0.09, bounce: 0.05 }, Metal: { friction: 0.08, bounce: 0.1 },
+  DiamondPlate: { friction: 0.1, bounce: 0.1 }, Marble: { friction: 0.07, bounce: 0.08 }, Wood: { friction: 0.14, bounce: 0.1 },
+  WoodPlanks: { friction: 0.14, bounce: 0.1 }, Brick: { friction: 0.2, bounce: 0.05 }, Concrete: { friction: 0.22, bounce: 0.03 },
+  Rock: { friction: 0.25, bounce: 0.03 }, Cobblestone: { friction: 0.25, bounce: 0.03 }, Grass: { friction: 0.2, bounce: 0.02 },
+  Sand: { friction: 0.4, bounce: 0 }, Fabric: { friction: 0.35, bounce: 0 },
+};
+const DEFAULT_MAT = { friction: 0.15, bounce: 0.05 };
+const AIR_DRAG = 0.003;       // pérdida de velocidad por paso en el aire
+const REST_SPEED = 0.002;     // por debajo de esto la velocidad horizontal se considera 0
+const BOUNCE_MIN = 0.12;      // velocidad de impacto mínima (por paso) para que haya rebote
+const MAX_SPEED = 3;          // límite de velocidad por paso (180 studs/s) para que nada atraviese el mundo
+const PLAYER_PUSH = 0.35;     // fracción de la velocidad del jugador que transmite al empujar una pieza suelta
+
 const PLAYER = { halfW: 0.5, halfD: 0.5, height: 3.05 };
 const PART_PAD = 0.12;       // margen de toque pieza ↔ jugador (igual que el cliente)
 const PLAYER_PAD = 0.1;
@@ -119,45 +137,128 @@ function isWatched(room, part) {
 // ── Estado por sala ──────────────────────────────────────────────────────────────────────────────
 
 function stateOf(room) {
-  if (!room.phys) room.phys = { lastAt: 0, acc: 0, support: new Map(), prev: new Map(), contacts: new Map(), landing: new Map() };
-  return room.phys;
+  if (!room.phys) room.phys = { lastAt: 0, acc: 0, support: new Map(), prev: new Map(), contacts: new Map(), landing: new Map(), vel: new Map(), pendingCarry: new Map() };
+  const ps = room.phys;
+  if (!ps.vel) ps.vel = new Map();
+  if (!ps.pendingCarry) ps.pendingCarry = new Map();
+  return ps;
 }
 
 // Para llamar cuando un script cambia a mano la posición de una pieza (teletransporte): se descarta su velocidad y apoyo.
 function resetBody(room, id) {
   if (room.physicsVelocities) room.physicsVelocities[id] = 0;
-  if (room.phys) room.phys.support.delete(id);
+  if (room.phys) { room.phys.support.delete(id); if (room.phys.vel) room.phys.vel.delete(id); }
+}
+
+const clampSpeed = v => Math.max(-MAX_SPEED, Math.min(MAX_SPEED, Number(v) || 0));
+
+// Velocidad actual de una pieza suelta en studs/s (para scripts).
+function getVelocity(room, id) {
+  const ps = stateOf(room), h = ps.vel.get(id) || { x: 0, z: 0 };
+  return { x: h.x / STEP, y: ((room.physicsVelocities && room.physicsVelocities[id]) || 0) / STEP, z: h.z / STEP };
+}
+// Fija la velocidad (studs/s). Los ejes que no se pasan se conservan.
+function setVelocity(room, id, v) {
+  const ps = stateOf(room), h = ps.vel.get(id) || { x: 0, z: 0 };
+  if (v.x !== undefined) h.x = clampSpeed(v.x * STEP);
+  if (v.z !== undefined) h.z = clampSpeed(v.z * STEP);
+  ps.vel.set(id, h);
+  if (v.y !== undefined) { if (!room.physicsVelocities) room.physicsVelocities = {}; room.physicsVelocities[id] = clampSpeed(v.y * STEP); if (v.y > 0) ps.support.delete(id); }
+}
+// Suma un impulso (studs/s) a la velocidad actual.
+function addImpulse(room, id, v) {
+  const cur = getVelocity(room, id);
+  setVelocity(room, id, { x: cur.x + (Number(v.x) || 0), y: cur.y + (Number(v.y) || 0), z: cur.z + (Number(v.z) || 0) });
+}
+
+function matOf(part) {
+  const m = MATERIALS[part.material] || DEFAULT_MAT;
+  return {
+    friction: Number.isFinite(part.friction) ? Math.max(0, Math.min(1, part.friction)) : m.friction,
+    bounce: Number.isFinite(part.bounce) ? Math.max(0, Math.min(1, part.bounce)) : m.bounce,
+    drag: Number.isFinite(part.drag) ? Math.max(0, Math.min(1, part.drag)) : AIR_DRAG,
+    gravityScale: Number.isFinite(part.gravityScale) ? Math.max(-5, Math.min(5, part.gravityScale)) : 1,
+  };
 }
 
 // ── Paso de simulación ───────────────────────────────────────────────────────────────────────────
 
 function stepDynamic(room, ps, e, entries, byId, landings) {
   const part = e.part, id = part.id;
-  const oldBottom = e.box.minY, oldTop = e.box.maxY;
+  const mat = matOf(part);
+  const hv = ps.vel.get(id) || { x: 0, z: 0 };
   let vy = room.physicsVelocities[id] || 0;
-  let dy = 0;
+  const moving = Math.abs(hv.x) > REST_SPEED || Math.abs(hv.z) > REST_SPEED;
 
-  // 1) Apoyada sobre algo: lo acompaña (ascensores y plataformas móviles).
+  // 0) Plataforma móvil: si el soporte se desplazó entre ticks, la pieza lo acompaña (una sola vez por tick).
+  const carry = ps.pendingCarry.get(id);
+  if (carry) {
+    ps.pendingCarry.delete(id);
+    part.x += carry.x; part.z += carry.z; e.box.minX += carry.x; e.box.maxX += carry.x; e.box.minZ += carry.z; e.box.maxZ += carry.z;
+  }
+
+  // 1) Apoyada y quieta: acompaña a su soporte (ascensores) y no gasta más.
   const supportId = ps.support.get(id);
   if (supportId !== undefined) {
     const se = byId.get(supportId);
-    if (se && se.part.canCollide && overlapXZ(e.box, se.box) && Math.abs(oldBottom - se.box.maxY) <= CARRY_TOL) {
-      dy = se.box.maxY - oldBottom;
-      if (Math.abs(dy) < 1e-9) dy = 0;
+    if (se && se.part.canCollide && overlapXZ(e.box, se.box) && Math.abs(e.box.minY - se.box.maxY) <= CARRY_TOL && vy <= 0) {
+      const dy = se.box.maxY - e.box.minY;
+      if (Math.abs(dy) > 1e-9) { part.y += dy; e.box.minY += dy; e.box.maxY += dy; }
       room.physicsVelocities[id] = 0;
-      if (dy !== 0) { part.y += dy; e.box.minY += dy; e.box.maxY += dy; }
-      return;
-    }
-    ps.support.delete(id);
+      if (!moving) return;
+      // desliza: se frena según la fricción del soporte (y de la propia pieza)
+      const f = Math.min(0.95, Math.sqrt(matOf(se.part).friction * mat.friction) * 0.5);
+      hv.x *= 1 - f; hv.z *= 1 - f;
+      if (Math.abs(hv.x) < REST_SPEED) hv.x = 0;
+      if (Math.abs(hv.z) < REST_SPEED) hv.z = 0;
+      ps.vel.set(id, hv);
+      vy = 0;
+    } else ps.support.delete(id);
   }
 
-  // 2) Caída libre.
-  vy = Math.max(-MAX_FALL, vy - GRAVITY);
-  dy = vy;
-  if (part.canCollide) {
+  // 2) Movimiento horizontal con colisión por eje.
+  if (part.canCollide !== false && (hv.x !== 0 || hv.z !== 0)) {
+    for (const axis of ['x', 'z']) {
+      const d = hv[axis];
+      if (!d) continue;
+      const lo = axis === 'x' ? 'minX' : 'minZ', hi = axis === 'x' ? 'maxX' : 'maxZ';
+      let move = d, hitId = null;
+      for (const o of entries) {
+        if (o === e || o.part.canCollide === false) continue;
+        // Solo choca lo que está a la altura de la pieza (no lo que pisa ni lo que está por encima).
+        if (!(o.box.maxY > e.box.minY + SNAP && o.box.minY < e.box.maxY - SNAP)) continue;
+        const other = axis === 'x' ? 'z' : 'x';
+        const olo = other === 'x' ? 'minX' : 'minZ', ohi = other === 'x' ? 'maxX' : 'maxZ';
+        if (!(e.box[olo] < o.box[ohi] - 1e-4 && e.box[ohi] > o.box[olo] + 1e-4)) continue;
+        if (d > 0 && e.box[hi] <= o.box[lo] + 1e-4 && e.box[hi] + d > o.box[lo]) { const m = o.box[lo] - e.box[hi]; if (m < move) { move = m; hitId = o.part.id; } }
+        else if (d < 0 && e.box[lo] >= o.box[hi] - 1e-4 && e.box[lo] + d < o.box[hi]) { const m = o.box[hi] - e.box[lo]; if (m > move) { move = m; hitId = o.part.id; } }
+      }
+      if (move !== d) {
+        const impact = Math.abs(d);
+        const bounce = Math.min(mat.bounce, 0.95);
+        hv[axis] = impact > BOUNCE_MIN && bounce > 0 ? -d * bounce : 0;
+        if (impact > 0.02 && hitId) landings.push({ a: id, b: hitId, speed: impact / STEP, wall: true });
+      }
+      if (move) { part[axis] += move; e.box[lo] += move; e.box[hi] += move; }
+    }
+  }
+  if (!ps.support.has(id)) { // en el aire: arrastre
+    const k = 1 - mat.drag; hv.x *= k; hv.z *= k;
+    if (Math.abs(hv.x) < REST_SPEED) hv.x = 0;
+    if (Math.abs(hv.z) < REST_SPEED) hv.z = 0;
+  }
+  ps.vel.set(id, hv);
+  if (ps.support.has(id)) return;
+
+  // 3) Caída libre / salto con colisión vertical.
+  const oldBottom = e.box.minY, oldTop = e.box.maxY;
+  vy = Math.max(-MAX_FALL, vy - GRAVITY * mat.gravityScale);
+  if (mat.gravityScale < 0) vy = Math.min(MAX_FALL, vy);
+  let dy = vy;
+  if (part.canCollide !== false) {
     let landTop = -Infinity, landOn = null, ceilBottom = Infinity, ceilOn = null;
     for (const o of entries) {
-      if (o === e || !o.part.canCollide || !overlapXZ(e.box, o.box)) continue;
+      if (o === e || o.part.canCollide === false || !overlapXZ(e.box, o.box)) continue;
       if (vy <= 0) {
         if (oldBottom >= o.box.maxY - SNAP && oldBottom + vy < o.box.maxY && o.box.maxY > landTop) { landTop = o.box.maxY; landOn = o; }
       } else if (oldTop <= o.box.minY + SNAP && oldTop + vy > o.box.minY && o.box.minY < ceilBottom) { ceilBottom = o.box.minY; ceilOn = o; }
@@ -165,13 +266,15 @@ function stepDynamic(room, ps, e, entries, byId, landings) {
     if (landOn) {
       const speed = -vy / STEP;
       dy = landTop - oldBottom;
-      vy = 0;
-      ps.support.set(id, landOn.part.id);
-      if (speed >= LANDING_MIN_SPEED) landings.push({ a: id, b: landOn.part.id, speed });
+      const bounce = Math.min((mat.bounce + matOf(landOn.part).bounce) * 0.5 * 2, 0.95);
+      if (-vy > BOUNCE_MIN && bounce > 0.02) vy = -vy * bounce;     // rebota: no queda apoyada
+      else { vy = 0; ps.support.set(id, landOn.part.id); }
+      if (ps.support.has(id)) { hv.x *= 0.8; hv.z *= 0.8; }
+      landings.push({ a: id, b: landOn.part.id, speed });
     } else if (ceilOn) {
       const speed = vy / STEP;
       dy = ceilBottom - oldTop;
-      vy = 0;
+      vy = -vy * Math.min(mat.bounce, 0.95);
       landings.push({ a: id, b: ceilOn.part.id, speed });
     }
   }
@@ -199,17 +302,48 @@ function stepRoom(room, now, players) {
   const entries = [], byId = new Map();
   for (const part of Object.values(room.worldParts)) {
     if (part.type === 'Spawn' || part.isNPC) continue;
-    const entry = { part, box: partBox(part), dyn: !part.anchored, startY: part.y };
+    const entry = { part, box: partBox(part), dyn: !part.anchored, startY: part.y, startX: part.x, startZ: part.z };
     entries.push(entry); byId.set(part.id, entry);
   }
   const dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
   const landings = [];
+
+  // Plataformas móviles: si el soporte se movió desde el tick anterior (script o física), lo que está encima va con él.
+  for (const entry of dynamics) {
+    const supportId = ps.support.get(entry.part.id);
+    if (supportId === undefined) continue;
+    const before = ps.prev.get(supportId), se = byId.get(supportId);
+    if (!before || !se) continue;
+    const dx = se.part.x - before.x, dz = se.part.z - before.z;
+    if ((dx || dz) && Math.hypot(dx, dz) <= MAX_SWEEP) ps.pendingCarry.set(entry.part.id, { x: dx, z: dz });
+  }
+  // Empujar piezas sueltas caminando contra ellas.
+  for (const player of (Array.isArray(players) ? players : [])) {
+    const pvx = (Number(player.vx) || 0) * STEP, pvz = (Number(player.vz) || 0) * STEP;
+    if (Math.abs(pvx) < 1e-3 && Math.abs(pvz) < 1e-3) continue;
+    const pb = playerBox(player);
+    for (const entry of dynamics) {
+      const part = entry.part;
+      if (part.canCollide === false || !intersects(pb, entry.box, 0.04)) continue;
+      if ((Number(player.y) || 0) >= entry.box.maxY - 0.25) continue; // está parado encima, no empuja
+      const volume = Math.max(1, part.sx * part.sy * part.sz);
+      const factor = PLAYER_PUSH * Math.min(1, 30 / volume);
+      const hv = ps.vel.get(part.id) || { x: 0, z: 0 };
+      const cx = (entry.box.minX + entry.box.maxX) / 2, cz = (entry.box.minZ + entry.box.maxZ) / 2;
+      const toX = cx - (Number(player.x) || 0), toZ = cz - (Number(player.z) || 0);
+      if (Math.abs(toX) >= Math.abs(toZ)) { if (Math.sign(toX) === Math.sign(pvx) && Math.abs(pvx * factor) > Math.abs(hv.x)) hv.x = clampSpeed(pvx * factor); }
+      else if (Math.sign(toZ) === Math.sign(pvz) && Math.abs(pvz * factor) > Math.abs(hv.z)) hv.z = clampSpeed(pvz * factor);
+      ps.vel.set(part.id, hv);
+      ps.support.delete(part.id);
+    }
+  }
   for (let s = 0; s < steps; s++) for (const entry of dynamics) stepDynamic(room, ps, entry, entries, byId, landings);
 
   for (const entry of dynamics) {
-    if (Math.abs(entry.part.y - entry.startY) > 1e-4) result.changed.push({ id: entry.part.id, x: entry.part.x, y: entry.part.y, z: entry.part.z });
+    if (Math.abs(entry.part.y - entry.startY) > 1e-4 || Math.abs(entry.part.x - entry.startX) > 1e-4 || Math.abs(entry.part.z - entry.startZ) > 1e-4) result.changed.push({ id: entry.part.id, x: r3(entry.part.x), y: r3(entry.part.y), z: r3(entry.part.z) });
   }
   for (const landing of landings) {
+    if (landing.a === landing.b) continue;
     const key = pairKey(landing.a, landing.b);
     ps.landing.set(key, Math.max(ps.landing.get(key) || 0, landing.speed));
   }
@@ -261,6 +395,15 @@ function stepRoom(room, now, players) {
     }
   }
 
+  // Choques que ocurrieron dentro del tick (la pieza ya rebotó y se alejó): se registran igual como contacto.
+  for (const landing of landings) {
+    if (landing.a === landing.b) continue;
+    const ea = byId.get(landing.a), eb = byId.get(landing.b);
+    if (!ea || !eb || !(isWatched(room, ea.part) || isWatched(room, eb.part))) continue;
+    const key = pairKey(landing.a, landing.b);
+    if (!nowContacts.has(key)) nowContacts.set(key, { a: landing.a, b: landing.b });
+  }
+
   const emit = (phase, key, contact) => {
     const sides = [];
     if (contact.player) {
@@ -309,4 +452,42 @@ function stepRoom(room, now, players) {
   return result;
 }
 
-module.exports = { stepRoom, resetBody, partBox, playerBox, PLAYER, STEP };
+// ── Raycast ──────────────────────────────────────────────────────────────────────────────────────
+// Rayo contra las cajas de las piezas. origin/dir: {x,y,z} (dir no necesita estar normalizado).
+// opts: { ignore: [id|nombre…], includeNonCollidable: bool, maxDistance }
+// Devuelve { id, name, distance, point, normal } o null.
+function rayBox(o, d, box, maxDist) {
+  let tmin = 0, tmax = maxDist, nx = 0, ny = 0, nz = 0;
+  const axes = [['x', 'minX', 'maxX'], ['y', 'minY', 'maxY'], ['z', 'minZ', 'maxZ']];
+  for (const [axis, lo, hi] of axes) {
+    const dir = d[axis], org = o[axis];
+    if (Math.abs(dir) < 1e-12) { if (org < box[lo] || org > box[hi]) return null; continue; }
+    let t1 = (box[lo] - org) / dir, t2 = (box[hi] - org) / dir, sign = -1;
+    if (t1 > t2) { const t = t1; t1 = t2; t2 = t; sign = 1; }
+    if (t1 > tmin) { tmin = t1; nx = ny = nz = 0; if (axis === 'x') nx = sign; else if (axis === 'y') ny = sign; else nz = sign; }
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return null;
+  }
+  return { t: tmin, normal: { x: nx, y: ny, z: nz } };
+}
+function raycast(parts, origin, direction, opts = {}) {
+  const len = Math.hypot(direction.x, direction.y, direction.z) || 1;
+  const d = { x: direction.x / len, y: direction.y / len, z: direction.z / len };
+  const max = Math.max(0.01, Math.min(2000, Number(opts.maxDistance) || 500));
+  const ignore = new Set((opts.ignore || []).map(String));
+  let best = null;
+  for (const part of parts) {
+    if (!part || part.type === 'Spawn' || part.isNPC) continue;
+    if (part.canCollide === false && !opts.includeNonCollidable) continue;
+    if (ignore.has(part.id) || ignore.has(part.name)) continue;
+    const hit = rayBox(origin, d, partBox(part), best ? best.t : max);
+    if (hit && (!best || hit.t < best.t)) best = { t: hit.t, normal: hit.normal, part };
+  }
+  if (!best) return null;
+  return {
+    id: best.part.id, name: best.part.name, distance: r3(best.t), normal: best.normal,
+    point: { x: r3(origin.x + d.x * best.t), y: r3(origin.y + d.y * best.t), z: r3(origin.z + d.z * best.t) },
+  };
+}
+
+module.exports = { stepRoom, resetBody, partBox, playerBox, PLAYER, STEP, getVelocity, setVelocity, addImpulse, raycast, rayBox, MATERIALS };
