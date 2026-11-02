@@ -2525,7 +2525,13 @@ function handleScriptCommand(run,message) {
   const payload=message.payload||{},id=String(payload.id||'');
   try{if(_handleExtendedCommand(run,message))return;if(message.command==='createPart'){if(runtimeObjects.size>=SCRIPT_MAX_PARTS)throw new Error('Se alcanzó el máximo de '+SCRIPT_MAX_PARTS+' piezas');if(runtimeObjects.has(id))throw new Error('El identificador de pieza ya existe');_createGameScriptPart(id,payload.data||{});const created=runtimeObjects.get(id);if(created)created.local=true;}else if(message.command==='updatePart'){if(!runtimeObjects.has(id))throw new Error('No existe la pieza '+id);_updateGameScriptPart(id,payload.patch||{});}else if(message.command==='destroyPart'){_destroyGameScriptPart(id);}else return;_syncScriptWorkspaces();}catch(err){appendOutput('[error] '+err.message,'err');}
 }
-function _syncRuntimeCollider(object) { if(object.data.canCollide!==false){if(!object.collider){object.collider={mesh:object.mesh,box:new THREE.Box3().setFromObject(object.mesh)};gColliders.push(object.collider);}else{object.collider.mesh=object.mesh;object.collider.box.setFromObject(object.mesh);}}else if(object.collider){gColliders=gColliders.filter(collider=>collider!==object.collider);object.collider=null;} }
+// Caja de una malla. Una esfera suelta (free) ocupa lo mismo gire como gire: se ignora su rotación para que la caja no "respire" al rodar.
+function _meshBox(mesh, box = new THREE.Box3(), free = false) {
+  const g = mesh.geometry;
+  if (free && g && g.type === 'SphereGeometry') { if (!g.boundingBox) g.computeBoundingBox(); return box.copy(g.boundingBox).translate(mesh.position); }
+  return box.setFromObject(mesh);
+}
+function _syncRuntimeCollider(object) { const free=object.data.type==='Sphere'&&object.data.anchored===false;if(object.data.canCollide!==false){if(!object.collider){object.collider={mesh:object.mesh,free,box:_meshBox(object.mesh,undefined,free)};gColliders.push(object.collider);}else{object.collider.mesh=object.mesh;object.collider.free=free;_meshBox(object.mesh,object.collider.box,free);}}else if(object.collider){gColliders=gColliders.filter(collider=>collider!==object.collider);object.collider=null;} }
 function _replaceRuntimeMesh(object) { const old=object.mesh,mesh=makeMesh(object.data);if(old&&old.parent)old.parent.remove(old);if(old){old.geometry?.dispose();if(Array.isArray(old.material))old.material.forEach(material=>material.dispose());else old.material?.dispose();}gScene.add(mesh);object.mesh=mesh;_syncRuntimeCollider(object); }
 function _createGameScriptPart(id,source) { const data=normalizeGamePart(id,source);const object={id,data,mesh:null,collider:null,velocity:new THREE.Vector3()};object.mesh=makeMesh(data);gScene.add(object.mesh);runtimeObjects.set(id,object);_syncRuntimeCollider(object); }
 function _updateGameScriptPart(id,patch) { const object=runtimeObjects.get(id),current=object.data,position=patch.position||{},size=patch.size||{};const merged={...current,...patch,x:patch.x??position.x??position.X??current.x,y:patch.y??position.y??position.Y??current.y,z:patch.z??position.z??position.Z??current.z,sx:patch.sx??size.x??size.X??current.sx,sy:patch.sy??size.y??size.Y??current.sy,sz:patch.sz??size.z??size.Z??current.sz};object.data=normalizeGamePart(id,merged);if(object.data.anchored)object.velocity.set(0,0,0);_replaceRuntimeMesh(object); }
@@ -2536,7 +2542,7 @@ function applyNetworkPartUpsert(part) {
   const id=String(part.id||'');if(!id)return;
   const existing=runtimeObjects.get(id);
   if(!existing){if(part.sx===undefined)return;_createGameScriptPart(id,part);return;}
-  const visualChanged=['type','sx','sy','sz','color','material','transparent','rx','ry','rz'].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
+  const rotKeys=existing.data.type==='Sphere'&&existing.data.anchored===false?[]:['rx','ry','rz'];const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
   if(visualChanged){_updateGameScriptPart(id,part);return;}
   existing.data=normalizeGamePart(id,{...existing.data,...part});
   existing.mesh.position.set(existing.data.x,existing.data.y,existing.data.z);
@@ -2636,7 +2642,7 @@ function _colBox(col) {
   const m = col.mesh, p = m.position, r = m.rotation, sc = m.scale, k = col._k;
   if (!k || k[0] !== p.x || k[1] !== p.y || k[2] !== p.z || k[3] !== r.x || k[4] !== r.y || k[5] !== r.z || k[6] !== sc.x || k[7] !== sc.y || k[8] !== sc.z) {
     const b = col.box, ox = (b.min.x + b.max.x) / 2, oy = b.min.y, oz = (b.min.z + b.max.z) / 2;
-    b.setFromObject(m);
+    _meshBox(m, b, col.free);
     if (k) { col._dx = (b.min.x + b.max.x) / 2 - ox; col._dy = b.min.y - oy; col._dz = (b.min.z + b.max.z) / 2 - oz; } else { col._dx = col._dy = col._dz = 0; }
     col._k = [p.x, p.y, p.z, r.x, r.y, r.z, sc.x, sc.y, sc.z];
   } else col._dx = col._dy = col._dz = 0;
@@ -4333,7 +4339,7 @@ function _stepGameplay() {
     if (d.behavior === 'coin') object.mesh.rotation.y += 0.05;
     const hasBehavior = d.behavior && d.behavior !== 'none', watched = gTouchWatch.size && gTouchWatch.has(d.name);
     if (!hasBehavior && !watched) continue;
-    const box = new THREE.Box3().setFromObject(object.mesh).expandByScalar(0.12), hit = box.intersectsBox(pBox);
+    const box = _meshBox(object.mesh, undefined, d.type === 'Sphere' && d.anchored === false).expandByScalar(0.12), hit = box.intersectsBox(pBox);
     if (watched) { if (hit && !object.touching) dispatchScriptEvent('touched:' + d.name, [scriptPlayerSnapshot()]); object.touching = hit; }
     if (hit && hasBehavior) _applyBehavior(object, d, box, now);
   }
