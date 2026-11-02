@@ -236,6 +236,15 @@ const caja = game.getPart("Caja");                // estado actual, también por
 
 Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor de rigging, huesos ni animación.
 
+## Sincronización del mundo entre jugadores
+
+Todo lo que cambia en una partida online se ve igual para todos los jugadores de la instancia:
+
+- **Piezas con física** (`anchored:false`): el servidor simula y emite un único paquete `world_delta` por tick (20 Hz) con todas las piezas que se movieron. El cliente **interpola** hacia esas posiciones a 60 Hz (`_stepNetInterp`), así que si alguien empuja una caja, una esfera rueda o un script mueve una plataforma, los demás lo ven fluido y no a saltos. Los saltos grandes (más de 12 studs) y el snapshot inicial se colocan directamente.
+- **Jugadores nuevos** reciben el estado actual (`room_state`): piezas movidas, creadas/destruidas por scripts y coleccionables ya recogidos.
+- **Coleccionables compartidos** (`behavior: coin`): el cliente avisa con `part_collect`; el servidor valida que la pieza exista, que no esté recogida y que el jugador esté cerca, y avisa al resto con `part_collected`. La moneda desaparece para todos y no reaparece para quien entra después.
+- Posiciones, animación y rotación de avatares: `player_move` / `player_moved` (20 Hz, con suavizado).
+
 ## Motor de físicas y scripts (v2)
 
 ### Físicas

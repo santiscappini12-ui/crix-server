@@ -174,7 +174,7 @@ function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId])
 function gameChannel(mapId, instanceId) { return `game:${encodeURIComponent(mapId)}:${instanceId}`; }
 function getRoom(mapId, instanceId) {
   const key = roomKey(mapId, instanceId);
-  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[], worldParts:null, basePartIds:new Set(), changedPartIds:new Set(), removedPartIds:new Set(), physicsVelocities:{}, scriptStarted:false, scriptStatus:'stopped', pendingReset:false, commandTimes:[], watched:new Set(), appliedSeq:0, phys:null };
+  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[], worldParts:null, basePartIds:new Set(), changedPartIds:new Set(), removedPartIds:new Set(), physicsVelocities:{}, scriptStarted:false, scriptStatus:'stopped', pendingReset:false, commandTimes:[], watched:new Set(), appliedSeq:0, phys:null, collectedIds:new Set() };
   return rooms[key];
 }
 function roomPlayers(room) { return Object.values(room.players); }
@@ -214,13 +214,13 @@ function initializeRoomWorld(room, map) {
     const id=String(source.id||`map-part-${index}`),part=normalizeRoomPart(id,source);
     room.worldParts[id]=part;room.basePartIds.add(id);
   }
-  room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];room.watched=new Set();room.appliedSeq=0;room.phys=null;
+  room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];room.watched=new Set();room.appliedSeq=0;room.phys=null;room.collectedIds=new Set();
 }
 
 function roomWorldSnapshot(room) {
   const runtimeParts=Object.values(room.worldParts||{}).filter(part=>!room.basePartIds.has(part.id)&&part.type!=='Spawn');
   const worldChanges=Array.from(room.changedPartIds).map(id=>room.worldParts[id]).filter(part=>part&&part.type!=='Spawn');
-  return {runtimeParts,worldChanges,removedParts:[...room.removedPartIds]};
+  return {runtimeParts,worldChanges,removedParts:[...room.removedPartIds],collectedParts:[...(room.collectedIds||[])]};
 }
 
 let scriptRunner=null, scriptRunnerError=null;
@@ -335,10 +335,10 @@ function stepServerWorldPhysics() {
     const roomId=roomKey(room.mapId,room.instanceId),channel=gameChannel(room.mapId,room.instanceId);
     const result=worldPhysics.stepRoom(room,now,playersForRunner(room));
     if(result.changed.length){
-      for(const update of result.changed){
-        if(room.basePartIds.has(update.id))room.changedPartIds.add(update.id);
-        io.to(channel).emit('runtime_scene',{command:'upsertPart',payload:{part:update}});
-      }
+      for(const update of result.changed)if(room.basePartIds.has(update.id))room.changedPartIds.add(update.id);
+      // Un único paquete por tick con todas las piezas que se movieron (antes era uno por pieza).
+      // `t` permite al cliente interpolar y descartar paquetes viejos.
+      io.to(channel).emit('world_delta',{t:now,parts:result.changed});
       scriptRunner?.send({type:'worldPositions',roomId,parts:result.changed,appliedSeq:room.appliedSeq||0});
     }
     if(result.events.length&&scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'contacts',roomId,events:result.events});
@@ -1970,6 +1970,20 @@ io.on('connection', socket => {
   });
 
   // Evento remoto LocalScript → Script de servidor (game.fireServer en el cliente, game.onClientEvent en el servidor).
+  // Coleccionables compartidos: cuando alguien recoge una moneda, desaparece para todos en la sala.
+  socket.on('part_collect', data => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id] || !room.worldParts) return;
+    const id = String(data?.id || '').slice(0, 120);
+    const part = room.worldParts[id];
+    if (!part || part.behavior !== 'coin' || room.collectedIds.has(id)) return;
+    const p = room.players[socket.id];
+    // Validación anti-trampa: el jugador tiene que estar cerca de la pieza.
+    if (Math.hypot((p.x||0)-part.x, (p.y||0)-part.y, (p.z||0)-part.z) > Math.max(part.sx, part.sy, part.sz) / 2 + 12) return;
+    room.collectedIds.add(id);
+    socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('part_collected', { id, by:socket.id });
+  });
+
   socket.on('script_remote', data => {
     const meta = connSockets[socket.id]; if (!meta?.mapId) return;
     const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id];

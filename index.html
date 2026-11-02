@@ -3150,26 +3150,52 @@ function _createGameScriptPart(id,source) { const data=normalizeGamePart(id,sour
 function _updateGameScriptPart(id,patch) { const object=runtimeObjects.get(id),current=object.data,position=patch.position||{},size=patch.size||{};const merged={...current,...patch,x:patch.x??position.x??position.X??current.x,y:patch.y??position.y??position.Y??current.y,z:patch.z??position.z??position.Z??current.z,sx:patch.sx??size.x??size.X??current.sx,sy:patch.sy??size.y??size.Y??current.sy,sz:patch.sz??size.z??size.Z??current.sz};object.data=normalizeGamePart(id,merged);if(object.data.anchored)object.velocity.set(0,0,0);_replaceRuntimeMesh(object); }
 function _destroyGameScriptPart(id) { const object=runtimeObjects.get(id);if(!object)return;if(object.mesh&&object.mesh.parent)object.mesh.parent.remove(object.mesh);object.mesh?.geometry?.dispose();if(Array.isArray(object.mesh?.material))object.mesh.material.forEach(material=>material.dispose());else object.mesh?.material?.dispose();if(object.collider)gColliders=gColliders.filter(collider=>collider!==object.collider);runtimeObjects.delete(id); }
 function appendOutput(line, cls = '') { const out = document.getElementById('code-output'); const span = document.createElement('span'); span.className = cls === 'err' ? 'code-out-err' : cls === 'warn' ? 'code-out-warn' : cls === 'sys' ? 'code-out-sys' : ''; span.textContent = line + '\n'; out.appendChild(span); out.scrollTop = out.scrollHeight; }
-function applyNetworkPartUpsert(part) {
+function applyNetworkPartUpsert(part,snap) {
   if(!gScene||!part||part.type==='Spawn'||part.isNPC)return;
   const id=String(part.id||'');if(!id)return;
   const existing=runtimeObjects.get(id);
   if(!existing){if(part.sx===undefined)return;_createGameScriptPart(id,part);return;}
   const rotKeys=existing.data.type==='Sphere'&&existing.data.anchored===false?[]:['rx','ry','rz'];const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
-  if(visualChanged){_updateGameScriptPart(id,part);return;}
+  if(visualChanged){existing.netTarget=null;_updateGameScriptPart(id,part);return;}
   existing.data=normalizeGamePart(id,{...existing.data,...part});
-  existing.mesh.position.set(existing.data.x,existing.data.y,existing.data.z);
-  existing.mesh.rotation.set(existing.data.rx||0,existing.data.ry||0,existing.data.rz||0);
   if(existing.data.anchored)existing.velocity.set(0,0,0);
-  _syncRuntimeCollider(existing);
+  const d=existing.data,m=existing.mesh,far=Math.hypot(d.x-m.position.x,d.y-m.position.y,d.z-m.position.z)>12;
+  if(snap||far||!existing.mesh.visible){
+    // Primera vez / teletransporte / snapshot: colocar directamente.
+    existing.netTarget=null;
+    m.position.set(d.x,d.y,d.z);m.rotation.set(d.rx||0,d.ry||0,d.rz||0);
+    _syncRuntimeCollider(existing);
+  }else{
+    // Movimiento normal: el servidor manda ~20 paquetes/s; el cliente interpola a 60/s (ver _stepNetInterp).
+    existing.netTarget={x:d.x,y:d.y,z:d.z,rx:d.rx||0,ry:d.ry||0,rz:d.rz||0};
+  }
+}
+// Acerca suavemente cada pieza sincronizada a la última posición que mandó el servidor.
+function _stepNetInterp() {
+  for(const object of runtimeObjects.values()){
+    const t=object.netTarget,m=object.mesh;if(!t||!m)continue;
+    const k=0.4,p=m.position,r=m.rotation;
+    p.x+=(t.x-p.x)*k;p.y+=(t.y-p.y)*k;p.z+=(t.z-p.z)*k;
+    // Rotación por el camino corto (las esferas rodando mandan rx/ry/rz).
+    const ang=(a,b)=>{let dd=b-a;while(dd>Math.PI)dd-=Math.PI*2;while(dd<-Math.PI)dd+=Math.PI*2;return dd;};
+    r.x+=ang(r.x,t.rx)*k;r.y+=ang(r.y,t.ry)*k;r.z+=ang(r.z,t.rz)*k;
+    if(Math.abs(t.x-p.x)<0.002&&Math.abs(t.y-p.y)<0.002&&Math.abs(t.z-p.z)<0.002){p.set(t.x,t.y,t.z);r.set(t.rx,t.ry,t.rz);object.netTarget=null;}
+  }
+}
+// Coleccionable recogido por otro jugador: desaparece también aquí.
+function _remoteCollect(id) {
+  const object=runtimeObjects.get(String(id));if(!object||object.collected)return;
+  object.collected=true;if(object.mesh)object.mesh.visible=false;
+  if(object.collider){gColliders=gColliders.filter(collider=>collider!==object.collider);object.collider=null;}
 }
 function applyNetworkWorldSnapshot(snapshot={}) {
   const nextRuntimeIds=new Set((snapshot.runtimeParts||[]).map(part=>String(part.id||'')).filter(Boolean));
   for(const id of networkRuntimePartIds)if(!nextRuntimeIds.has(id))_destroyGameScriptPart(id);
   networkRuntimePartIds=nextRuntimeIds;
   for(const id of snapshot.removedParts||[])_destroyGameScriptPart(String(id));
-  for(const part of snapshot.runtimeParts||[])applyNetworkPartUpsert(part);
-  for(const part of snapshot.worldChanges||[])applyNetworkPartUpsert(part);
+  for(const part of snapshot.runtimeParts||[])applyNetworkPartUpsert(part,true);
+  for(const part of snapshot.worldChanges||[])applyNetworkPartUpsert(part,true);
+  for(const id of snapshot.collectedParts||[])_remoteCollect(id);
   _syncScriptWorkspaces();
 }
 function applyNetworkSceneEvent(message={}) {
@@ -3266,7 +3292,7 @@ function _stepLocalSpheres() {
   }
   for (const o of loose) if (!o._pp) o._pp = { x: o.mesh.position.x, y: o.mesh.position.y, z: o.mesh.position.z };
 }
-function _stepScriptParts() { const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics;for(const object of runtimeObjects.values()){if(localSpheres&&object.data.type==='Sphere')continue;if(object.data.anchored||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
+function _stepScriptParts() { _stepNetInterp();const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics;for(const object of runtimeObjects.values()){if(localSpheres&&object.data.type==='Sphere')continue;if(object.data.anchored||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
 // Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
 // así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
 // (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
@@ -3411,10 +3437,10 @@ function netConnect() {
   socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
   socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();});
   socket.on('connect_error',()=>{netConnected=false;updateNetPill('🟡','Sin servidor');});
-  socket.on('room_state',({players=[],chat=[],runtimeParts=[],worldChanges=[],removedParts=[],scriptRuntime})=>{
+  socket.on('room_state',({players=[],chat=[],runtimeParts=[],worldChanges=[],removedParts=[],collectedParts=[],scriptRuntime})=>{
     clearRemotePlayers();players.forEach(player=>spawnRemote(player));
     if(chat.length)chat.forEach(message=>addGMsg(`${message.username}: ${message.text}`,'chat'));
-    applyNetworkWorldSnapshot({runtimeParts,worldChanges,removedParts});
+    applyNetworkWorldSnapshot({runtimeParts,worldChanges,removedParts,collectedParts});
     if(scriptRuntime==='error')addGMsg('⚠️ No se pudo iniciar el script de servidor.','sys');
     updateNetPill('🟢',`${players.length+1} jugadores`);
   });
@@ -3423,6 +3449,9 @@ function netConnect() {
     else if(status==='ready'&&scriptCount)addGMsg(`🖥️ ${scriptCount} script(s) ejecutándose en el servidor`,'sys');
   });
   socket.on('runtime_scene',applyNetworkSceneEvent);
+  // Lote de posiciones de piezas con física (un paquete por tick del servidor).
+  socket.on('world_delta',({parts=[]}={})=>{for(const part of parts)applyNetworkPartUpsert(part);});
+  socket.on('part_collected',({id}={})=>_remoteCollect(id));
   socket.on('script_remote',({name,data}={})=>{if(name)dispatchScriptEvent('remote:'+String(name),[data]);});
   socket.on('server_player_cmd',command=>{if(gPlayer&&command&&typeof command==='object')_playerCommand(command);});
   socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
@@ -5006,6 +5035,7 @@ function _applyBehavior(object, d, box, now) {
     case 'coin':
       object.collected = true; object.mesh.visible = false;
       if (object.collider) { gColliders = gColliders.filter(c => c !== object.collider); object.collider = null; }
+      if (netConnected && netServerScriptsActive && socket) socket.emit('part_collect', { id });
       gState.coins += v > 0 ? v : 1; updateGameHud(); dispatchScriptEvent('coin', [gState.coins]); break;
     case 'heal': if (_cool('h'+id, 800, now)) healPlayer(v > 0 ? v : 25); break;
     case 'teleport':
