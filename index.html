@@ -5097,7 +5097,8 @@ function callFbStart(st, why) {
 }
 function callFbStop(st) {
   const fb = st && st.fb; if (!fb) return;
-  st.fb = null; st.viaServer = false;
+  st.fb = null; st.viaServer = false; st.fbForced = false;
+  try { const au = document.getElementById('call-remote-audio'); if (au) au.muted = false; } catch {}
   (fb.timers || []).forEach(t => clearInterval(t));
   (fb.nodes || []).forEach(n => { try { n.onaudioprocess = null; n.disconnect(); } catch {} });
   try { if (fb.out) fb.out.disconnect(); } catch {}
@@ -5108,9 +5109,59 @@ function callFbStop(st) {
   const v = document.getElementById('call-remote'); if (v && !st.remote) { try { v.srcObject = null; } catch {} }
   if (_callState === st) { if (st.remote) callAttachRemote(); callRender(); }
 }
+// ── Vigilante de audio ──
+// "Conectado" (ICE) no garantiza que el audio fluya: con ciertas rutas/TURN/NAT la llamada figura activa y no se escucha nada,
+// y como WebRTC "estaba conectado" el respaldo por el servidor nunca arrancaba. Cada 2 s se mira cuántos bytes de audio entran;
+// si pasan ~7 s sin que entre nada (y la otra persona no está en segundo plano) se pasa al respaldo por el servidor y se le
+// avisa a la otra persona (latido con valor 2) para que también envíe su audio por ahí. Cuando el audio directo se recupera
+// se vuelve solo. También se revive el <audio> si el navegador lo dejó en pausa.
+function callFbIsReq(k, d) { try { return k === 'h' && !!d && new Uint8Array(d)[0] === 2; } catch { return false; } }
+function callMediaWatchStart(st) {
+  clearInterval(st.watchTimer);
+  st.mw = { rx: -1, rxAt: Date.now(), tx: -1, txAt: Date.now(), ok: 0 };
+  st.watchTimer = setInterval(() => { callMediaWatchTick(st).catch(() => {}); }, 2000);
+}
+async function callMediaWatchTick(st) {
+  if (_callState !== st || st.status !== 'active' || !st.pc || st._watchBusy) return;
+  st._watchBusy = true;
+  try {
+    const now = Date.now(), a = document.getElementById('call-remote-audio'), w = st.mw || (st.mw = { rx: -1, rxAt: now, tx: -1, txAt: now, ok: 0 });
+    // El <audio> debe estar reproduciendo el stream remoto (el navegador puede dejarlo en pausa o desenganchado).
+    if (a && st.remote && !st.viaServer && document.visibilityState === 'visible' && (a.srcObject !== st.remote || a.paused)) callAttachRemote();
+    if (st.viaServer && !st.fbForced) return;                       // respaldo normal (WebRTC no conectó): ya lo vigila su propio temporizador
+    let rx = 0, tx = 0;
+    (await st.pc.getStats()).forEach(r => {
+      if (r.type === 'inbound-rtp' && r.kind === 'audio') rx += r.bytesReceived || 0;
+      else if (r.type === 'outbound-rtp' && r.kind === 'audio') tx += r.bytesSent || 0;
+    });
+    if (_callState !== st) return;
+    const grew = rx > w.rx; if (grew) w.rxAt = now; w.rx = Math.max(w.rx, rx); w.ok = grew ? w.ok + 1 : 0;
+    if (tx > w.tx) w.txAt = now; w.tx = Math.max(w.tx, tx);
+    const p = st.peerState || {}, peerQuiet = !!(p.bg || p.sys);     // en segundo plano / micrófono pausado por el sistema: es normal que no llegue audio
+    if (!st.viaServer) {
+      if (!grew && now - w.rxAt > 7000 && !peerQuiet) {
+        st.fbForced = true; st.fbForcedAt = now;
+        callFbStart(st, 'sin audio entrante por WebRTC');
+        if (!st.viaServer) st.fbForced = false;                     // sin Web Audio no hay respaldo posible
+        else callFbSend(st, 'h', new Uint8Array([2]));
+      }
+      // Nuestro micrófono no está saliendo: se vuelve a pedir si el sistema lo cortó.
+      if (now - w.txAt > 7000 && now - (st._txFixAt || 0) > 10000) { st._txFixAt = now; callRecoverMedia(); }
+      return;
+    }
+    // Respaldo forzado: seguir avisando mientras a nosotros no nos llega audio directo.
+    if (now - w.rxAt > 5000 && st.fb) callFbSend(st, 'h', new Uint8Array([2]));
+    // Mientras llega audio por el servidor se silencia el audio directo para no oír doble.
+    if (a) a.muted = !!(st.fbLastRx && now - st.fbLastRx < 3000);
+    // Si el audio directo volvió y la otra persona ya no lo pide, se regresa a WebRTC.
+    const reqRecent = !!(st.fbReqAt && now - st.fbReqAt < 8000);
+    if (now - (st.fbForcedAt || 0) > 10000 && w.ok >= 3 && !reqRecent) { callFbStop(st); w.rxAt = now; callAttachRemote(); }
+  } finally { st._watchBusy = false; }
+}
 function callFbReceive(st, k, d) {
   if (!st.fb) return;
   st.fbLastRx = Date.now();
+  if (callFbIsReq(k, d)) st.fbReqAt = st.fbLastRx;
   if (st.status !== 'active') { st.hint = ''; callMarkActive(st); }
   if (k === 'a') callFbPlay(st, d); else if (k === 'v') callFbShow(st, d);
 }
@@ -5146,7 +5197,7 @@ function callFbShow(st, d) {
 }
 function callMarkActive(st) {
   if (!st || st.status === 'active') return;
-  st.status = 'active'; st.startedAt = Date.now(); callTone(null); callRender(); callStartClock(); callWakeLockAcquire(); callMediaSessionSet(st); callBgStart(st);
+  st.status = 'active'; st.startedAt = Date.now(); callTone(null); callRender(); callStartClock(); callWakeLockAcquire(); callMediaSessionSet(st); callBgStart(st); callMediaWatchStart(st);
   if (document.visibilityState === 'hidden') callOngoingNotif(true);
 }
 // Emite un evento de llamada y reintenta hasta que el servidor lo confirme. socket.io ya guarda lo emitido sin conexión;
@@ -5170,7 +5221,7 @@ function callEndTone(kind) {
 }
 function callEndedCard(st, kind, text) {
   if (!st || _callState !== st || st.status === 'ended') return;
-  ['ringTimer', 'connTimer', 'discTimer', 'hintTimer', 'fbTimer', 'fbTimer2', 'offerTimer', 'endTimer'].forEach(k => clearTimeout(st[k]));
+  ['ringTimer', 'connTimer', 'discTimer', 'hintTimer', 'fbTimer', 'fbTimer2', 'offerTimer', 'endTimer', 'watchTimer'].forEach(k => clearTimeout(st[k]));
   callFbStop(st); callTone(null);
   // Se libera ya el micrófono/cámara y la conexión: la tarjeta es solo informativa.
   try { if (st.pc) { st.pc.ontrack = st.pc.onicecandidate = st.pc.onconnectionstatechange = st.pc.oniceconnectionstatechange = null; st.pc.close(); } } catch {}
@@ -5313,7 +5364,7 @@ function callOnConnState(st) {
   const armCut = (msg, ms) => { clearTimeout(st.discTimer); st.discTimer = setTimeout(() => { if (_callState === st && st.pc && !callConnOk(st) && !callFbHealthy(st)) callHangup(msg); }, ms); };
   if (c === 'connected' || i === 'connected' || i === 'completed') {
     clearTimeout(st.discTimer); clearTimeout(st.connTimer); clearTimeout(st.hintTimer); clearTimeout(st.fbTimer); clearTimeout(st.fbTimer2); st.hint = ''; st.triedRestart = false;
-    if (st.viaServer) callFbStop(st);                    // WebRTC ya conectó: se apaga el respaldo y se vuelve al audio/video directo
+    if (st.viaServer && !st.fbForced) callFbStop(st);    // WebRTC ya conectó: se apaga el respaldo y se vuelve al audio/video directo (salvo que se haya forzado por falta de audio)
     if (!st.viaServer && st.rtcRemote && st.remote !== st.rtcRemote) st.remote = st.rtcRemote;
     if (st.status !== 'active') { callMarkActive(st); callAttachRemote(); } else { callAttachRemote(); callUpdateStatus(); }
     callSendState(st);
@@ -5770,7 +5821,7 @@ function callCleanup() {
   const st = _callState; _callState = null;
   clearInterval(_callClock); callTone(null);
   if (st) {
-    ['ringTimer','connTimer','discTimer','hintTimer','fbTimer','fbTimer2','offerTimer','endTimer'].forEach(k => clearTimeout(st[k]));
+    ['ringTimer','connTimer','discTimer','hintTimer','fbTimer','fbTimer2','offerTimer','endTimer','watchTimer'].forEach(k => clearTimeout(st[k]));
     try { callFbStop(st); } catch {}
     try { if (st.dc) st.dc.close(); } catch {}
     if (st.local) st.local.getTracks().forEach(t => { t.onmute = t.onunmute = t.onended = null; });
@@ -5778,6 +5829,7 @@ function callCleanup() {
     if (st.local) st.local.getTracks().forEach(t => { try { t.stop(); } catch {} });
   }
   ['call-remote','call-local','call-remote-audio'].forEach(id => { const el = document.getElementById(id); if (el) { try { el.srcObject = null; } catch {} } });
+  { const au = document.getElementById('call-remote-audio'); if (au) au.muted = false; }
   const rv = document.getElementById('call-remote'); if (rv) rv.onloadedmetadata = rv.onplaying = rv.onresize = null;
   const ov = document.getElementById('call-overlay'); if (ov) ov.classList.remove('open', 'mini', 'novideo');
 }
@@ -5826,7 +5878,15 @@ function callInitSignaling() {
   // Audio/video de respaldo (por el servidor). Si llega algo y WebRTC todavía no conectó, esta persona también pasa a ese modo.
   socket.on('call_media', ({ from, k, d }) => {
     const st = _callState; if (!st || st.peerId !== from || !['connecting', 'active'].includes(st.status)) return;
-    if (!st.viaServer) { if (callConnOk(st)) return; callFbStart(st, 'peer'); }
+    if (!st.viaServer) {
+      if (callConnOk(st)) {
+        // WebRTC figura conectado: el respaldo solo se activa si la otra persona avisa que no le llega nuestro audio.
+        if (!(st.status === 'active' && callFbIsReq(k, d))) return;
+        st.fbForced = true; st.fbForcedAt = Date.now();
+      }
+      callFbStart(st, 'peer');
+      if (!st.viaServer) { st.fbForced = false; return; }
+    }
     callFbReceive(st, k, d);
   });
   socket.on('connect', callSyncAfterReconnect);
