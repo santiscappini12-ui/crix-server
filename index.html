@@ -70,7 +70,15 @@ input,select,textarea{font-family:var(--font);}
 .notif-wrap{position:relative;cursor:pointer;}
 .notif-dot{width:7px;height:7px;border-radius:50%;background:var(--red);position:absolute;top:-1px;right:-1px;display:none;border:1.5px solid var(--bg);}
 /* ═══ PAGE SHELL ═══ */
-.page{flex:1;overflow-y:auto;padding-top:50px;}
+:root{--nav-h:50px;}
+body.nav-hidden{--nav-h:0px;}
+#nav{transition:transform .22s ease;}
+body.nav-hidden #nav{transform:translateY(-50px);border-bottom-color:transparent;}
+#nav-toggle{position:absolute;top:100%;right:16px;width:34px;height:16px;border:1px solid var(--border);border-top:none;border-radius:0 0 9px 9px;background:rgba(8,10,15,.95);color:var(--text2);font-size:9px;line-height:14px;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+#nav-toggle:hover{color:var(--text);background:var(--bg3);}
+body.nav-hidden #nav-toggle{opacity:.55;}
+body.nav-hidden #nav-toggle:hover{opacity:1;}
+.page{flex:1;overflow-y:auto;padding-top:var(--nav-h,50px);transition:padding-top .22s ease;}
 .page-inner{max-width:1200px;margin:0 auto;padding:20px 16px;}
 /* ═══ HOME ═══ */
 .section-hd{font-family:var(--display);font-size:15px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px;letter-spacing:-.5px;}
@@ -211,7 +219,7 @@ input,select,textarea{font-family:var(--font);}
 .code-out-sys{color:var(--text3);}
 /* ═══ MESSAGES ═══ */
 #s-msg{flex-direction:row;}
-#msg-sidebar{width:270px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:50px;flex-shrink:0;}
+#msg-sidebar{width:270px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:var(--nav-h,50px);flex-shrink:0;}
 #msg-list{flex:1;overflow-y:auto;}
 .msg-conv{padding:11px 13px;cursor:pointer;display:flex;align-items:center;gap:9px;transition:background .1s;border-bottom:1px solid rgba(30,37,53,.5);}
 .msg-conv:hover{background:var(--bg3);}
@@ -221,7 +229,7 @@ input,select,textarea{font-family:var(--font);}
 .conv-name{font-size:13px;font-weight:700;}
 .conv-last{font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .unread-badge{background:var(--acc);color:#fff;border-radius:10px;padding:1px 6px;font-size:9px;font-weight:700;display:inline-block;margin-top:2px;}
-#msg-main{flex:1;display:flex;flex-direction:column;padding-top:50px;min-width:0;}
+#msg-main{flex:1;display:flex;flex-direction:column;padding-top:var(--nav-h,50px);min-width:0;}
 #msg-header{padding:11px 15px;border-bottom:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;gap:10px;flex-shrink:0;}
 #msg-messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px;}
 .mb-wrap{display:flex;flex-direction:column;gap:2px;}
@@ -532,6 +540,7 @@ input,select,textarea{font-family:var(--font);}
     </div>
     <div class="nav-av" id="nav-av" onclick="goTab('profile',ME&&ME.id)"></div>
   </div>
+  <button id="nav-toggle" onclick="toggleNavBar()" title="Ocultar barra superior" aria-label="Ocultar o mostrar la barra superior">▲</button>
 </div>
 <!-- ═══ HOME ═══ -->
 <div id="s-home" class="screen">
@@ -2686,6 +2695,14 @@ function _setupMob() { const base = document.getElementById('joy-base'); const k
 let gChatMsgs = [];
 function addGMsg(text, cls='chat') { const el = document.getElementById('g-chat-msgs'); gChatMsgs.push({text,cls}); if (gChatMsgs.length > 50) gChatMsgs.shift(); el.innerHTML = gChatMsgs.map(m=>`<div class="g-msg ${m.cls}">${esc(m.text)}</div>`).join(''); el.scrollTop = el.scrollHeight; }
 function gChatKey(e) { if (e.key === 'Enter') { const t = e.target.value.trim(); if (t) { addGMsg(ME.username+': '+t,'me'); netSendChat(t); e.target.value=''; } e.target.blur(); } }
+function toggleNavBar(force) {
+  const hide = typeof force === 'boolean' ? force : !document.body.classList.contains('nav-hidden');
+  document.body.classList.toggle('nav-hidden', hide);
+  const btn = document.getElementById('nav-toggle');
+  if (btn) { btn.textContent = hide ? '▼' : '▲'; btn.title = hide ? 'Mostrar barra superior' : 'Ocultar barra superior'; }
+  try { localStorage.setItem('crix_nav_hidden', hide ? '1' : '0'); } catch (_) {}
+}
+try { if (localStorage.getItem('crix_nav_hidden') === '1') toggleNavBar(true); } catch (_) {}
 function exitGame() { gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
 const NET_RATE = 3;
