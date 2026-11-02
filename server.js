@@ -1984,16 +1984,6 @@ io.on('connection', socket => {
   });
 
   // Evento remoto LocalScript → Script de servidor (game.fireServer en el cliente, game.onClientEvent en el servidor).
-  // Un cliente detectó que le falta una pieza o está desfasado: se le reenvía el estado completo del mundo.
-  socket.on('world_resync', () => {
-    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
-    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id] || !room.worldParts) return;
-    const now = Date.now(); if (now - (socket.data.lastResync || 0) < 1000) return;
-    socket.data.lastResync = now;
-    const dynamic = Object.values(room.worldParts).filter(part => !part.anchored && part.type !== 'Spawn');
-    socket.emit('world_snapshot', { ...roomWorldSnapshot(room), dynamicParts: dynamic });
-  });
-
   // Coleccionables compartidos: cuando alguien recoge una moneda, desaparece para todos en la sala.
   socket.on('part_collect', data => {
     const meta = connSockets[socket.id]; if (!meta?.mapId) return;

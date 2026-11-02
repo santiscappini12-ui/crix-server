@@ -3452,9 +3452,8 @@ function netConnect() {
   // Lote de posiciones de piezas con física (un paquete por tick del servidor).
   socket.on('world_delta',({parts=[]}={})=>{for(const part of parts)applyNetworkPartUpsert(part);});
   socket.on('part_collected',({id}={})=>_remoteCollect(id));
-  // Resync periódico del servidor: si falta alguna pieza se pide el estado completo; el resto se corrige suavemente.
-  socket.on('world_sync',({parts=[]}={})=>{let missing=false;for(const part of parts){if(!runtimeObjects.has(String(part.id)))missing=true;else applyNetworkPartUpsert(part);}if(missing&&netConnected)socket.emit('world_resync');});
-  socket.on('world_snapshot',snapshot=>{applyNetworkWorldSnapshot(snapshot);for(const part of snapshot.dynamicParts||[])applyNetworkPartUpsert(part,true);});
+  // Resync periódico del servidor: solo corrige la posición de piezas que ya existen aquí. Nunca crea piezas.
+  socket.on('world_sync',({parts=[]}={})=>{for(const part of parts){if(runtimeObjects.has(String(part.id)))applyNetworkPartUpsert(part);}});
   socket.on('script_remote',({name,data}={})=>{if(name)dispatchScriptEvent('remote:'+String(name),[data]);});
   socket.on('server_player_cmd',command=>{if(gPlayer&&command&&typeof command==='object')_playerCommand(command);});
   socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
