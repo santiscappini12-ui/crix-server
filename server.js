@@ -605,6 +605,57 @@ app.use((req, res, next) => {
 const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
+// ── Enlaces compartibles ──────────────────────────────────────────────────────────────────────
+//   /juego/<id>/<nombre>   /video/<id>/<nombre>   /u/<usuario>
+// Sirven la misma app, pero con título y vista previa (Open Graph) del contenido para que al pegar el enlace en
+// Discord, WhatsApp, etc. se vea el nombre y la descripción. Solo se revela el título de contenido público; el
+// contenido privado muestra una vista previa genérica (el cliente igualmente comprueba los permisos al abrirlo).
+const htmlEsc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+let indexCache = { mtime: 0, html: '' };
+function readIndexHtml() {
+  const file = path.join(__dirname, 'index.html');
+  const stat = fs.statSync(file);
+  if (stat.mtimeMs !== indexCache.mtime) indexCache = { mtime: stat.mtimeMs, html: fs.readFileSync(file, 'utf8') };
+  return indexCache.html;
+}
+function shareMeta(kind, key) {
+  const fallback = { title: 'Crix — Plataforma de Juegos', desc: 'Juega, crea y comparte juegos y videos en Crix.' };
+  try {
+    if (kind === 'juego') {
+      const map = DB.maps[key];
+      if (map && (map.privacy || 'public') === 'public') return { title: `${map.name || 'Juego'} — Crix`, desc: String(map.desc || `Juega a ${map.name || 'este juego'} en Crix`).slice(0, 200) };
+    } else if (kind === 'video') {
+      const video = (DB.videos || []).find(item => item.id === key);
+      if (video && (video.privacy || 'public') === 'public' && video.ready !== false) return { title: `${video.title || 'Video'} — Crix`, desc: String(video.desc || video.description || `Mira este video de ${video.authorName || 'Crix'} en Crix`).slice(0, 200) };
+    } else if (kind === 'u') {
+      const user = Object.values(DB.users).find(item => String(item.username || '').toLowerCase() === key.toLowerCase());
+      if (user && !user.banned) return { title: `${user.username} en Crix`, desc: String(user.bio || `Perfil de ${user.username} en Crix`).slice(0, 200) };
+    }
+  } catch (_) {}
+  return fallback;
+}
+function sharePage(kind) {
+  return (req, res) => {
+    const key = String(req.params.id || req.params.username || '').slice(0, 200);
+    const meta = shareMeta(kind, key);
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const url = origin + req.originalUrl.split('?')[0];
+    const tags = [
+      `<meta property="og:site_name" content="Crix">`, `<meta property="og:type" content="website">`,
+      `<meta property="og:title" content="${htmlEsc(meta.title)}">`, `<meta property="og:description" content="${htmlEsc(meta.desc)}">`,
+      `<meta property="og:url" content="${htmlEsc(url)}">`, `<meta property="og:image" content="${htmlEsc(origin + '/icons/icon-512.png')}">`,
+      `<meta name="twitter:card" content="summary">`, `<meta name="description" content="${htmlEsc(meta.desc)}">`,
+      `<link rel="canonical" href="${htmlEsc(url)}">`,
+      `<script>window.__CRIX_ROUTE__=${JSON.stringify({ kind, key }).replace(/</g, '\\u003c')};</script>`,
+    ].join('\n');
+    const html = readIndexHtml().replace(/<title>[\s\S]*?<\/title>/, () => `<title>${htmlEsc(meta.title)}</title>`).replace('</head>', () => tags + '\n</head>');
+    res.set('Cache-Control', 'no-cache').type('html').send(html);
+  };
+}
+app.get(['/juego/:id', '/juego/:id/:slug'], sharePage('juego'));
+app.get(['/video/:id', '/video/:id/:slug'], sharePage('video'));
+app.get('/u/:username', sharePage('u'));
 app.get(PUBLIC_FILES, (req, res) => {
   // El service worker y el manifiesto no deben quedar en caché para que las actualizaciones lleguen rápido.
   if (req.path === '/service-worker.js' || req.path === '/manifest.webmanifest') res.set('Cache-Control', 'no-cache');
