@@ -39,6 +39,15 @@ const BOUNCE_MIN = 0.12;      // velocidad de impacto mínima (por paso) para qu
 const MAX_SPEED = 3;          // límite de velocidad por paso (180 studs/s) para que nada atraviese el mundo
 const PLAYER_PUSH = 0.35;     // fracción de la velocidad del jugador que transmite al empujar una pieza suelta
 
+// Esferas sueltas: rodadura (giro libre en el aire, fricción de Coulomb en el punto de contacto, resistencia a la rodadura).
+// La velocidad angular va en rad/paso, igual que la lineal va en studs/paso.
+const SPHERE_I = 0.4;                // momento de inercia de una esfera maciza: 2/5 · m · r²
+const ROLL_K = 1 + 1 / SPHERE_I;     // = 3.5: lo que cuesta anular el deslizamiento en el punto de contacto
+const COULOMB_SCALE = 3.5;           // fricción del material (fracción por paso) → coeficiente de Coulomb (hielo ≈ 0.04, madera ≈ 0.5, roca ≈ 0.9)
+const ROLL_RESIST = 0.1;             // resistencia a la rodadura: Crr = fricción del material · 0.1 (madera ≈ 0.014)
+const ROLL_DRAG = 0.002;             // pérdida proporcional de velocidad por paso al rodar
+const SPIN_EPS = 1e-4;              // por debajo de esto el giro se considera 0
+
 const PLAYER = { halfW: 0.5, halfD: 0.5, height: 3.05 };
 const PART_PAD = 0.12;       // margen de toque pieza ↔ jugador (igual que el cliente)
 const PLAYER_PAD = 0.1;
@@ -63,13 +72,15 @@ function localExtents(part) {
 // Offset del centro y semiextensiones de la caja en ejes del mundo (independiente de la posición).
 function shapeOf(part) {
   const cached = shapeCache.get(part);
-  if (cached && cached.type === part.type && cached.sx === part.sx && cached.sy === part.sy && cached.sz === part.sz &&
-      cached.rx === part.rx && cached.ry === part.ry && cached.rz === part.rz) return cached;
+  // Una esfera suelta ocupa lo mismo gire como gire: su caja ignora la rotación (si no, "respiraría" al rodar).
+  const free = part.type === 'Sphere' && !part.anchored;
+  if (cached && cached.type === part.type && cached.free === free && cached.sx === part.sx && cached.sy === part.sy && cached.sz === part.sz &&
+      (free || (cached.rx === part.rx && cached.ry === part.ry && cached.rz === part.rz))) return cached;
   const [x0, x1, y0, y1, z0, z1] = localExtents(part);
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
   const hx = (x1 - x0) / 2, hy = (y1 - y0) / 2, hz = (z1 - z0) / 2;
-  const shape = { type: part.type, sx: part.sx, sy: part.sy, sz: part.sz, rx: part.rx, ry: part.ry, rz: part.rz, ox: cx, oy: cy, oz: cz, ex: hx, ey: hy, ez: hz };
-  if (part.rx || part.ry || part.rz) {
+  const shape = { type: part.type, free, sx: part.sx, sy: part.sy, sz: part.sz, rx: part.rx, ry: part.ry, rz: part.rz, ox: cx, oy: cy, oz: cz, ex: hx, ey: hy, ez: hz };
+  if ((part.rx || part.ry || part.rz) && !free) {
     // Euler XYZ de three.js: R = Rx · Ry · Rz
     const a = Math.cos(part.rx || 0), b = Math.sin(part.rx || 0);
     const c = Math.cos(part.ry || 0), d = Math.sin(part.ry || 0);
@@ -137,9 +148,10 @@ function isWatched(room, part) {
 // ── Estado por sala ──────────────────────────────────────────────────────────────────────────────
 
 function stateOf(room) {
-  if (!room.phys) room.phys = { lastAt: 0, acc: 0, support: new Map(), prev: new Map(), contacts: new Map(), landing: new Map(), vel: new Map(), pendingCarry: new Map() };
+  if (!room.phys) room.phys = { lastAt: 0, acc: 0, support: new Map(), prev: new Map(), contacts: new Map(), landing: new Map(), vel: new Map(), pendingCarry: new Map(), spin: new Map() };
   const ps = room.phys;
   if (!ps.vel) ps.vel = new Map();
+  if (!ps.spin) ps.spin = new Map();
   if (!ps.pendingCarry) ps.pendingCarry = new Map();
   return ps;
 }
@@ -147,7 +159,7 @@ function stateOf(room) {
 // Para llamar cuando un script cambia a mano la posición de una pieza (teletransporte): se descarta su velocidad y apoyo.
 function resetBody(room, id) {
   if (room.physicsVelocities) room.physicsVelocities[id] = 0;
-  if (room.phys) { room.phys.support.delete(id); if (room.phys.vel) room.phys.vel.delete(id); }
+  if (room.phys) { room.phys.support.delete(id); if (room.phys.vel) room.phys.vel.delete(id); if (room.phys.spin) room.phys.spin.delete(id); }
 }
 
 const clampSpeed = v => Math.max(-MAX_SPEED, Math.min(MAX_SPEED, Number(v) || 0));
@@ -181,9 +193,77 @@ function matOf(part) {
   };
 }
 
+// ── Rodadura de esferas ──────────────────────────────────────────────────────────────────────────
+
+const sphereRadius = part => Math.min(part.sx, part.sy, part.sz) / 2;
+
+function spinOf(ps, part) {
+  let sp = ps.spin.get(part.id);
+  if (!sp) { sp = { wx: 0, wy: 0, wz: 0, q: null, ex: NaN, ey: NaN, ez: NaN }; ps.spin.set(part.id, sp); }
+  return sp;
+}
+const isSpinning = sp => !!sp && (Math.abs(sp.wx) > SPIN_EPS || Math.abs(sp.wy) > SPIN_EPS || Math.abs(sp.wz) > SPIN_EPS);
+
+// Euler XYZ de three.js ↔ cuaternión (la orientación se integra en cuaternión para no tener bloqueo de ejes).
+function eulerToQuat(x, y, z) {
+  const c1 = Math.cos(x / 2), c2 = Math.cos(y / 2), c3 = Math.cos(z / 2), s1 = Math.sin(x / 2), s2 = Math.sin(y / 2), s3 = Math.sin(z / 2);
+  return { x: s1 * c2 * c3 + c1 * s2 * s3, y: c1 * s2 * c3 - s1 * c2 * s3, z: c1 * c2 * s3 + s1 * s2 * c3, w: c1 * c2 * c3 - s1 * s2 * s3 };
+}
+function quatToEuler(q) {
+  const m11 = 1 - 2 * (q.y * q.y + q.z * q.z), m12 = 2 * (q.x * q.y - q.z * q.w), m13 = 2 * (q.x * q.z + q.y * q.w);
+  const m22 = 1 - 2 * (q.x * q.x + q.z * q.z), m23 = 2 * (q.y * q.z - q.x * q.w), m32 = 2 * (q.y * q.z + q.x * q.w), m33 = 1 - 2 * (q.x * q.x + q.y * q.y);
+  const y = Math.asin(Math.max(-1, Math.min(1, m13)));
+  if (Math.abs(m13) < 0.9999999) return { x: Math.atan2(-m23, m33), y, z: Math.atan2(-m12, m11) };
+  return { x: Math.atan2(m32, m22), y, z: 0 };
+}
+
+// Gira la esfera según su velocidad angular (en el eje del mundo) y deja el resultado en part.rx/ry/rz.
+function advanceSpin(ps, part) {
+  const sp = ps.spin.get(part.id);
+  if (!isSpinning(sp)) return;
+  const rx = part.rx || 0, ry = part.ry || 0, rz = part.rz || 0;
+  if (!sp.q || rx !== sp.ex || ry !== sp.ey || rz !== sp.ez) sp.q = eulerToQuat(rx, ry, rz); // alguien la rotó a mano: se parte de ahí
+  const w = Math.hypot(sp.wx, sp.wy, sp.wz), k = Math.sin(w / 2) / w;
+  const a = { x: sp.wx * k, y: sp.wy * k, z: sp.wz * k, w: Math.cos(w / 2) }, b = sp.q;
+  const q = {
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  };
+  const n = Math.hypot(q.x, q.y, q.z, q.w) || 1;
+  q.x /= n; q.y /= n; q.z /= n; q.w /= n;
+  sp.q = q;
+  const e = quatToEuler(q);
+  part.rx = sp.ex = e.x; part.ry = sp.ey = e.y; part.rz = sp.ez = e.z;
+}
+
+// Fricción de Coulomb en el punto de contacto con el suelo. El deslizamiento u = v + ω × (−r·ŷ) se va convirtiendo en giro
+// (y el giro en avance) hasta que la esfera rueda sin deslizar (u = 0). `normalImpulse` limita la fuerza: μ · N.
+function frictionContact(sp, hv, r, mu, normalImpulse) {
+  const ux = hv.x + r * sp.wz, uz = hv.z - r * sp.wx, us = Math.hypot(ux, uz);
+  if (us < 1e-7) return;
+  const j = Math.min(us / ROLL_K, mu * normalImpulse), dx = -ux / us, dz = -uz / us;
+  hv.x += j * dx; hv.z += j * dz;
+  sp.wx -= j * dz / (SPHERE_I * r);
+  sp.wz += j * dx / (SPHERE_I * r);
+}
+
+// Un paso de una esfera apoyada: fricción de contacto + resistencia a la rodadura. Modifica hv y el giro.
+function rollOnSurface(sp, hv, r, surf, mat) {
+  const fc = Math.sqrt(surf.friction * mat.friction);
+  frictionContact(sp, hv, r, fc * COULOMB_SCALE, Math.max(0, GRAVITY * mat.gravityScale));
+  const speed = Math.hypot(hv.x, hv.z);
+  if (speed > 0) {
+    const k = Math.max(0, speed - GRAVITY * fc * ROLL_RESIST - speed * ROLL_DRAG) / speed;
+    hv.x *= k; hv.z *= k; sp.wx *= k; sp.wz *= k;
+  }
+  if (Math.hypot(hv.x, hv.z) < REST_SPEED && Math.hypot(sp.wx, sp.wz) * r < REST_SPEED) { hv.x = hv.z = 0; sp.wx = sp.wz = 0; }
+  sp.wy *= 0.96; // el giro sobre el eje vertical se frena contra el suelo
+  if (Math.abs(sp.wy) < SPIN_EPS) sp.wy = 0;
+}
+
 // ── Paso de simulación ───────────────────────────────────────────────────────────────────────────
 
-function stepDynamic(room, ps, e, entries, byId, landings) {
+function stepDynamicBody(room, ps, e, entries, byId, landings) {
   const part = e.part, id = part.id;
   const mat = matOf(part);
   const hv = ps.vel.get(id) || { x: 0, z: 0 };
@@ -205,12 +285,16 @@ function stepDynamic(room, ps, e, entries, byId, landings) {
       const dy = se.box.maxY - e.box.minY;
       if (Math.abs(dy) > 1e-9) { part.y += dy; e.box.minY += dy; e.box.maxY += dy; }
       room.physicsVelocities[id] = 0;
-      if (!moving) return;
-      // desliza: se frena según la fricción del soporte (y de la propia pieza)
-      const f = Math.min(0.95, Math.sqrt(matOf(se.part).friction * mat.friction) * 0.5);
-      hv.x *= 1 - f; hv.z *= 1 - f;
-      if (Math.abs(hv.x) < REST_SPEED) hv.x = 0;
-      if (Math.abs(hv.z) < REST_SPEED) hv.z = 0;
+      const sphere = part.type === 'Sphere';
+      if (!moving && !(sphere && isSpinning(ps.spin.get(id)))) return;
+      if (sphere) rollOnSurface(spinOf(ps, part), hv, sphereRadius(part), matOf(se.part), mat); // rueda en vez de deslizar
+      else {
+        // desliza: se frena según la fricción del soporte (y de la propia pieza)
+        const f = Math.min(0.95, Math.sqrt(matOf(se.part).friction * mat.friction) * 0.5);
+        hv.x *= 1 - f; hv.z *= 1 - f;
+        if (Math.abs(hv.x) < REST_SPEED) hv.x = 0;
+        if (Math.abs(hv.z) < REST_SPEED) hv.z = 0;
+      }
       ps.vel.set(id, hv);
       vy = 0;
     } else ps.support.delete(id);
@@ -237,6 +321,10 @@ function stepDynamic(room, ps, e, entries, byId, landings) {
         const impact = Math.abs(d);
         const bounce = Math.min(mat.bounce, 0.95);
         hv[axis] = impact > BOUNCE_MIN && bounce > 0 ? -d * bounce : 0;
+        if (part.type === 'Sphere') { // la pared absorbe el giro de ese eje: queda rodando acorde a la velocidad que le queda
+          const sp = spinOf(ps, part), r = sphereRadius(part);
+          if (axis === 'x') sp.wz = -hv.x / r; else sp.wx = hv.z / r;
+        }
         if (impact > 0.02 && hitId) landings.push({ a: id, b: hitId, speed: impact / STEP, wall: true });
       }
       if (move) { part[axis] += move; e.box[lo] += move; e.box[hi] += move; }
@@ -264,12 +352,16 @@ function stepDynamic(room, ps, e, entries, byId, landings) {
       } else if (oldTop <= o.box.minY + SNAP && oldTop + vy > o.box.minY && o.box.minY < ceilBottom) { ceilBottom = o.box.minY; ceilOn = o; }
     }
     if (landOn) {
-      const speed = -vy / STEP;
+      const speed = -vy / STEP, vyIn = vy;
       dy = landTop - oldBottom;
       const bounce = Math.min((mat.bounce + matOf(landOn.part).bounce) * 0.5 * 2, 0.95);
       if (-vy > BOUNCE_MIN && bounce > 0.02) vy = -vy * bounce;     // rebota: no queda apoyada
       else { vy = 0; ps.support.set(id, landOn.part.id); }
-      if (ps.support.has(id)) { hv.x *= 0.8; hv.z *= 0.8; }
+      if (part.type === 'Sphere') {
+        // al tocar con velocidad horizontal (o con giro previo) la fricción del impacto convierte avance en giro y viceversa
+        const sp = ps.spin.get(id);
+        if (sp || hv.x || hv.z) frictionContact(sp || spinOf(ps, part), hv, sphereRadius(part), Math.sqrt(matOf(landOn.part).friction * mat.friction) * COULOMB_SCALE, vy - vyIn);
+      } else if (ps.support.has(id)) { hv.x *= 0.8; hv.z *= 0.8; }
       landings.push({ a: id, b: landOn.part.id, speed });
     } else if (ceilOn) {
       const speed = vy / STEP;
@@ -280,6 +372,11 @@ function stepDynamic(room, ps, e, entries, byId, landings) {
   }
   room.physicsVelocities[id] = vy;
   if (dy !== 0) { part.y += dy; e.box.minY += dy; e.box.maxY += dy; }
+}
+
+function stepDynamic(room, ps, e, entries, byId, landings) {
+  stepDynamicBody(room, ps, e, entries, byId, landings);
+  if (e.part.type === 'Sphere') advanceSpin(ps, e.part); // el giro sigue en el aire, apoyada o rebotando
 }
 
 function pairKey(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
@@ -302,7 +399,7 @@ function stepRoom(room, now, players) {
   const entries = [], byId = new Map();
   for (const part of Object.values(room.worldParts)) {
     if (part.type === 'Spawn' || part.isNPC) continue;
-    const entry = { part, box: partBox(part), dyn: !part.anchored, startY: part.y, startX: part.x, startZ: part.z };
+    const entry = { part, box: partBox(part), dyn: !part.anchored, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
     entries.push(entry); byId.set(part.id, entry);
   }
   const dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
@@ -340,7 +437,13 @@ function stepRoom(room, now, players) {
   for (let s = 0; s < steps; s++) for (const entry of dynamics) stepDynamic(room, ps, entry, entries, byId, landings);
 
   for (const entry of dynamics) {
-    if (Math.abs(entry.part.y - entry.startY) > 1e-4 || Math.abs(entry.part.x - entry.startX) > 1e-4 || Math.abs(entry.part.z - entry.startZ) > 1e-4) result.changed.push({ id: entry.part.id, x: r3(entry.part.x), y: r3(entry.part.y), z: r3(entry.part.z) });
+    const part = entry.part, sphere = part.type === 'Sphere';
+    const rotated = sphere && (Math.abs((part.rx || 0) - entry.startRx) > 1e-4 || Math.abs((part.ry || 0) - entry.startRy) > 1e-4 || Math.abs((part.rz || 0) - entry.startRz) > 1e-4);
+    if (rotated || Math.abs(part.y - entry.startY) > 1e-4 || Math.abs(part.x - entry.startX) > 1e-4 || Math.abs(part.z - entry.startZ) > 1e-4) {
+      const update = { id: part.id, x: r3(part.x), y: r3(part.y), z: r3(part.z) };
+      if (sphere) { update.rx = r3(part.rx || 0); update.ry = r3(part.ry || 0); update.rz = r3(part.rz || 0); } // solo las esferas mandan rotación
+      result.changed.push(update);
+    }
   }
   for (const landing of landings) {
     if (landing.a === landing.b) continue;
