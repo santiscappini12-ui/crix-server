@@ -47,6 +47,8 @@ const COULOMB_SCALE = 3.5;           // fricción del material (fracción por pa
 const ROLL_RESIST = 0.1;             // resistencia a la rodadura: Crr = fricción del material · 0.1 (madera ≈ 0.014)
 const ROLL_DRAG = 0.002;             // pérdida proporcional de velocidad por paso al rodar
 const SPIN_EPS = 1e-4;              // por debajo de esto el giro se considera 0
+const SPHERE_PUSH = 0.9;             // fracción de la velocidad del jugador que recibe una esfera liviana al empujarla (se reduce con el tamaño)
+const PUSH_INTENT_MS = 400;          // el cliente frena al jugador contra la esfera (su velocidad medida cae a 0): se recuerda hacia dónde caminaba
 
 const PLAYER = { halfW: 0.5, halfD: 0.5, height: 3.05 };
 const PART_PAD = 0.12;       // margen de toque pieza ↔ jugador (igual que el cliente)
@@ -415,16 +417,25 @@ function stepRoom(room, now, players) {
     if ((dx || dz) && Math.hypot(dx, dz) <= MAX_SWEEP) ps.pendingCarry.set(entry.part.id, { x: dx, z: dz });
   }
   // Empujar piezas sueltas caminando contra ellas.
+  if (!ps.pushIntent) ps.pushIntent = new Map();
   for (const player of (Array.isArray(players) ? players : [])) {
-    const pvx = (Number(player.vx) || 0) * STEP, pvz = (Number(player.vz) || 0) * STEP;
-    if (Math.abs(pvx) < 1e-3 && Math.abs(pvz) < 1e-3) continue;
+    const rvx = (Number(player.vx) || 0) * STEP, rvz = (Number(player.vz) || 0) * STEP;
+    const walking = Math.abs(rvx) >= 1e-3 || Math.abs(rvz) >= 1e-3;
+    // Solo para esferas: al chocar con ellas el cliente detiene al jugador y su velocidad medida cae a 0, así que se usa hacia dónde venía caminando.
+    const intentKey = 'p:' + (player.userId || player.socketId || player.username);
+    if (walking) ps.pushIntent.set(intentKey, { x: rvx, z: rvz, at: now });
+    const intent = !walking ? ps.pushIntent.get(intentKey) : null;
+    const hasIntent = !!intent && now - intent.at < PUSH_INTENT_MS;
+    if (!walking && !hasIntent) continue;
     const pb = playerBox(player);
     for (const entry of dynamics) {
-      const part = entry.part;
+      const part = entry.part, sphere = part.type === 'Sphere';
+      if (!walking && !sphere) continue;
+      const pvx = walking ? rvx : intent.x, pvz = walking ? rvz : intent.z;
       if (part.canCollide === false || !intersects(pb, entry.box, 0.04)) continue;
       if ((Number(player.y) || 0) >= entry.box.maxY - 0.25) continue; // está parado encima, no empuja
       const volume = Math.max(1, part.sx * part.sy * part.sz);
-      const factor = PLAYER_PUSH * Math.min(1, 30 / volume);
+      const factor = sphere ? SPHERE_PUSH * Math.sqrt(Math.min(1, 30 / volume)) : PLAYER_PUSH * Math.min(1, 30 / volume);
       const hv = ps.vel.get(part.id) || { x: 0, z: 0 };
       const cx = (entry.box.minX + entry.box.maxX) / 2, cz = (entry.box.minZ + entry.box.maxZ) / 2;
       const toX = cx - (Number(player.x) || 0), toZ = cz - (Number(player.z) || 0);
