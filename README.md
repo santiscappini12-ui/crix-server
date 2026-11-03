@@ -234,7 +234,7 @@ const caja = game.getPart("Caja");                // estado actual, también por
 
 **Límites actuales:** JavaScript es el lenguaje con soporte completo. CrixScript conserva una conversión básica de sintaxis tipo Lua; no es un intérprete completo. Los `Script` sí se ejecutan en el servidor y replican el mundo de su instancia; `LocalScript` es local, por lo que el estado que crean (GUI, monedas, piezas creadas por un LocalScript) es de cada jugador y no se comparte con los demás. Todavía no hay `RemoteEvent` reales entre cliente y servidor, almacenamiento persistente por jugador (DataStore), sonido ni animaciones personalizadas; los elementos *Sound*, *Bloom*, *Blur* y *SunRays* del Explorador son marcadores. `ServerScriptService` y `LocalScriptService` distinguen el tipo de ejecución, aunque la jerarquía de servicios todavía es básica. `isolated-vm` limita memoria y tiempo, pero ejecutar código público requiere mantener Node y el módulo nativo actualizados; para alojar scripts de personas desconocidas a gran escala conviene correr `script-runner.js` en un contenedor sin privilegios separado del servidor web. Esto todavía no incluye todas las capacidades de Roblox Studio o Unity, ni intérpretes para todos los lenguajes, binario o ensamblador.
 
-Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor visual de rigging, huesos ni animación (ver *Lo que todavía no existe en avatares y NPC*).
+Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor de rigging, huesos ni animación.
 
 ## Sincronización del mundo entre jugadores
 
@@ -270,8 +270,8 @@ Todo lo que cambia en una partida online se ve igual para todos los jugadores de
 Todos los personajes (tu avatar, los demás jugadores y los NPC) usan el mismo esqueleto, definido en `crix-avatar.js` (se carga en el navegador y el servidor lo reutiliza para validar). Mide ~3.1 studs, igual que la caja de colisión.
 
 - **24 huesos con jerarquía real**: `Hips → Spine → Chest → Neck → Head (+ Jaw, EyeL, EyeR)`, `ShoulderL/R → UpperArmL/R → LowerArmL/R → HandL/R`, `UpperLegL/R → LowerLegL/R → FootL/R → ToesL/R`. Rotar un hueso mueve todo lo que cuelga de él. También valen alias (`cabeza`, `brazoDer`, `manoIzq`, `pieDer`, `LeftArm`…).
-- **Un solo aspecto: el muñeco de arcilla** (cabeza grande y redonda, torso liso en forma de huevo, brazos y piernas gruesos con manoplas y pies redondos, todo en gris claro). Se fuerza para todos los avatares, incluidos los ya guardados y los NPC (`FORCE_CLAY` en `crix-avatar.js`; en `false` vuelve el estilo `cartoon` de colores). En **Perfil → 🧍 Avatar** se eligen peinado, expresión, color de pelo y ojos y tamaño. Se guarda en la cuenta y lo ven todos.
-- **Cara viva**: ojos con parpadeo y mirada, cejas, boca deformable. Expresiones: `neutral, happy, sad, angry, surprised, sleepy, wink, smug, scared, talk, dead`.
+- **Dos estilos con el mismo esqueleto**: `cartoon` (cuerpo redondeado de colores, pelo, ropa) y `stick` (monigote blanco con articulaciones visibles). Cada jugador elige el suyo en **Perfil → 🧍 Avatar** (vista previa 3D en vivo: estilo, colores de piel/camiseta/pantalón/zapatos/pelo/ojos, 7 peinados, expresión, tamaño). Se guarda en la cuenta y lo ven todos.
+- **Cara viva**: ojos con parpadeo y mirada, cejas, boca deformable, rubor. Expresiones: `neutral, happy, sad, angry, surprised, sleepy, wink, smug, scared, talk, dead`.
 - **Animación procedural por capas**: locomoción (reposo, caminar→correr según la velocidad real, salto, caída, amortiguación al aterrizar) + gestos encima + órdenes de script, todo mezclado con cuaterniones (transiciones suaves entre cualquier pose). Gestos: `wave, cheer, point, clap, dance, attack, punch, shrug, salute, sit, crouch, sleep, dead, swim, tpose, think, laugh` (también en español: `saludar, bailar, aplaudir, sentarse`…).
 - **Chat**: `/e bailar`, `/e wave`, `/e stop`, `/cara feliz`.
 
@@ -295,11 +295,6 @@ Constantes útiles: `game.BONES`, `game.ANIMATIONS`, `game.FACES`, `game.HAIRS`,
 **LocalScript / ▶ Probar**: `localPlayer.setBone(...)`, `localPlayer.setPose(...)`, `localPlayer.playAnimation(...)`, `setFace`, `setLook`, `addAccessory`, `removeAccessory`, `resetAvatar` controlan TU avatar y se replican a los demás (máx. 20 mensajes/s); `game.setBone(nombreNpc, ...)` en un LocalScript solo cambia lo que ves tú.
 
 **NPC**: ahora son personajes completos. Una parte NPC puede traer `look` (mismo formato que `setLook`); los NPC nuevos de la biblioteca ya traen uno. Los NPC pasean con un reloj compartido, así todos los jugadores los ven en el mismo lugar.
-
-**Lo que todavía no existe en avatares y NPC**:
-- **No se pueden mover NPC por script.** Un script puede animarlos (`playAnimation`, `setBone`, `setPose`), cambiarles el aspecto (`setLook`, accesorios) o detenerlos (`setNpcWander(nombre, false)`), pero no cambiarles la posición ni mandarlos a un punto: su paseo lo calcula el cliente con un reloj compartido.
-- **No hay animaciones personalizadas guardables.** No se pueden crear, guardar ni reutilizar animaciones propias (ni como archivo ni dentro del juego). Hoy se arman combinando las animaciones existentes con `setBone` y `setPose`, y esa combinación hay que volver a pedirla desde el script cada vez.
-- **No hay un panel visual para editar huesos** dentro del editor de mapas. Los huesos se controlan solo por código (`setBone`, `setPose`) o, para el aspecto, desde **Perfil → 🧍 Avatar**.
 
 **Seguridad y límites**: el servidor valida cada orden con las mismas reglas que el cliente (rotaciones ±3600°, posiciones ±20, escala 0.01–20, colores `#rrggbb`, nombres de hueso/animación conocidos), guarda como máximo 24 KB de estado por avatar y cuenta cada orden dentro del límite de 300 cambios/s del mundo. La apariencia (`look`) es cosmética: no cambia la caja de colisión.
 
