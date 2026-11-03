@@ -39,8 +39,8 @@
     ['EyeR',       'Head',      [0.17, 0.40, 0.42]],
     ['ShoulderL',  'Chest',     [-0.42, 0.46, 0]],
     ['ShoulderR',  'Chest',     [0.42, 0.46, 0]],
-    ['UpperArmL',  'ShoulderL', [-0.14, 0, 0]],
-    ['UpperArmR',  'ShoulderR', [0.14, 0, 0]],
+    ['UpperArmL',  'ShoulderL', [-0.21, 0, 0]],
+    ['UpperArmR',  'ShoulderR', [0.21, 0, 0]],
     ['LowerArmL',  'UpperArmL', [0, -0.52, 0]],
     ['LowerArmR',  'UpperArmR', [0, -0.52, 0]],
     ['HandL',      'LowerArmL', [0, -0.44, 0]],
@@ -179,6 +179,13 @@
     }
     g.computeVertexNormals(); return g;
   }
+  // Perfil de revolución suave (r, y) del tronco, de la entrepierna (y=-0.40) a la base del cuello (y=1.16) respecto del hueso Spine.
+  function torsoGeo() {
+    const prof = [[0, -0.40], [0.30, -0.36], [0.45, -0.20], [0.51, 0.02], [0.52, 0.28], [0.50, 0.55], [0.46, 0.80], [0.38, 1.00], [0.26, 1.12], [0, 1.18]];
+    const pts = new THREE.SplineCurve(prof.map(p => new THREE.Vector2(p[0], p[1]))).getPoints(56).map(v => new THREE.Vector2(Math.max(0, v.x), v.y));
+    pts[0].x = 0; pts[pts.length - 1].x = 0;
+    return new THREE.LatheGeometry(pts, 36);
+  }
   const geoCache = {};
   function G(key, make) { return geoCache[key] || (geoCache[key] = make()); }
 
@@ -205,8 +212,7 @@
     av.mats.eye = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.line = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.mouthIn = new THREE.MeshBasicMaterial({ color: 0x6a1d2a, side: THREE.DoubleSide });
-    av.mats.blush = new THREE.MeshBasicMaterial({ color: 0xff8a8a, transparent: true, opacity: 0.45 });
-    av.pose = {}; av.target = {}; av.layers = { anim: null, emote: null, over: {} };
+        av.pose = {}; av.target = {}; av.layers = { anim: null, emote: null, over: {} };
     av.state = { t: Math.random() * 10, blinkT: 2 + Math.random() * 3, blink: 0, face: look.face, faceT: 0, talk: 0, loco: 'idle', locoBlend: 0, phase: 0, landT: 0, lastGround: true, lastVy: 0, sitting: false };
     for (const n of BONE_NAMES) { av.pose[n] = { q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(1, 1, 1) }; }
     buildFace(av);
@@ -236,20 +242,18 @@
     const C = clay ? { skin: M.white, shirt: M.white, pants: M.white, shoes: M.white } : { skin: M.skin, shirt: M.shirt, pants: M.pants, shoes: M.shoes };
     const ell = (bone, mat, pos, r) => addMesh(av, bone, G('uSph', () => new THREE.SphereGeometry(1, 28, 20)), mat, pos, null, r);   // elipsoide de radios r
     // cápsula colgando de la articulación: el cilindro baja `len` y las dos tapas redondeadas la suavizan
-    const cap = (bone, mat, r, len) => addMesh(av, bone, G('pc' + r + 'x' + len, () => capsuleGeo(r, len, 14)), mat, [0, -len / 2, 0]);
-    // tronco: tres elipsoides muy solapados para que no se note el "estrangulamiento" entre ellos al doblar la espalda
-    ell('Hips',  C.pants, [0, 0.00, 0],  [0.50, 0.34, 0.40]);
-    ell('Spine', C.shirt, [0, 0.24, 0],  [0.52, 0.44, 0.40]);
-    ell('Chest', C.shirt, [0, 0.26, 0],  [0.52, 0.46, 0.40]);
-    ell('Neck',  C.skin,  [0, 0.06, 0],  [0.26, 0.20, 0.24]);       // cuello corto y ancho: la cabeza casi se apoya en el torso
+    const cap = (bone, mat, r, len, dy = 0) => addMesh(av, bone, G('pc' + r + 'x' + len, () => capsuleGeo(r, len, 14)), mat, [0, -len / 2 - dy, 0]);
+    // tronco: una sola pieza lisa en forma de huevo/pera (sin anillos ni pliegues), colgada del hueso Spine
+    addMesh(av, 'Spine', G('torso', () => torsoGeo()), C.shirt, [0, 0, 0], null, [1, 1, 0.76]);
+    if (!clay) ell('Hips', C.pants, [0, -0.02, 0], [0.49, 0.30, 0.37]);   // parte baja con el color del pantalón
+    ell('Neck',  C.skin,  [0, 0.06, 0],  [0.24, 0.20, 0.22]);
     addMesh(av, 'Head', G('cHead', () => new THREE.SphereGeometry(0.52, 32, 24)), C.skin, [0, 0.52, 0], null, [1.06, 1.0, 1.02]);
     for (const s of ['L', 'R']) {
-      ell('Shoulder' + s, C.shirt, [0, 0, 0], [0.23, 0.23, 0.23]);
-      cap('UpperArm' + s, C.shirt, 0.20, 0.32);
-      cap('LowerArm' + s, C.skin,  0.185, 0.255);
-      ell('Hand' + s, C.skin, [0, -0.12, 0], [0.20, 0.23, 0.18]);   // manopla redondeada
-      cap('UpperLeg' + s, C.pants, 0.225, 0.56);
-      cap('LowerLeg' + s, C.pants, 0.20, 0.34);
+      cap('UpperArm' + s, C.shirt, 0.19, 0.33, 0.05);
+      cap('LowerArm' + s, C.skin,  0.18, 0.26);
+      ell('Hand' + s, C.skin, [0, -0.12, 0], [0.19, 0.22, 0.17]);   // manopla redondeada
+      cap('UpperLeg' + s, C.pants, 0.22, 0.56);
+      cap('LowerLeg' + s, C.pants, 0.21, 0.33);
       ell('Foot' + s, C.shoes, [0, -0.02, 0.06], [0.215, 0.15, 0.30]);
       ell('Toes' + s, C.shoes, [0, 0.0, 0.02],   [0.19, 0.10, 0.16]);
     }
@@ -269,7 +273,6 @@
       lid.scale.set(1, 1.2, 0.6); lid.userData.tag = 'face'; lid.position.z = 0.012; lid.rotation.x = -0.0; eyeBone.add(lid); lid.visible = false;
       eyes[s] = { white, pupil, glint, lid, bone: eyeBone };
       const brow = new THREE.Mesh(G('brow', () => capsuleGeo(0.032, 0.15, 6)), M.hair); brow.rotation.z = Math.PI / 2; brow.position.set(sx * 0.17, 0.60, 0.455); brow.userData.tag = 'face'; F.add(brow); brows[s] = brow;
-      const blush = new THREE.Mesh(G('blush', () => new THREE.CircleGeometry(0.07, 12)), M.blush); blush.position.set(sx * 0.29, 0.24, 0.43); blush.lookAt(sx * 0.5, 0.2, 1.2); blush.userData.tag = 'face'; F.add(blush); av.parts['blush' + s] = blush;
     }
     // Boca: línea (tubo) con curva editable + interior oscuro para abierta
     const mouthGroup = new THREE.Group(); mouthGroup.position.set(0, 0.15, 0.475); F.add(mouthGroup);
@@ -349,7 +352,7 @@
     const b = sin(t * 1.8), k = sin(t * 0.9);
     return { Hips: [0, 0, 0], _y: b * 0.015, Spine: [0.03 + b * 0.015, 0, 0], Chest: [0.02 + b * 0.02, k * 0.03, 0], Neck: [-0.03, k * 0.06, 0], Head: [0.02, -k * 0.05, 0],
       ShoulderL: [0, 0, 0.04 + b * 0.01], ShoulderR: [0, 0, -0.04 - b * 0.01],
-      UpperArmL: [0.05 + b * 0.02, 0, 0.27], UpperArmR: [0.05 + b * 0.02, 0, -0.27], LowerArmL: [-0.14, 0, 0], LowerArmR: [-0.14, 0, 0], HandL: [0, 0, 0.05], HandR: [0, 0, -0.05],
+      UpperArmL: [0.05 + b * 0.02, 0, 0.14], UpperArmR: [0.05 + b * 0.02, 0, -0.14], LowerArmL: [-0.14, 0, 0], LowerArmR: [-0.14, 0, 0], HandL: [0, 0, 0.05], HandR: [0, 0, -0.05],
       UpperLegL: [0, 0, 0.02], UpperLegR: [0, 0, -0.02], LowerLegL: [0.02, 0, 0], LowerLegR: [0.02, 0, 0], FootL: [0, 0, 0], FootR: [0, 0, 0] };
   }
   // Ciclo de marcha/carrera: fase p en [0, 2π). amp y lean dependen de la velocidad (0..1 caminar, 1..2 correr).
@@ -510,7 +513,6 @@
       e.bone.scale.set(1, Math.max(0.08, 1 - closeAmt * 0.92 + Math.max(0, -cur.lid) * 0.25), 1);
       e.pupil.position.x = lx; e.pupil.position.y = ly; e.glint.position.x = 0.025 + lx; e.glint.position.y = 0.03 + ly;
       f.brows[s].position.y = 0.60 + cur.browY + (name === 'wink' && s === 'R' ? -0.03 : 0); f.brows[s].rotation.z = Math.PI / 2 + sx * cur.browA * 0.55;   // browA > 0 (enojo): extremo interior hacia abajo
-      av.parts['blush' + s].material.opacity = 0.45 * clamp(cur.blushA * 2, 0, 1);
     }
     if (Math.abs(cur.open - (f._lo ?? -1)) > 0.01 || Math.abs(cur.curve - (f._lc ?? -9)) > 0.01 || Math.abs(cur.width - (f._lw ?? -1)) > 0.003) { f._lo = cur.open; f._lc = cur.curve; f._lw = cur.width; updateMouth(av); }
   }
