@@ -37,10 +37,10 @@
     ['Jaw',        'Head',      [0, 0.08, 0.20]],
     ['EyeL',       'Head',      [-0.17, 0.40, 0.42]],
     ['EyeR',       'Head',      [0.17, 0.40, 0.42]],
-    ['ShoulderL',  'Chest',     [-0.42, 0.46, 0]],
+    ['ShoulderL',  'Chest',     [-0.44, 0.46, 0]],
     ['ShoulderR',  'Chest',     [0.42, 0.46, 0]],
-    ['UpperArmL',  'ShoulderL', [-0.21, 0, 0]],
-    ['UpperArmR',  'ShoulderR', [0.21, 0, 0]],
+    ['UpperArmL',  'ShoulderL', [-0.27, 0, 0]],
+    ['UpperArmR',  'ShoulderR', [0.27, 0, 0]],
     ['LowerArmL',  'UpperArmL', [0, -0.52, 0]],
     ['LowerArmR',  'UpperArmR', [0, -0.52, 0]],
     ['HandL',      'LowerArmL', [0, -0.44, 0]],
@@ -78,14 +78,18 @@
   const FACES = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'sleepy', 'wink', 'smug', 'scared', 'talk', 'dead'];
   const HAIRS = ['none', 'short', 'spiky', 'long', 'bun', 'cap', 'mohawk'];
   const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'capsule'];
-  const DEFAULT_LOOK = { style: 'cartoon', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'short', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1 };
+  const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1 };
   const MAX_ACCESSORIES = 24;
+  // Todos los avatares son el muñeco de arcilla de un solo color (la referencia). Poner en false para volver a permitir 'cartoon'.
+  const FORCE_CLAY = true;
 
   const normalizeHex = (v, fallback) => (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) ? v : fallback;
   function sanitizeLook(src, base) {
     const o = Object.assign({}, base || DEFAULT_LOOK);
+    if (FORCE_CLAY) o.style = 'stick';
     if (!src || typeof src !== 'object') return o;
     if (src.style === 'cartoon' || src.style === 'stick') o.style = src.style;
+    if (FORCE_CLAY) o.style = 'stick';
     for (const k of ['skin', 'shirt', 'pants', 'shoes', 'hairColor', 'eyes']) if (src[k] !== undefined) o[k] = src[k] === null ? null : normalizeHex(src[k], o[k]);
     if (HAIRS.includes(src.hair)) o.hair = src.hair;
     if (FACES.includes(src.face)) o.face = src.face;
@@ -158,7 +162,7 @@
   // ══ PARTE GRÁFICA (solo navegador, necesita THREE r128) ══════════════════════════════════════════════════════
   const THREE = global.THREE;
   if (!THREE) { global.CrixAvatarShared = Shared; return; }
-  const CLAY = 0xe9e8e4;      // color del estilo 'stick' (muñeco de arcilla de un solo color)
+  const CLAY = 0xdcdad6;      // color del estilo 'stick' (muñeco de arcilla de un solo color)
   const BASE_SCALE = 0.83;   // el rig completo mide ~3.1 studs (caja de colisión del juego: 3.05)
 
   // ── Geometría (r128: no hay CapsuleGeometry) ──────────────────────────────────────────────────
@@ -181,7 +185,7 @@
   }
   // Perfil de revolución suave (r, y) del tronco, de la entrepierna (y=-0.40) a la base del cuello (y=1.16) respecto del hueso Spine.
   function torsoGeo() {
-    const prof = [[0, -0.40], [0.30, -0.36], [0.45, -0.20], [0.51, 0.02], [0.52, 0.28], [0.50, 0.55], [0.46, 0.80], [0.38, 1.00], [0.26, 1.12], [0, 1.18]];
+    const prof = [[0, -0.40], [0.29, -0.36], [0.43, -0.20], [0.48, 0.02], [0.49, 0.28], [0.47, 0.55], [0.43, 0.80], [0.36, 1.00], [0.25, 1.12], [0, 1.18]];
     const pts = new THREE.SplineCurve(prof.map(p => new THREE.Vector2(p[0], p[1]))).getPoints(56).map(v => new THREE.Vector2(Math.max(0, v.x), v.y));
     pts[0].x = 0; pts[pts.length - 1].x = 0;
     return new THREE.LatheGeometry(pts, 36);
@@ -249,7 +253,8 @@
     ell('Neck',  C.skin,  [0, 0.06, 0],  [0.24, 0.20, 0.22]);
     addMesh(av, 'Head', G('cHead', () => new THREE.SphereGeometry(0.52, 32, 24)), C.skin, [0, 0.52, 0], null, [1.06, 1.0, 1.02]);
     for (const s of ['L', 'R']) {
-      cap('UpperArm' + s, C.shirt, 0.19, 0.33, 0.05);
+      ell('Shoulder' + s, C.shirt, [0.0, -0.02, 0], [0.20, 0.19, 0.19]);
+      cap('UpperArm' + s, C.shirt, 0.20, 0.32, 0.05);
       cap('LowerArm' + s, C.skin,  0.18, 0.26);
       ell('Hand' + s, C.skin, [0, -0.12, 0], [0.19, 0.22, 0.17]);   // manopla redondeada
       cap('UpperLeg' + s, C.pants, 0.22, 0.56);
@@ -352,7 +357,7 @@
     const b = sin(t * 1.8), k = sin(t * 0.9);
     return { Hips: [0, 0, 0], _y: b * 0.015, Spine: [0.03 + b * 0.015, 0, 0], Chest: [0.02 + b * 0.02, k * 0.03, 0], Neck: [-0.03, k * 0.06, 0], Head: [0.02, -k * 0.05, 0],
       ShoulderL: [0, 0, 0.04 + b * 0.01], ShoulderR: [0, 0, -0.04 - b * 0.01],
-      UpperArmL: [0.05 + b * 0.02, 0, 0.14], UpperArmR: [0.05 + b * 0.02, 0, -0.14], LowerArmL: [-0.14, 0, 0], LowerArmR: [-0.14, 0, 0], HandL: [0, 0, 0.05], HandR: [0, 0, -0.05],
+      UpperArmL: [0.05 + b * 0.02, 0, 0.10], UpperArmR: [0.05 + b * 0.02, 0, -0.10], LowerArmL: [-0.14, 0, 0], LowerArmR: [-0.14, 0, 0], HandL: [0, 0, 0.05], HandR: [0, 0, -0.05],
       UpperLegL: [0, 0, 0.02], UpperLegR: [0, 0, -0.02], LowerLegL: [0.02, 0, 0], LowerLegR: [0.02, 0, 0], FootL: [0, 0, 0], FootR: [0, 0, 0] };
   }
   // Ciclo de marcha/carrera: fase p en [0, 2π). amp y lean dependen de la velocidad (0..1 caminar, 1..2 correr).
@@ -364,7 +369,7 @@
     return { _y: -0.02 + bob - smooth(0.0, 0.05, r), Hips: [lean * 0.4, sin(p) * 0.12 * smooth(1, 0.6, r), cc * 0.05],
       Spine: [lean * 0.5, -sin(p) * 0.16, -cc * 0.03], Chest: [lean * 0.7, -sin(p) * 0.18, 0], Neck: [-lean * 0.6, sin(p) * 0.06, 0], Head: [-lean * 0.4, sin(p) * 0.05, 0],
       ShoulderL: [0, 0, 0.03], ShoulderR: [0, 0, -0.03],
-      UpperArmL: [s2 * armAmp, 0, 0.16], UpperArmR: [s * armAmp, 0, -0.16],
+      UpperArmL: [s2 * armAmp, 0, 0.12], UpperArmR: [s * armAmp, 0, -0.12],
       LowerArmL: [-(0.35 + Math.max(0, -s2) * 0.7 * r + r * 0.5), 0, 0], LowerArmR: [-(0.35 + Math.max(0, -s) * 0.7 * r + r * 0.5), 0, 0], HandL: [0, 0, 0], HandR: [0, 0, 0],
       UpperLegL: [s * legAmp, 0, 0.02], UpperLegR: [s2 * legAmp, 0, -0.02],
       LowerLegL: [kneeL * (cc > 0 ? 1 : 0.35), 0, 0], LowerLegR: [kneeR * (c2 > 0 ? 1 : 0.35), 0, 0],

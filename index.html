@@ -2273,7 +2273,7 @@ function toggleFollow(uid) {
 
 // ── Editor de avatar: vista previa 3D en vivo, 2 estilos, colores, pelo, cara y animaciones ─────────────────────
 let avEd = null;
-const AVED_FIELDS = [['skin','Piel'],['shirt','Camiseta'],['pants','Pantalón'],['shoes','Zapatos'],['hairColor','Pelo'],['eyes','Ojos']];
+const AVED_FIELDS = [['hairColor','Pelo'],['eyes','Ojos']];
 const AVED_LABELS = { none:'Sin pelo', short:'Corto', spiky:'Puntas', long:'Largo', bun:'Rodete', cap:'Gorra', mohawk:'Cresta', neutral:'Neutral', happy:'Feliz', sad:'Triste', angry:'Enojado', surprised:'Sorpresa', sleepy:'Sueño', wink:'Guiño', smug:'Pícaro', scared:'Susto' };
 function openAvatarEditor() {
   if (!ME || typeof CrixAvatar === 'undefined') return; openModal('mo-avatar');
@@ -2299,7 +2299,7 @@ function avatarEditorRebuild() {
 function avatarEditorUI() {
   const L = avEd.look, ctrl = document.getElementById('avp-ctrl');
   const seg = (key, vals) => '<div style="display:flex;flex-wrap:wrap;gap:4px">' + vals.map(v => `<button class="btn ${L[key] === v ? 'btn-p' : 'btn-g'}" style="font-size:11px;padding:4px 8px" onclick="avatarEditorSet('${key}','${v}')">${AVED_LABELS[v] || v}</button>`).join('') + '</div>';
-  ctrl.innerHTML = '<div><b>Estilo</b></div><div style="display:flex;gap:4px"><button class="btn ' + (L.style === 'cartoon' ? 'btn-p' : 'btn-g') + '" style="font-size:12px" onclick="avatarEditorSet(\'style\',\'cartoon\')">🧒 Caricatura</button><button class="btn ' + (L.style === 'stick' ? 'btn-p' : 'btn-g') + '" style="font-size:12px" onclick="avatarEditorSet(\'style\',\'stick\')">🧸 Arcilla</button></div>'
+  ctrl.innerHTML = ''   // todos los avatares son el muñeco de arcilla (FORCE_CLAY en crix-avatar.js): sin estilo ni colores de cuerpo
     + '<div><b>Colores</b></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' + AVED_FIELDS.map(([k, n]) => { const val = L[k] || (k === 'shirt' ? avEd.color : '#888888'); return `<label style="display:flex;align-items:center;gap:6px">${n}<input type="color" value="${val}" oninput="avatarEditorSet('${k}',this.value,true)" style="width:34px;height:24px;border:none;background:none"></label>`; }).join('') + '</div>'
     + '<div><b>Pelo</b></div>' + seg('hair', CrixAvatar.HAIRS) + '<div><b>Expresión</b></div>' + seg('face', CrixAvatar.FACES.filter(f => f !== 'dead' && f !== 'talk'))
     + `<div><b>Tamaño</b> <input type="range" min="0.7" max="1.3" step="0.05" value="${L.scale}" oninput="avatarEditorSet('scale',parseFloat(this.value),true)" style="vertical-align:middle"></div>`;
