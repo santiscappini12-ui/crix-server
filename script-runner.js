@@ -17,6 +17,7 @@ const worldPhysics = require('./world-physics');
 
 const rooms = new Map();
 const MAX_ROOMS = 20;
+const CrixAvatar = require('./crix-avatar.js');
 const MAX_SCRIPTS_PER_ROOM = 8;
 const MAX_SOURCE_CHARS = 32 * 1024;
 const MAX_PARTS = 500;
@@ -257,6 +258,33 @@ const ISOLATE_EXTRAS = String.raw`
     game.message = (p, text) => __pc(p, 'message', { text: String(text).slice(0, 200) });
     game.broadcast = text => { for (const p of __getPlayers()) __pc(p, 'message', { text: String(text).slice(0, 200) }); };
 
+    // ── Avatares: huesos, animaciones, cara, aspecto y accesorios (se replican a todos los jugadores de la instancia) ──
+    // target: un jugador (objeto o userId), '*' (todos los jugadores) o el nombre/id de un NPC. Rotaciones en GRADOS.
+    const __AV = ${JSON.stringify({ bones: CrixAvatar.BONES, animations: CrixAvatar.ANIMATIONS, faces: CrixAvatar.FACES, hairs: CrixAvatar.HAIRS, shapes: CrixAvatar.SHAPES })};
+    const __avT = t => (t && typeof t === 'object') ? String(t.userId !== undefined ? t.userId : (t.id !== undefined ? t.id : t.name)) : String(t);
+    const __av = (t, cmd) => __avatarCmd(__avT(t), JSON.stringify(cmd));
+    game.BONES = __AV.bones.slice(); game.ANIMATIONS = __AV.animations.slice(); game.FACES = __AV.faces.slice(); game.HAIRS = __AV.hairs.slice(); game.SHAPES = __AV.shapes.slice();
+    game.playAnimation = (t, name, opts) => __av(t, Object.assign({ op:'anim', name:String(name) }, opts || {}));
+    game.stopAnimation = (t, name) => __av(t, { op:'stop', name:name === undefined ? '' : String(name) });
+    game.setBone = (t, bone, props) => __av(t, { op:'bone', bone:String(bone), props:props || {} });
+    game.resetBone = (t, bone) => __av(t, { op:'resetBone', bone:String(bone) });
+    game.resetAvatar = t => __av(t, { op:'reset' });
+    game.setFace = (t, name, talking) => __av(t, { op:'face', name:name === null ? null : String(name), talk:!!talking });
+    game.setLook = (t, look) => __av(t, { op:'look', look:look || {} });
+    game.addAccessory = (t, id, bone, spec) => __av(t, { op:'addAcc', id:String(id), bone:String(bone), spec:spec || {} });
+    game.removeAccessory = (t, id) => __av(t, { op:'removeAcc', id:String(id) });
+    game.setNpcWander = (t, enabled) => __av(t, { op:'hold', value:enabled === false });
+    // Pose completa de una vez: game.setPose(jugador, { Head:{x:20}, UpperArmR:[0,0,-90] }, { duration:0.4 })
+    game.setPose = (t, bones, opts) => {
+      const out = {}, shared = opts || {};
+      for (const name of Object.keys(bones || {})) {
+        const v = bones[name];
+        const isRot = Array.isArray(v) || (v && typeof v === 'object' && (v.x !== undefined || v.y !== undefined || v.z !== undefined) && v.rotation === undefined && v.rot === undefined);
+        out[name] = Object.assign({}, shared, isRot ? { rotation:v } : (v || {}));
+      }
+      return __av(t, { op:'pose', bones:out });
+    };
+
     // ── Eventos remotos (LocalScript ↔ Script de servidor) ──
     const __remote = new Map();
     game.onClientEvent = (name, fn) => { if (typeof fn !== 'function') throw new TypeError('onClientEvent necesita una función'); const key = String(name); if (!__remote.has(key)) __remote.set(key, []); __remote.get(key).push(fn); };
@@ -284,6 +312,7 @@ function bootstrapSource(modules) {
     const __raycast = __crixRaycast;
     const __playerCmd = __crixPlayerCmd;
     const __remoteOut = __crixRemoteOut;
+    const __avatarCmd = __crixAvatarCmd;
     const __getVelocity = __crixGetVelocity;
     ${CRIXSCRIPT_PRELUDE}
     const __handlers = { touched:new Map(), touchEnded:new Map(), impact:new Map() };
@@ -393,7 +422,7 @@ function bootstrapSource(modules) {
         error(script.name+': '+(err && err.message || err));
       }
     }
-    delete globalThis.__crixRaycast; delete globalThis.__crixPlayerCmd; delete globalThis.__crixRemoteOut; delete globalThis.__crixGetVelocity;
+    delete globalThis.__crixRaycast; delete globalThis.__crixPlayerCmd; delete globalThis.__crixRemoteOut; delete globalThis.__crixAvatarCmd; delete globalThis.__crixGetVelocity;
     delete globalThis.__crixEmit; delete globalThis.__crixGetPlayers; delete globalThis.__crixGetParts; delete globalThis.__crixLog; delete globalThis.__crixGetPart; delete globalThis.__crixWatch;
   `;
 }
@@ -464,6 +493,14 @@ function createRoom(message) {
     if(room.remoteTimes.length>=300)throw new Error('Límite de eventos remotos por segundo alcanzado');room.remoteTimes.push(now);
     let data=null;try{data=JSON.parse(String(dataJson));}catch(_){}
     send({type:'remoteOut',roomId:room.id,userId:String(userId).slice(0,100),name,data});
+  },{sync:true}));
+  jail.setSync('__crixAvatarCmd',new ivm.Callback((target,cmdJson)=>{
+    if(String(cmdJson).length>8192)throw new Error('La orden de avatar supera 8 KB');
+    const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
+    if(room.commandTimes.length>=MAX_COMMANDS_PER_SECOND)throw new Error('Límite de cambios del mundo alcanzado');room.commandTimes.push(now);
+    let cmd=null;try{cmd=JSON.parse(String(cmdJson));}catch(_){}
+    if(!cmd||typeof cmd!=='object'||!CrixAvatar.sanitizeCommand(cmd))throw new Error('Orden de avatar inválida: '+String(cmd&&cmd.op));
+    send({type:'avatarCommand',roomId:room.id,target:String(target).slice(0,120),cmd});
   },{sync:true}));
   jail.setSync('__crixLog',new ivm.Callback((cls,text)=>output(room,room.currentScriptName || 'Servidor',text,cls),{sync:true}));
   context.evalSync(bootstrapSource(modules),{timeout:1000});

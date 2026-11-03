@@ -903,6 +903,19 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-instances')">Cerrar</button></div>
 </div>
 </div>
+<div class="mo-overlay" id="mo-avatar">
+<div class="mo-box" style="width:min(720px,100%)">
+  <h3>🧍 Mi avatar</h3>
+  <div style="display:flex;gap:14px;flex-wrap:wrap">
+    <div style="flex:0 0 250px;display:flex;flex-direction:column;gap:8px;align-items:center">
+      <canvas id="avp-canvas" width="250" height="330" style="background:linear-gradient(#26304a,#3a4560);border-radius:12px;cursor:grab;touch-action:none"></canvas>
+      <div id="avp-anims" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center"></div>
+    </div>
+    <div id="avp-ctrl" style="flex:1;min-width:230px;display:flex;flex-direction:column;gap:9px;font-size:13px"></div>
+  </div>
+  <div class="mo-btns"><button class="btn btn-g" onclick="avatarEditorReset()">Restablecer</button><button class="btn btn-g" onclick="closeAvatarEditor()">Cancelar</button><button class="btn btn-p" onclick="saveAvatarEditor()">Guardar</button></div>
+</div>
+</div>
 <div class="mo-overlay" id="mo-npc">
 <div class="mo-box">
   <h3>🤖 NPCs</h3>
@@ -990,6 +1003,7 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 </div>
 <div id="toast"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="/crix-avatar.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 // Copia de world-physics.js (el mismo motor que usa el servidor). Se usa cuando el juego corre sin servidor (prueba desde el Studio).
@@ -2194,7 +2208,7 @@ function renderProfile(uid) {
     '</div>'+
     '<div class="pf-btns">'+
     (isMe
-      ? '<button class="btn btn-g" style="font-size:12px" onclick="editProfile()">✏️ Editar bio</button><button class="btn btn-g" style="font-size:12px" onclick="document.getElementById(\'profile-avatar-file\').click()">🖼 Cambiar foto</button>'+(profileAvatarSrc(u)?'<button class="btn btn-g" style="font-size:12px" onclick="removeProfileAvatar()">Quitar foto</button>':'')+'<button class="btn btn-red" style="font-size:12px" onclick="logout()">← Cerrar sesión</button>'
+      ? '<button class="btn btn-g" style="font-size:12px" onclick="editProfile()">✏️ Editar bio</button><button class="btn btn-p" style="font-size:12px" onclick="openAvatarEditor()">🧍 Avatar</button><button class="btn btn-g" style="font-size:12px" onclick="document.getElementById(\'profile-avatar-file\').click()">🖼 Cambiar foto</button>'+(profileAvatarSrc(u)?'<button class="btn btn-g" style="font-size:12px" onclick="removeProfileAvatar()">Quitar foto</button>':'')+'<button class="btn btn-red" style="font-size:12px" onclick="logout()">← Cerrar sesión</button>'
       : ((!isFriend ? '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(\''+u.id+'\')">+ Agregar amigo</button>' : '')+
          (isFriend ? '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje cifrado</button>' : ''))+
         (u.currentGameId && u.currentInstanceId ? '<button class="btn btn-p" style="font-size:12px" onclick="joinFriendGame(\''+u.id+'\')">▶ Unirme a su partida</button>' : '')+
@@ -2255,6 +2269,52 @@ function toggleFollow(uid) {
   if (idx === -1) { ME.following.push(uid); showToast('Ahora seguís a este usuario'); }
   else { ME.following.splice(idx, 1); showToast('Dejaste de seguir'); }
   saveMe(); renderProfile(viewingUserId);
+}
+
+// ── Editor de avatar: vista previa 3D en vivo, 2 estilos, colores, pelo, cara y animaciones ─────────────────────
+let avEd = null;
+const AVED_FIELDS = [['skin','Piel'],['shirt','Camiseta'],['pants','Pantalón'],['shoes','Zapatos'],['hairColor','Pelo'],['eyes','Ojos']];
+const AVED_LABELS = { none:'Sin pelo', short:'Corto', spiky:'Puntas', long:'Largo', bun:'Rodete', cap:'Gorra', mohawk:'Cresta', neutral:'Neutral', happy:'Feliz', sad:'Triste', angry:'Enojado', surprised:'Sorpresa', sleepy:'Sueño', wink:'Guiño', smug:'Pícaro', scared:'Susto' };
+function openAvatarEditor() {
+  if (!ME || typeof CrixAvatar === 'undefined') return; openModal('mo-avatar');
+  const cv = document.getElementById('avp-canvas');
+  if (!avEd) {
+    const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }), scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(30, cv.width / cv.height, 0.1, 100);
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(cv.width, cv.height, false);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa4b8, 0.8), new THREE.AmbientLight(0xffffff, 0.3)); const sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(3, 6, 5); scene.add(sun);
+    cam.position.set(0, 1.9, 11); cam.lookAt(0, 1.55, 0);
+    avEd = { renderer, scene, cam, av: null, mode: 'idle', raf: 0, yaw: 0.35, last: 0 };
+    let drag = null; cv.onpointerdown = e => { drag = e.clientX; cv.setPointerCapture(e.pointerId); }; cv.onpointermove = e => { if (drag !== null) { avEd.yaw += (e.clientX - drag) * 0.012; drag = e.clientX; } }; cv.onpointerup = () => { drag = null; };
+  }
+  avEd.look = Object.assign({}, CrixAvatar.DEFAULT_LOOK, ME.look || {}); avEd.color = ME.color || '#5b8def'; avatarEditorRebuild(); avatarEditorUI();
+  cancelAnimationFrame(avEd.raf); avEd.last = performance.now();
+  const loop = () => { if (!document.getElementById('mo-avatar').classList.contains('open')) return; avEd.raf = requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - avEd.last) / 1000); avEd.last = now;
+    const m = avEd.mode; CrixAvatar.update(avEd.av, dt, { speed: m === 'walk' ? 6 : m === 'run' ? 14 : 0, onGround: m !== 'jump', vy: m === 'jump' ? 0.2 : 0 }); avEd.av.root.parent.rotation.y = avEd.yaw; avEd.renderer.render(avEd.scene, avEd.cam); };
+  loop();
+}
+function avatarEditorRebuild() {
+  if (avEd.av) { avEd.scene.remove(avEd.av.root.parent); CrixAvatar.dispose(avEd.av); }
+  const g = new THREE.Group(); avEd.av = _makeAvatar(avEd.look, avEd.color); g.add(avEd.av.root); avEd.scene.add(g);
+}
+function avatarEditorUI() {
+  const L = avEd.look, ctrl = document.getElementById('avp-ctrl');
+  const seg = (key, vals) => '<div style="display:flex;flex-wrap:wrap;gap:4px">' + vals.map(v => `<button class="btn ${L[key] === v ? 'btn-p' : 'btn-g'}" style="font-size:11px;padding:4px 8px" onclick="avatarEditorSet('${key}','${v}')">${AVED_LABELS[v] || v}</button>`).join('') + '</div>';
+  ctrl.innerHTML = '<div><b>Estilo</b></div><div style="display:flex;gap:4px"><button class="btn ' + (L.style === 'cartoon' ? 'btn-p' : 'btn-g') + '" style="font-size:12px" onclick="avatarEditorSet(\'style\',\'cartoon\')">🧒 Caricatura</button><button class="btn ' + (L.style === 'stick' ? 'btn-p' : 'btn-g') + '" style="font-size:12px" onclick="avatarEditorSet(\'style\',\'stick\')">🕴 Monigote</button></div>'
+    + '<div><b>Colores</b></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' + AVED_FIELDS.map(([k, n]) => { const val = L[k] || (k === 'shirt' ? avEd.color : '#888888'); return `<label style="display:flex;align-items:center;gap:6px">${n}<input type="color" value="${val}" oninput="avatarEditorSet('${k}',this.value,true)" style="width:34px;height:24px;border:none;background:none"></label>`; }).join('') + '</div>'
+    + '<div><b>Pelo</b></div>' + seg('hair', CrixAvatar.HAIRS) + '<div><b>Expresión</b></div>' + seg('face', CrixAvatar.FACES.filter(f => f !== 'dead' && f !== 'talk'))
+    + `<div><b>Tamaño</b> <input type="range" min="0.7" max="1.3" step="0.05" value="${L.scale}" oninput="avatarEditorSet('scale',parseFloat(this.value),true)" style="vertical-align:middle"></div>`;
+  document.getElementById('avp-anims').innerHTML = ['idle', 'walk', 'run', 'jump'].map(m => `<button class="btn ${avEd.mode === m ? 'btn-p' : 'btn-g'}" style="font-size:11px;padding:3px 7px" onclick="avatarEditorMode('${m}')">${m}</button>`).join('') + CrixAvatar.ANIMATIONS.filter(a => !['dead', 'sleep'].includes(a)).map(a => `<button class="btn btn-g" style="font-size:11px;padding:3px 7px" onclick="avatarEditorEmote('${a}')">${a}</button>`).join('');
+}
+function avatarEditorSet(key, value, noUI) { avEd.look[key] = value; CrixAvatar.applyLook(avEd.av, avEd.look); if (key === 'face') CrixAvatar.setFace(avEd.av, value); if (!noUI) avatarEditorUI(); }
+function avatarEditorMode(m) { avEd.mode = m; CrixAvatar.stopAnimation(avEd.av); avatarEditorUI(); }
+function avatarEditorEmote(a) { avEd.mode = 'idle'; CrixAvatar.stopAnimation(avEd.av); CrixAvatar.playAnimation(avEd.av, a); avatarEditorUI(); }
+function avatarEditorReset() { avEd.look = Object.assign({}, CrixAvatar.DEFAULT_LOOK); avatarEditorRebuild(); avatarEditorUI(); }
+function closeAvatarEditor() { closeModal('mo-avatar'); if (avEd) cancelAnimationFrame(avEd.raf); }
+function saveAvatarEditor() {
+  const look = CrixAvatar.sanitizeLook(avEd.look, {}); ME.look = look; saveMe(); closeAvatarEditor();
+  if (typeof gPlayer !== 'undefined' && gPlayer) _avatarSelf([{ op: 'look', look }]);
+  try { renderProfile(ME.id); } catch (_) {}
+  showToast('Avatar guardado');
 }
 function editProfile() { const bio = prompt('Editá tu bio:', ME.bio || ''); if (bio === null) return; ME.bio = bio.slice(0, 120); saveMe(); renderProfile(ME.id); }
 function logout() {
@@ -2532,7 +2592,13 @@ function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).fin
 }
 function clearSt() { stParts.forEach(p => p.mesh && stScene.remove(p.mesh)); stParts = []; if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; }
 function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,1,2,0,2,3, 3,2,5,3,5,4, 0,3,4, 1,5,2, 0,4,1,1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo = geo.toNonIndexed(); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); applyPartUVs(geo, d, sx, sy, sz); const mat = buildPartMaterial(d); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); setShadowFlags(mesh); return mesh; }
-function makeHumanoidRig(d) { const root=new THREE.Group(),bodyMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.color||'#cc6644')}),skinMat=new THREE.MeshPhongMaterial({color:new THREE.Color(d.skinColor||'#f0bf98')});root.position.set(d.x||0,d.y||0,d.z||0);root.rotation.set(d.rx||0,d.ry||0,d.rz||0);root.scale.set(d.sx||1,(d.sy||2.6)/2.6,d.sz||1);const addBox=(size,material,position,parent=root)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.position.set(...position);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;};addBox([0.92,1.15,0.48],bodyMat,[0,1.32,0]);const head=new THREE.Mesh(new THREE.SphereGeometry(0.37,16,12),skinMat);head.position.set(0,2.2,0);head.castShadow=true;root.add(head);const armL=new THREE.Group(),armR=new THREE.Group(),legL=new THREE.Group(),legR=new THREE.Group();armL.position.set(-0.58,1.78,0);armR.position.set(0.58,1.78,0);legL.position.set(-0.24,0.78,0);legR.position.set(0.24,0.78,0);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armL);addBox([0.34,0.92,0.36],bodyMat,[0,-0.43,0],armR);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legL);addBox([0.38,0.9,0.4],bodyMat,[0,-0.43,0],legR);root.add(armL,armR,legL,legR);root.userData.rig={armL,armR,legL,legR};root.traverse(child=>child.userData.studioRoot=root);return root; }
+const NPC_LOOKS = { dummy:{ hair:'short' }, zombie:{ skin:'#8fb57a', hair:'none', face:'angry', pants:'#3d4a3a' }, robot:{ style:'stick', hair:'none', face:'neutral', eyes:'#2fd4ff' }, merchant:{ hair:'long', hairColor:'#8a5a2b', face:'happy' }, guard:{ hair:'cap', face:'neutral' }, cat:{ hair:'bun', face:'smug', scale:0.8 } };
+function makeHumanoidRig(d) {
+  const root = new THREE.Group(), look = Object.assign({}, d.look || {}); if (d.skinColor && !look.skin) look.skin = d.skinColor;
+  const av = _makeAvatar(look, d.color || '#cc6644'); root.add(av.root); root.userData.avatar = av;
+  root.position.set(d.x||0, d.y||0, d.z||0); root.rotation.set(d.rx||0, d.ry||0, d.rz||0); root.scale.set(d.sx||1, (d.sy||3.05)/3.05, d.sz||1);
+  root.traverse(child => { child.userData.studioRoot = root; if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } }); return root;
+}
 function addPartMesh(d) { if(d.anchored===undefined)d.anchored=true; if(d.canCollide===undefined)d.canCollide=true; const mesh=d.isNPC?makeHumanoidRig(d):makeMesh(d); stScene.add(mesh); const entry = {data:d, mesh}; stParts.push(entry); return entry; }
 async function importObjModel(event) { const input=event.target,file=input.files&&input.files[0];input.value='';if(!file)return;if(file.size>2*1024*1024){showToast('El OBJ no puede superar 2 MB');return;}try{const text=await file.text(),vertices=[],positions=[];for(const raw of text.split(/\r?\n/)){const line=raw.trim();if(line.startsWith('v ')){const values=line.slice(2).trim().split(/\s+/).slice(0,3).map(Number);if(values.length===3&&values.every(Number.isFinite))vertices.push(values);}else if(line.startsWith('f ')){const face=line.slice(2).trim().split(/\s+/).map(token=>{const rawIndex=parseInt(token.split('/')[0],10);return rawIndex<0?vertices.length+rawIndex:rawIndex-1;});if(face.length<3||face.some(index=>index<0||index>=vertices.length))continue;for(let i=1;i<face.length-1;i++)for(const index of [face[0],face[i],face[i+1]])positions.push(...vertices[index]);if(positions.length>180000)throw new Error('El modelo supera el límite de 60.000 vértices');}}if(positions.length<9)throw new Error('El OBJ no contiene caras triangulables');const mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];for(let i=0;i<positions.length;i+=3)for(let axis=0;axis<3;axis++){mins[axis]=Math.min(mins[axis],positions[i+axis]);maxs[axis]=Math.max(maxs[axis],positions[i+axis]);}const center=mins.map((value,axis)=>(value+maxs[axis])/2),extent=Math.max(...maxs.map((value,axis)=>value-mins[axis]));if(!extent)throw new Error('El modelo no tiene tamaño');const normalized=new Float32Array(positions.length);for(let i=0;i<positions.length;i++)normalized[i]=(positions[i]-center[i%3])*4/extent;const bytes=new Uint8Array(normalized.buffer);let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));const data={id:'model'+Date.now(),type:'ImportedMesh',name:file.name.replace(/\.obj$/i,'').slice(0,80)||'Modelo OBJ',x:stCamTarget.x,y:stCamTarget.y,z:stCamTarget.z,sx:4,sy:4,sz:4,rx:0,ry:0,rz:0,color:'#d7deed',material:'SmoothPlastic',anchored:true,canCollide:true,transparent:0,meshData:btoa(binary)};recordStudioHistory();const entry=addPartMesh(data);refreshExplorer();selectPart(entry);updateStStatus();showToast('🧩 Modelo OBJ importado. La geometría se guardará con el proyecto.');}catch(err){showToast(err.message||'No se pudo importar el OBJ');} }
 function stuAdd(type) {
@@ -2688,7 +2754,7 @@ function confirmPublish() {
 }
 const NPC_LIB = [{id:'dummy',name:'Dummy',icon:'🪆',type:'Humanoid',color:'#cc6644',hp:100},{id:'zombie',name:'Zombie',icon:'🧟',type:'Enemy',color:'#3d6e3d',hp:50},{id:'robot',name:'Robot',icon:'🤖',type:'NPC',color:'#4466aa',hp:200},{id:'merchant',name:'Comerciante',icon:'🧙',type:'Friendly',color:'#cc9933',hp:100},{id:'guard',name:'Guardia',icon:'💂',type:'Friendly',color:'#334488',hp:150},{id:'cat',name:'Gato',icon:'🐱',type:'Passive',color:'#aaaaaa',hp:30}];
 function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
-function spawnNpc(npcId) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; recordStudioHistory();const d = { id:'npc'+Date.now(), type:'NPC', name:npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:2.6, sz:1, rx:0, ry:0, rz:0, color:npc.color, skinColor:'#f0bf98', anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(`🤖 Humanoide ${npc.name} agregado`); }
+function spawnNpc(npcId) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; recordStudioHistory();const d = { id:'npc'+Date.now(), type:'NPC', name:npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:3.05, sz:1, rx:0, ry:0, rz:0, color:npc.color, skinColor:'#f0bf98', look:Object.assign({}, NPC_LOOKS[npc.id]||{}), anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(`🤖 Humanoide ${npc.name} agregado`); }
 const TOOLBOX_ITEMS = [{name:'Castillo',icon:'🏰',cat:'Edificios',type:'Block',color:'#888888',sx:8,sy:12,sz:8},{name:'Árbol',icon:'🌲',cat:'Naturaleza',type:'Cylinder',color:'#228b22',sx:2,sy:8,sz:2},{name:'Roca',icon:'🪨',cat:'Naturaleza',type:'Block',color:'#666655',sx:3,sy:2,sz:3},{name:'Puerta',icon:'🚪',cat:'Edificios',type:'Block',color:'#8B4513',sx:2,sy:4,sz:0.3},{name:'Escalera',icon:'🪜',cat:'Edificios',type:'Wedge',color:'#aaaaaa',sx:2,sy:4,sz:6},{name:'Poste de luz',icon:'💡',cat:'Decoración',type:'Cylinder',color:'#f7c948',sx:0.3,sy:8,sz:0.3},{name:'Barril',icon:'🛢️',cat:'Decoración',type:'Cylinder',color:'#8B4513',sx:1.5,sy:2,sz:1.5},{name:'Fuente',icon:'⛲',cat:'Decoración',type:'Cylinder',color:'#aaaacc',sx:4,sy:0.5,sz:4},{name:'Pared',icon:'🧱',cat:'Edificios',type:'Block',color:'#cc8866',sx:8,sy:4,sz:0.5},{name:'Plataforma Neon',icon:'✨',cat:'Especial',type:'Block',color:'#00ffff',sx:6,sy:0.3,sz:6,material:'Neon'},{name:'Esfera Cristal',icon:'💎',cat:'Especial',type:'Sphere',color:'#88ccff',sx:3,sy:3,sz:3,material:'Glass'},{name:'Columna',icon:'🏛️',cat:'Edificios',type:'Cylinder',color:'#e8e0d0',sx:1.2,sy:8,sz:1.2}];
 let toolboxFilter = 'all';
 function openToolbox() { const cats = ['all', ...new Set(TOOLBOX_ITEMS.map(i => i.cat))]; document.getElementById('toolbox-cats').innerHTML = cats.map(c => `<button class="filter-btn ${toolboxFilter===c?'active':''}" onclick="setToolboxCat('${c}',this)">${c==='all'?'Todos':c}</button>`).join(''); renderToolboxGrid(); openModal('mo-toolbox'); }
@@ -3070,6 +3136,18 @@ const localPlayer = {
 ['health','maxHealth','coins','deaths'].forEach(key => Object.defineProperty(localPlayer, key, {get: () => (playerState ? playerState[key] : 0)}));
 Object.defineProperty(localPlayer, 'position', {get: () => clone((playerState || {}).position || {x:0,y:0,z:0})});
 game.player = localPlayer; game.gui = gui;
+const avCmd = (target, cmd) => sendCommand('avatar', {target: (target === undefined || target === null) ? 'me' : (typeof target === 'object' ? String(target.userId !== undefined ? target.userId : (target.id !== undefined ? target.id : target.name)) : String(target)), cmd: cmd});
+const avDefs = {
+  playAnimation: (n, o) => Object.assign({op:'anim', name:String(n)}, o || {}), stopAnimation: n => ({op:'stop', name:n === undefined ? '' : String(n)}),
+  setBone: (b, p) => ({op:'bone', bone:String(b), props:p || {}}), resetBone: b => ({op:'resetBone', bone:String(b)}), resetAvatar: () => ({op:'reset'}),
+  setFace: (n, t) => ({op:'face', name:n === null ? null : String(n), talk:!!t}), setLook: l => ({op:'look', look:l || {}}),
+  addAccessory: (id, b, s) => ({op:'addAcc', id:String(id), bone:String(b), spec:s || {}}), removeAccessory: id => ({op:'removeAcc', id:String(id)}), setNpcWander: e => ({op:'hold', value:e === false}),
+  setPose: (bones, opts) => { const out = {}, shared = opts || {}; for (const name of Object.keys(bones || {})) { const v = bones[name]; const isRot = Array.isArray(v) || (v && typeof v === 'object' && (v.x !== undefined || v.y !== undefined || v.z !== undefined) && v.rotation === undefined && v.rot === undefined); out[name] = Object.assign({}, shared, isRot ? {rotation:v} : (v || {})); } return {op:'pose', bones:out}; }
+};
+for (const key of Object.keys(avDefs)) { localPlayer[key] = (...args) => avCmd('me', avDefs[key](...args)); game[key] = (target, ...args) => avCmd(target, avDefs[key](...args)); }
+const avConsts = ${JSON.stringify(typeof CrixAvatarShared !== 'undefined' ? {BONES:CrixAvatarShared.BONES, ANIMATIONS:CrixAvatarShared.ANIMATIONS, FACES:CrixAvatarShared.FACES, HAIRS:CrixAvatarShared.HAIRS, SHAPES:CrixAvatarShared.SHAPES} : {})};
+for (const key of Object.keys(avConsts)) game[key] = avConsts[key].slice();
+
 const time = () => Date.now() / 1000;
 task.every = (seconds, callback) => setInterval(() => { try { callback(); } catch (err) { send('output', {text:'[error] ' + (err && err.message ? err.message : String(err)), cls:'err'}); } }, Math.max(100, Math.min(60000, number(seconds, 1) * 1000)));
 task.cancel = id => clearInterval(id);
@@ -3296,20 +3374,55 @@ function _stepScriptParts() { _stepNetInterp();const serverPhysics=netServerScri
 // Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
 // así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
 // (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
-function _buildHumanoid(color) {
-  const g = new THREE.Group(); const c = new THREE.Color(color || '#5b8def');
-  const bMat = new THREE.MeshPhongMaterial({color:c}); const sMat = new THREE.MeshPhongMaterial({color:0xffdbac}); const eyeM = new THREE.MeshPhongMaterial({color:0x111111});
-  const lL = new THREE.Mesh(new THREE.BoxGeometry(0.45,1.10,0.45),bMat); lL.position.set(-0.27, 0.55, 0); const lR = lL.clone(); lR.position.set( 0.27, 0.55, 0);
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.20, 0.55),bMat); torso.position.set(0, 1.70, 0);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.70,0.70),sMat); head.position.set(0, 2.75, 0);
-  const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6),eyeM); eL.position.set(-0.17, 2.78, 0.36); const eR = eL.clone(); eR.position.set( 0.17, 2.78, 0.36);
-  const aL = new THREE.Mesh(new THREE.BoxGeometry(0.40,1.10,0.40),bMat); aL.position.set(-0.72, 1.70, 0); const aR = aL.clone(); aR.position.set( 0.72, 1.70, 0);
-  g.add(lL,lR,torso,head,eL,eR,aL,aR); shadowAllMeshes(g);
-  const parts = {aL,aR,lL,lR}; g.userData.parts = parts;
-  return { group:g, parts };
+function _makeAvatar(look, color) {
+  const av = CrixAvatar.build(look || {}); CrixAvatar.setUserColor(av, color || '#5b8def');
+  CrixAvatar.update(av, 0.5, { snap: true, speed: 0, onGround: true }); CrixAvatar.update(av, 0.5, { snap: true, speed: 0, onGround: true });
+  return av;
 }
-function _spawnPlayer(pos) { const built = _buildHumanoid(ME.color||'#5b8def'); const g = built.group; g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = built.parts; gVelY = 0; gOnGround = false; gTargetRY = 0; }
-function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; const _nowT = performance.now(); const _frameDt = Math.min(0.1, Math.max(0, (_nowT - (_gameLoop._last || _nowT)) / 1000)); _gameLoop._last = _nowT; gAnimT += _frameDt; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; gAcc += Math.min(100, _frameDt * 1000); let _steps = 0; while (gAcc >= PHYS_STEP_MS && _steps < 6) { gAcc -= PHYS_STEP_MS; _steps++; _stepPlayer(mx, mz, moving); } if (_steps === 6) gAcc = 0; let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * Math.min(1, 12 * _frameDt); _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (moving && gOnGround) { const sw = Math.sin(gAnimT * 9) * 0.55; gPlayerParts.aL.rotation.x = sw; gPlayerParts.aR.rotation.x = -sw; gPlayerParts.lL.rotation.x = -sw; gPlayerParts.lR.rotation.x = sw; } else { gPlayerParts.aL.rotation.x = gPlayerParts.aR.rotation.x = gPlayerParts.lL.rotation.x = gPlayerParts.lR.rotation.x = 0; } gNPCs.forEach(npc => { const t = gAnimT*0.5 + (npc.data.id||'').charCodeAt?.(3)*0.3||0; npc.mesh.position.x = npc.data.x + Math.sin(t)*5; npc.mesh.position.z = npc.data.z + Math.cos(t*0.7)*5; npc.mesh.rotation.y=t;const rig=npc.mesh.userData.rig;if(rig){const swing=Math.sin(t*3)*0.45;rig.armL.rotation.x=swing;rig.armR.rotation.x=-swing;rig.legL.rotation.x=-swing;rig.legR.rotation.x=swing;} }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
+// Contenedor en los pies (la escala del avatar no afecta a la posición ni a la etiqueta de nombre).
+function _buildHumanoid(color, look) {
+  const g = new THREE.Group(); const av = _makeAvatar(look, color); g.add(av.root); g.userData.avatar = av; shadowAllMeshes(g);
+  return { group: g, avatar: av };
+}
+function myLook() { return Object.assign({}, (ME && ME.look) || {}); }
+function _spawnPlayer(pos) { const built = _buildHumanoid(ME.color||'#5b8def', myLook()); const g = built.group; g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = {}; gVelY = 0; gOnGround = false; gTargetRY = 0; }
+// Aplica un estado/diferencia de avatar a quien corresponda: yo (socket.id), otro jugador (socketId) o un NPC ("n:id").
+function _avatarFor(key) {
+  if (typeof key !== 'string') return null;
+  if (socket && key === socket.id) return gPlayer && gPlayer.userData.avatar || null;
+  if (key.startsWith('n:')) { const id = key.slice(2), npc = gNPCs.find(n => String(n.data.id) === id); return npc ? npc.mesh.userData.avatar : null; }
+  return remotePlayers[key] ? remotePlayers[key].av : null;
+}
+const _avatarPending = {};
+function applyAvatarDiff(key, diff) { const av = _avatarFor(key); if (av) CrixAvatar.applyState(av, diff); else { (_avatarPending[key] = _avatarPending[key] || []).push(diff); if (_avatarPending[key].length > 60) _avatarPending[key].shift(); } }
+function flushAvatarPending(key) { const av = _avatarFor(key), list = _avatarPending[key]; if (av && list) { list.forEach(d => CrixAvatar.applyState(av, d)); delete _avatarPending[key]; } }
+// Órdenes sobre MI avatar (LocalScript, emotes, editor de avatar): se ven al instante y se replican a los demás.
+function _avatarSelf(cmds) {
+  const av = gPlayer && gPlayer.userData.avatar, ok = [];
+  for (const c of cmds) { const d = CrixAvatar.sanitizeCommand(c); if (!d) continue; if (av) CrixAvatar.applyState(av, d); ok.push(c); }
+  if (ok.length && typeof socket !== 'undefined' && socket && netConnected) socket.emit('avatar_self', { cmds: ok });
+}
+function _avatarFromScript(target, cmd) {
+  const d = CrixAvatar.sanitizeCommand(cmd); if (!d) return;
+  if (target === 'me' || target === '*' || (ME && String(ME.id) === target)) { _avatarSelf([cmd]); if (target !== '*') return; }
+  gNPCs.forEach(n => { if (String(n.data.id) === target || n.data.name === target) CrixAvatar.applyState(n.mesh.userData.avatar, d); });
+}
+// Comandos de chat: /e bailar · /e wave · /e stop · /cara feliz
+function avatarChatCommand(text) {
+  const m = /^\/(e|emote|emote|cara|face)\s*(\S*)/i.exec(text); if (!m) return false;
+  const kind = m[1].toLowerCase(), arg = (m[2] || '').toLowerCase();
+  if (kind === 'cara' || kind === 'face') { const f = { feliz:'happy', triste:'sad', enojado:'angry', sorpresa:'surprised', sueno:'sleepy', guino:'wink' }[arg] || arg; if (CrixAvatar.FACES.includes(f)) _avatarSelf([{ op:'face', name:f }]); else addGMsg('Caras: ' + CrixAvatar.FACES.join(', '), 'sys'); return true; }
+  if (!arg || arg === 'stop' || arg === 'parar') { _avatarSelf([{ op:'stop' }, { op:'face', name:null }]); return true; }
+  if (CrixAvatar.resolveAnim(arg)) _avatarSelf([{ op:'anim', name:arg }]); else addGMsg('Emotes: ' + CrixAvatar.ANIMATIONS.join(', '), 'sys');
+  return true;
+}
+function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; const _nowT = performance.now(); const _frameDt = Math.min(0.1, Math.max(0, (_nowT - (_gameLoop._last || _nowT)) / 1000)); _gameLoop._last = _nowT; gAnimT += _frameDt; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; gAcc += Math.min(100, _frameDt * 1000); let _steps = 0; while (gAcc >= PHYS_STEP_MS && _steps < 6) { gAcc -= PHYS_STEP_MS; _steps++; _stepPlayer(mx, mz, moving); } if (_steps === 6) gAcc = 0; let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * Math.min(1, 12 * _frameDt); _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } { const _av = gPlayer.userData.avatar; if (_av) CrixAvatar.update(_av, _frameDt, { speed: Math.hypot(gVelX, gVelZ) * 60, onGround: gOnGround, vy: gVelY }); } gNPCs.forEach(npc => { const av = npc.mesh.userData.avatar; if (!av) return; if (npc.seed === undefined) npc.seed = String(npc.data.id || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+    // Reloj de pared: todos los jugadores ven al NPC en el mismo lugar. Un Script puede detenerlo con game.setNpcWander(nombre, false).
+    const t = Date.now() / 2000 + npc.seed * 0.3, hold = !!av.hold, nx = npc.data.x + (hold ? 0 : Math.sin(t) * 5), nz = npc.data.z + (hold ? 0 : Math.cos(t * 0.7) * 5);
+    const dx = nx - npc.mesh.position.x, dz = nz - npc.mesh.position.z, spd = npc.px === undefined ? 0 : Math.hypot(dx, dz) / Math.max(0.001, _frameDt);
+    npc.px = 1; npc.mesh.position.x = nx; npc.mesh.position.z = nz;
+    if (spd > 0.4) { let dr = Math.atan2(dx, dz) - npc.mesh.rotation.y; while (dr < -Math.PI) dr += Math.PI * 2; while (dr > Math.PI) dr -= Math.PI * 2; npc.mesh.rotation.y += dr * Math.min(1, 8 * _frameDt); }
+    CrixAvatar.update(av, _frameDt, { speed: Math.min(spd, 30), onGround: true }); }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
 function _setupGameInput() { window.addEventListener('keydown', e => { if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return; gKeys[e.code] = true; if (e.code === 'Space') { e.preventDefault(); _tryJump(); } if (e.code === 'Escape') exitGame(); }); window.addEventListener('keyup', e => delete gKeys[e.code]); let cDrag = false, cx2=0, cy2=0; window.addEventListener('mousedown', e => { if (e.button===2 && document.getElementById('s-game').classList.contains('active')) { cDrag=true; cx2=e.clientX; cy2=e.clientY; } }); window.addEventListener('mouseup', e => { if (e.button===2) cDrag=false; }); window.addEventListener('mousemove', e => { if (!cDrag) return; gCamTheta -= (e.clientX-cx2)*0.01; gCamPhi = Math.max(0.08, Math.min(Math.PI/2.1, gCamPhi+(e.clientY-cy2)*0.01)); cx2=e.clientX; cy2=e.clientY; }); window.addEventListener('wheel', e => { if (document.getElementById('s-game').classList.contains('active')) gCamDist = Math.max(5,Math.min(60,gCamDist+e.deltaY*0.05)); }, {passive:true}); window.oncontextmenu = e => { if (document.getElementById('s-game').classList.contains('active')) e.preventDefault(); }; }
 
 // ═══ Física del jugador (paso fijo de 1/60 s: igual en pantallas de 60, 120 o 144 Hz) ═══
@@ -3379,7 +3492,7 @@ function _tryJump() { gJumpBuf = 7; }
 function _setupMob() { const base = document.getElementById('joy-base'); const knob = document.getElementById('joy-knob'); const jBtn = document.getElementById('jump-btn'); const R = 42; let jId = null; base.addEventListener('touchstart', e=>{e.preventDefault();jId=e.changedTouches[0].identifier;},{passive:false}); base.addEventListener('touchmove', e=>{ e.preventDefault(); let t=null; for(let i=0;i<e.changedTouches.length;i++) if(e.changedTouches[i].identifier===jId) t=e.changedTouches[i]; if(!t)return; const r=base.getBoundingClientRect(); let dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2); const dist=Math.hypot(dx,dy); if(dist>R){dx=dx/dist*R;dy=dy/dist*R;} knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; joyPos={x:dx/R,y:dy/R}; },{passive:false}); const rst=()=>{knob.style.transform='translate(-50%,-50%)';joyPos={x:0,y:0};jId=null;}; base.addEventListener('touchend',e=>{e.preventDefault();rst();},{passive:false}); jBtn.addEventListener('touchstart',e=>{e.preventDefault();_tryJump();},{passive:false}); const cv=gRenderer.domElement; let ctId=null,ccx=0,ccy=0; cv.addEventListener('touchstart',e=>{ctId=e.changedTouches[0].identifier;ccx=e.changedTouches[0].clientX;ccy=e.changedTouches[0].clientY;},{passive:false}); cv.addEventListener('touchmove',e=>{ e.preventDefault(); for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(t.identifier===ctId){gCamTheta-=(t.clientX-ccx)*0.007;gCamPhi=Math.max(0.08,Math.min(Math.PI/2.1,gCamPhi+(t.clientY-ccy)*0.007));ccx=t.clientX;ccy=t.clientY;}} },{passive:false}); cv.addEventListener('touchend',()=>ctId=null); }
 let gChatMsgs = [];
 function addGMsg(text, cls='chat') { const el = document.getElementById('g-chat-msgs'); gChatMsgs.push({text,cls}); if (gChatMsgs.length > 50) gChatMsgs.shift(); el.innerHTML = gChatMsgs.map(m=>`<div class="g-msg ${m.cls}">${esc(m.text)}</div>`).join(''); el.scrollTop = el.scrollHeight; }
-function gChatKey(e) { if (e.key === 'Enter') { const t = e.target.value.trim(); if (t) { addGMsg(ME.username+': '+t,'me'); netSendChat(t); e.target.value=''; } e.target.blur(); } }
+function gChatKey(e) { if (e.key === 'Enter') { const t = e.target.value.trim(); if (t && avatarChatCommand(t)) { e.target.value=''; } else if (t) { addGMsg(ME.username+': '+t,'me'); netSendChat(t); e.target.value=''; } e.target.blur(); } }
 function toggleNavBar(force) {
   const hide = typeof force === 'boolean' ? force : !document.body.classList.contains('nav-hidden');
   document.body.classList.toggle('nav-hidden', hide);
@@ -3437,8 +3550,8 @@ function netConnect() {
   socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
   socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();});
   socket.on('connect_error',()=>{netConnected=false;updateNetPill('🟡','Sin servidor');});
-  socket.on('room_state',({players=[],chat=[],runtimeParts=[],worldChanges=[],removedParts=[],collectedParts=[],scriptRuntime})=>{
-    clearRemotePlayers();players.forEach(player=>spawnRemote(player));
+  socket.on('room_state',({players=[],avatars={},chat=[],runtimeParts=[],worldChanges=[],removedParts=[],collectedParts=[],scriptRuntime})=>{
+    clearRemotePlayers();players.forEach(player=>spawnRemote(player));try{for(const key of Object.keys(avatars||{}))applyAvatarDiff(key,avatars[key]);}catch(_){}
     if(chat.length)chat.forEach(message=>addGMsg(`${message.username}: ${message.text}`,'chat'));
     applyNetworkWorldSnapshot({runtimeParts,worldChanges,removedParts,collectedParts});
     if(scriptRuntime==='error')addGMsg('⚠️ No se pudo iniciar el script de servidor.','sys');
@@ -3459,7 +3572,8 @@ function netConnect() {
   socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
   socket.on('join_ack',({playerCount})=>{updateNetPill('🟢',`${playerCount} jugador${playerCount!==1?'es':''}`);addGMsg(`✅ Conectado (${playerCount} en sala)`,'sys');});
   socket.on('player_joined',playerData=>{spawnRemote(playerData);addGMsg(`→ ${playerData.username} entró`,'sys');updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
-  socket.on('player_moved',({socketId,x,y,z,ry,anim,moving})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.targetRY=ry;rp.anim=anim;rp.moving=moving;});
+  socket.on('player_moved',({socketId,x,y,z,ry,anim,moving,og})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.targetRY=ry;rp.anim=anim;rp.moving=moving;rp.og=og!==false;});
+  socket.on('avatar_cmd',({target,diff}={})=>{if(target&&diff)applyAvatarDiff(target,diff);});
   socket.on('player_left',({socketId})=>{const rp=remotePlayers[socketId];if(rp){if(gScene)gScene.remove(rp.group);addGMsg(`← ${rp.data.username} salió`,'sys');delete remotePlayers[socketId];}updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});
   socket.on('pong_res',ts=>{const ping=Date.now()-ts,pill=document.getElementById('g-net-pill');if(pill)pill.textContent=`🟢 ${Object.keys(remotePlayers).length+1}p · ${ping}ms`;});
@@ -3505,16 +3619,24 @@ netConnect = function() {
     window._crixPresenceRefreshTimer = setTimeout(() => refreshCloudContent(), 800);
   });
 };
-function netJoinGame(mapId, instanceId = netCurrentInstanceId) { netCurrentMapId = mapId; netCurrentInstanceId = instanceId; if (!socket || !netConnected || !ME || !instanceId) return; socket.emit('join_game', { mapId, instanceId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def' }); }
+function netJoinGame(mapId, instanceId = netCurrentInstanceId) { netCurrentMapId = mapId; netCurrentInstanceId = instanceId; if (!socket || !netConnected || !ME || !instanceId) return; socket.emit('join_game', { mapId, instanceId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def', look: myLook() }); }
 function netLeaveGame() { if (socket && netConnected) socket.emit('leave_game'); clearRemotePlayers(); netCurrentMapId = null; netCurrentInstanceId = null; const pill = document.getElementById('g-net-pill'); if (pill) pill.style.display = 'none'; }
 function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving, onGround:gOnGround }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
 function netSendChat(text) { if (!socket || !netConnected) return false; socket.emit('game_chat', { text }); return true; }
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
-function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const group = _buildAvatar(playerData.color || '#f97316'); group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, parts: group.userData.parts, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false }; }
+function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const built = _buildHumanoid(playerData.color || '#f97316', playerData.look); const group = built.group; group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, av: built.avatar, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false, og: true, spd: 0, vy: 0 }; flushAvatarPending(playerData.socketId); }
 function _buildAvatar(color) { return _buildHumanoid(color).group; }
 function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
-function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); }); remotePlayers = {}; }
-function netUpdateRemotes() { const LERP = 0.18; for (const rp of Object.values(remotePlayers)) { rp.group.position.lerp(rp.targetPos, LERP); let diff = rp.targetRY - rp.group.rotation.y; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; rp.group.rotation.y += diff * LERP; const { aL, aR, lL, lR } = rp.parts; if (rp.moving) { const sw = rp.anim; aL.rotation.x = sw; aR.rotation.x = -sw; lL.rotation.x = -sw; lR.rotation.x = sw; } else { aL.rotation.x = aR.rotation.x = lL.rotation.x = lR.rotation.x = 0; } } }
+function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); if (rp.av) CrixAvatar.dispose(rp.av); }); remotePlayers = {}; }
+function netUpdateRemotes() { const LERP = 0.18, now = performance.now(), dt = Math.min(0.1, Math.max(0.001, (now - (netUpdateRemotes._t || now)) / 1000)); netUpdateRemotes._t = now;
+  for (const rp of Object.values(remotePlayers)) {
+    const px = rp.group.position.x, py = rp.group.position.y, pz = rp.group.position.z;
+    rp.group.position.lerp(rp.targetPos, LERP); let diff = rp.targetRY - rp.group.rotation.y; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; rp.group.rotation.y += diff * LERP;
+    // La velocidad se estima con lo que realmente se movió el avatar (studs/s; la vertical en studs por tick de 60 Hz, como gVelY).
+    const k = 1 - Math.exp(-dt * 12), sp = Math.hypot(rp.group.position.x - px, rp.group.position.z - pz) / dt, vy = (rp.group.position.y - py) / dt / 60;
+    rp.spd += (sp - rp.spd) * k; rp.vy += (vy - rp.vy) * k;
+    if (rp.av) CrixAvatar.update(rp.av, dt, { speed: rp.moving ? rp.spd : (rp.spd < 1.5 ? 0 : rp.spd), onGround: rp.og !== false, vy: rp.vy });
+  } }
 let _netPatchApplied = false;
 function _patchGameLoopWithNet() { if (_netPatchApplied) return; _netPatchApplied = true; (function netFrame() { requestAnimationFrame(netFrame); if (!gPlayer || !gRenderer) return; netSendMove(); netUpdateRemotes(); })(); }
 const _origPlayMap = window.playMap;
@@ -5083,6 +5205,7 @@ function _handleExtendedCommand(run, message) {
   if (c === 'player') { _playerCommand(payload); return true; }
   if (c === 'guiSet') { if (typeof guiSet === 'function') guiSet(String(payload.name||''), String(payload.prop||''), payload.value); return true; }
   if (c === 'remote') { if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('script_remote', {name:String(payload.name||'').slice(0,40), data:payload.data}); return true; }
+  if (c === 'avatar') { _avatarFromScript(String(payload.target || 'me'), payload.cmd); return true; }
   if (c === 'toast') { gameBanner(String(payload.text||''), Number(payload.seconds)||3); return true; }
   return false;
 }

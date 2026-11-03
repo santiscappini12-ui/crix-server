@@ -1,4 +1,5 @@
 const express  = require('express');
+const CrixAvatar = require('./crix-avatar.js');   // validación compartida de avatares (la misma que usa el cliente)
 const http     = require('http');
 const { Server } = require('socket.io');
 const path     = require('path');
@@ -174,7 +175,7 @@ function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId])
 function gameChannel(mapId, instanceId) { return `game:${encodeURIComponent(mapId)}:${instanceId}`; }
 function getRoom(mapId, instanceId) {
   const key = roomKey(mapId, instanceId);
-  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, chat:[], worldParts:null, basePartIds:new Set(), changedPartIds:new Set(), removedPartIds:new Set(), physicsVelocities:{}, scriptStarted:false, scriptStatus:'stopped', pendingReset:false, commandTimes:[], watched:new Set(), appliedSeq:0, phys:null, collectedIds:new Set() };
+  if (!rooms[key]) rooms[key] = { mapId, instanceId, createdAt:Date.now(), players:{}, avatars:{}, npcs:{}, chat:[], worldParts:null, basePartIds:new Set(), changedPartIds:new Set(), removedPartIds:new Set(), physicsVelocities:{}, scriptStarted:false, scriptStatus:'stopped', pendingReset:false, commandTimes:[], watched:new Set(), appliedSeq:0, phys:null, collectedIds:new Set() };
   return rooms[key];
 }
 function roomPlayers(room) { return Object.values(room.players); }
@@ -208,9 +209,11 @@ function normalizeRoomPart(id, source = {}) {
 }
 
 function initializeRoomWorld(room, map) {
+  room.avatars={}; room.npcs={};
   room.worldParts={}; room.basePartIds=new Set(); room.changedPartIds=new Set(); room.removedPartIds=new Set(); room.physicsVelocities={};
   for(const [index,source] of (Array.isArray(map?.parts)?map.parts:[]).entries()){
-    if(!source||source.isNPC)continue;
+    if(source&&source.isNPC){const nid=String(source.id||`map-part-${index}`);room.npcs[nid]={id:nid,name:String(source.name||'NPC').slice(0,80),look:source.look&&typeof source.look==='object'?CrixAvatar.sanitizeLook(source.look,{}):null};continue;}
+    if(!source)continue;
     const id=String(source.id||`map-part-${index}`),part=normalizeRoomPart(id,source);
     room.worldParts[id]=part;room.basePartIds.add(id);
   }
@@ -276,6 +279,24 @@ function handleScriptRunnerMessage(message) {
   if(message.type==='playerCommand'){
     const target=roomPlayers(room).find(player=>String(player.userId)===String(message.userId));
     if(target)io.to(target.socketId).emit('server_player_cmd',{op:String(message.op||''),...(message.payload&&typeof message.payload==='object'?message.payload:{})});
+    return;
+  }
+  if(message.type==='avatarCommand'){
+    const diff=CrixAvatar.sanitizeCommand(message.cmd);if(!diff)return;
+    const raw=String(message.target??'').slice(0,120),keys=[];
+    if(raw==='*'||raw==='all'){for(const player of roomPlayers(room))keys.push(player.socketId);}
+    else{
+      const player=roomPlayers(room).find(item=>String(item.userId)===raw||String(item.socketId)===raw);
+      if(player)keys.push(player.socketId);
+      else for(const npc of Object.values(room.npcs||{}))if(npc.id===raw||npc.name===raw)keys.push('n:'+npc.id);
+    }
+    const channel=gameChannel(room.mapId,room.instanceId);
+    for(const key of keys.slice(0,64)){
+      const state=room.avatars[key]||(room.avatars[key]={});CrixAvatar.mergeState(state,diff);
+      if(JSON.stringify(state).length>24000){delete room.avatars[key];continue;}
+      if(key[0]!=='n'||key[1]!==':'){const pl=room.players[key];if(pl&&state.look)pl.look=CrixAvatar.sanitizeLook(state.look,pl.look);}
+      io.to(channel).emit('avatar_cmd',{target:key,diff});
+    }
     return;
   }
   if(message.type==='remoteOut'){
@@ -616,7 +637,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg',
+const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
@@ -818,6 +839,11 @@ app.post('/api/user/:id', (req, res) => {
         (typeof req.body.avatar !== 'string' || req.body.avatar.length > 180000 ||
          !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(req.body.avatar)))
       return res.status(400).json({ ok:false, err:'La foto debe ser JPG, PNG o WebP y no superar el límite permitido' });
+    if (req.body.look !== undefined) {
+      if (req.body.look === null) delete u.look;
+      else if (typeof req.body.look !== 'object' || JSON.stringify(req.body.look).length > 600) return res.status(400).json({ ok:false, err:'Aspecto de avatar inválido' });
+      else u.look = CrixAvatar.sanitizeLook(req.body.look, {});
+    }
     const allowed = ['bio','color','games','visits','following','liked','onlineAt','avatar'];
     if (actor.isAdmin) allowed.push('banned');
     allowed.forEach(k => { if (req.body[k] !== undefined) u[k] = req.body[k]; });
@@ -1946,6 +1972,7 @@ io.on('connection', socket => {
     const pd = {
       socketId: socket.id, userId: userId||socket.id,
       username: username.substring(0,30), color: color||'#5b8def',
+      look: CrixAvatar.sanitizeLook(user?.look && typeof user.look==='object' ? user.look : data?.look, {}),
       x:0,y:3,z:0, ry:0, anim:0, moving:false, onGround:false, mapId, instanceId, joinedAt:Date.now(),
     };
     room.players[socket.id] = pd;
@@ -1961,6 +1988,7 @@ io.on('connection', socket => {
     log('JOIN', `${username} → ${mapId} / ${instanceId}`);
     socket.emit('room_state', {
       players: roomPlayers(room).filter(p=>p.socketId!==socket.id),
+      avatars: room.avatars,
       chat: room.chat.slice(-30), mapId, instanceId,
       ...roomWorldSnapshot(room), scriptRuntime:room.scriptStatus,
     });
@@ -1980,11 +2008,30 @@ io.on('connection', socket => {
     p.ry=bounded(data?.ry,p.ry,-1000,1000);p.anim=bounded(data?.anim,p.anim,-10,10);p.moving=!!data?.moving;p.onGround=!!data?.onGround;
     sendRoomPlayersToRunner(room);
     socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
-      { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving });
+      { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving, og:p.onGround });
   });
 
   // Evento remoto LocalScript → Script de servidor (game.fireServer en el cliente, game.onClientEvent en el servidor).
   // Coleccionables compartidos: cuando alguien recoge una moneda, desaparece para todos en la sala.
+
+  // ── Avatares: huesos, animaciones, cara y accesorios ───────────────────────────────────────────────────────────
+  // Un cliente puede controlar SU PROPIO avatar (LocalScript, emotes); los Script de servidor controlan a cualquiera.
+  // Todo se valida con las reglas compartidas de crix-avatar.js, se guarda en room.avatars (para quien entra tarde) y se replica.
+  socket.on('avatar_self', data => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id]; if (!room || !player) return;
+    const now = Date.now(); player.avatarTimes = (player.avatarTimes || []).filter(time => now - time < 1000);
+    if (player.avatarTimes.length >= 20) return;                                     // 20 mensajes/s por jugador
+    player.avatarTimes.push(now);
+    const cmds = Array.isArray(data?.cmds) ? data.cmds.slice(0, 12) : [];
+    const state = room.avatars[socket.id] || (room.avatars[socket.id] = {});
+    const diffs = [];
+    for (const cmd of cmds) { const diff = CrixAvatar.sanitizeCommand(cmd); if (diff) { CrixAvatar.mergeState(state, diff); diffs.push(diff); } }
+    if (JSON.stringify(state).length > 24000) { delete room.avatars[socket.id]; return; }   // tope de tamaño por avatar
+    if (state.look) player.look = CrixAvatar.sanitizeLook(state.look, player.look);
+    for (const diff of diffs) socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('avatar_cmd', { target:socket.id, diff });
+  });
+
   socket.on('part_collect', data => {
     const meta = connSockets[socket.id]; if (!meta?.mapId) return;
     const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id] || !room.worldParts) return;
@@ -2113,7 +2160,7 @@ function leaveRoom(socket, mapId, instanceId) {
   const channel = gameChannel(mapId, instanceId);
   if (room.players[socket.id]) {
     socket.to(channel).emit('player_left', { socketId:socket.id });
-    delete room.players[socket.id];
+    delete room.players[socket.id]; delete room.avatars[socket.id];
   }
   if(Object.keys(room.players).length){sendRoomPlayersToRunner(room);}
   else{
@@ -2138,7 +2185,7 @@ setInterval(() => {
     for (const sid of Object.keys(room.players)) {
       const s = io.sockets.sockets.get(sid);
       if (!s||!s.connected) {
-        delete room.players[sid];
+        delete room.players[sid]; delete room.avatars[sid];
         removedPlayer=true;
         io.to(gameChannel(room.mapId, room.instanceId)).emit('player_left', { socketId:sid });
       }

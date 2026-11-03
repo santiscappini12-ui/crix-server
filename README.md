@@ -266,6 +266,38 @@ Todo lo que cambia en una partida online se ve igual para todos los jugadores de
 - Utilidades: `Vector3.new(x,y,z)` (add, sub, mul, dot, cross, lerp, distance, magnitude, unit), `math.lerp/clamp/dist/round/random(a,b)`.
 - Un error ya no apaga el script a la primera: se registra y solo se desactiva tras 10 errores seguidos. Límite de cambios al mundo: 300/s.
 
+### Avatares: huesos, cara y animaciones
+Todos los personajes (tu avatar, los demás jugadores y los NPC) usan el mismo esqueleto, definido en `crix-avatar.js` (se carga en el navegador y el servidor lo reutiliza para validar). Mide ~3.1 studs, igual que la caja de colisión.
+
+- **24 huesos con jerarquía real**: `Hips → Spine → Chest → Neck → Head (+ Jaw, EyeL, EyeR)`, `ShoulderL/R → UpperArmL/R → LowerArmL/R → HandL/R`, `UpperLegL/R → LowerLegL/R → FootL/R → ToesL/R`. Rotar un hueso mueve todo lo que cuelga de él. También valen alias (`cabeza`, `brazoDer`, `manoIzq`, `pieDer`, `LeftArm`…).
+- **Dos estilos con el mismo esqueleto**: `cartoon` (cuerpo redondeado de colores, pelo, ropa) y `stick` (monigote blanco con articulaciones visibles). Cada jugador elige el suyo en **Perfil → 🧍 Avatar** (vista previa 3D en vivo: estilo, colores de piel/camiseta/pantalón/zapatos/pelo/ojos, 7 peinados, expresión, tamaño). Se guarda en la cuenta y lo ven todos.
+- **Cara viva**: ojos con parpadeo y mirada, cejas, boca deformable, rubor. Expresiones: `neutral, happy, sad, angry, surprised, sleepy, wink, smug, scared, talk, dead`.
+- **Animación procedural por capas**: locomoción (reposo, caminar→correr según la velocidad real, salto, caída, amortiguación al aterrizar) + gestos encima + órdenes de script, todo mezclado con cuaterniones (transiciones suaves entre cualquier pose). Gestos: `wave, cheer, point, clap, dance, attack, punch, shrug, salute, sit, crouch, sleep, dead, swim, tpose, think, laugh` (también en español: `saludar, bailar, aplaudir, sentarse`…).
+- **Chat**: `/e bailar`, `/e wave`, `/e stop`, `/cara feliz`.
+
+**API para Script de servidor** (se replica a TODOS los jugadores de la instancia y la reciben también quienes entran tarde). `objetivo` = un jugador (objeto o userId), `'*'` (todos los jugadores) o el nombre/id de un NPC. Rotaciones en **grados**.
+```js
+game.setBone(jugador, 'Head', { rotation:{x:20, y:40, z:0}, duration:0.3 });   // rotar (con transición)
+game.setBone(jugador, 'UpperArmR', { rotation:[-90,0,0], mode:'add', weight:0.5 }); // 'add' se suma a la animación; 'set' la reemplaza
+game.setBone(jugador, 'Head',  { scale:2 });                    // agrandar una parte (número o [x,y,z])
+game.setBone(jugador, 'HandL', { offset:[0,0.3,0], color:'#ff0000', visible:true }); // mover, pintar, ocultar
+game.setPose('*', { Chest:[10,0,0], UpperArmL:{x:-80}, Head:{x:-15} }, { duration:0.4 }); // varios huesos a la vez
+game.playAnimation(jugador, 'dance', { speed:1.2 });            // loop:false + duration:3 para cortarlo solo
+game.stopAnimation(jugador);  game.resetBone(jugador, 'Head');  game.resetAvatar(jugador);
+game.setFace(jugador, 'angry', /*hablando*/ false);             // null = automática
+game.setLook(jugador, { style:'stick', skin:'#ffd9b3', shirt:'#e0554f', hair:'spiky', hairColor:'#222222', scale:1.2 });
+game.addAccessory(jugador, 'espada', 'HandR', { shape:'box', size:[0.12,1.8,0.12], offset:[0,-0.5,0.25], rotation:[0,0,0], color:'#dddddd', opacity:1, emissive:'#000000' });
+game.removeAccessory(jugador, 'espada');                        // formas: box, sphere, cylinder, cone, capsule (hasta 24 por avatar)
+game.setNpcWander('Guardia', false);                            // el NPC deja de pasear y se queda donde está
+```
+Constantes útiles: `game.BONES`, `game.ANIMATIONS`, `game.FACES`, `game.HAIRS`, `game.SHAPES`.
+
+**LocalScript / ▶ Probar**: `localPlayer.setBone(...)`, `localPlayer.setPose(...)`, `localPlayer.playAnimation(...)`, `setFace`, `setLook`, `addAccessory`, `removeAccessory`, `resetAvatar` controlan TU avatar y se replican a los demás (máx. 20 mensajes/s); `game.setBone(nombreNpc, ...)` en un LocalScript solo cambia lo que ves tú.
+
+**NPC**: ahora son personajes completos. Una parte NPC puede traer `look` (mismo formato que `setLook`); los NPC nuevos de la biblioteca ya traen uno. Los NPC pasean con un reloj compartido, así todos los jugadores los ven en el mismo lugar.
+
+**Seguridad y límites**: el servidor valida cada orden con las mismas reglas que el cliente (rotaciones ±3600°, posiciones ±20, escala 0.01–20, colores `#rrggbb`, nombres de hueso/animación conocidos), guarda como máximo 24 KB de estado por avatar y cuenta cada orden dentro del límite de 300 cambios/s del mundo. La apariencia (`look`) es cosmética: no cambia la caja de colisión.
+
 ### CrixScript (nuevo traductor)
 Reescrito con tokens (`crixscript.js`): ya no rompe cadenas ni comentarios, y soporta `if/elseif/else`, `while`, `for i = a, b, paso`, `for k, v in pairs/ipairs`, `repeat … until`, `function` anónimas / con nombre / `a.b.c` / `a:b`, tablas `{a = 1}` y `{1, 2, 3}`, `~=`, `..`, `and/or/not`, `nil`, `#`, `^`, `a, b = x, y` y `return a, b`. Incluye `table.insert/remove/concat/sort`, `string.format/sub/upper/lower/split/rep` y `os.time`. **Las listas empiezan en 0** (son arreglos de JavaScript).
 
