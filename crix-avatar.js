@@ -4,7 +4,7 @@
  *  Un único módulo que construye el MISMO avatar para el jugador local, los jugadores remotos y los NPC.
  *  El origen del grupo está en los PIES (y = 0 es el suelo) y mide ~3.05 studs, igual que la caja de colisión.
  *
- *  Esqueleto (22 huesos, jerarquía real: cada hueso rota alrededor de su articulación):
+ *  Esqueleto (24 huesos, jerarquía real: cada hueso rota alrededor de su articulación):
  *
  *     Root ─ Hips ─┬─ Spine ─ Chest ─┬─ Neck ─ Head ─┬─ Jaw
  *                  │                 │               ├─ EyeL / EyeR
@@ -14,8 +14,8 @@
  *                  ├─ UpperLegL ─ LowerLegL ─ FootL ─ ToesL
  *                  └─ UpperLegR ─ LowerLegR ─ FootR ─ ToesR
  *
- *  Estilos: 'cartoon' (cuerpo redondeado de colores) y 'stick' (monigote blanco con articulaciones visibles).
- *  Ambos comparten esqueleto, cara y animaciones: se puede cambiar de estilo en caliente.
+ *  Estilos: 'cartoon' (muñeco blando de colores) y 'stick' (el mismo muñeco en arcilla de un solo color, sin articulaciones).
+ *  Ambos comparten silueta, esqueleto, cara y animaciones: se puede cambiar de estilo en caliente.
  *
  *  Animación: poses procedurales por capas (locomoción + gesto + overrides de script) mezcladas con
  *  cuaterniones y suavizado exponencial. Los scripts pueden rotar/mover/escalar/ocultar/pintar cualquier hueso.
@@ -37,14 +37,14 @@
     ['Jaw',        'Head',      [0, 0.08, 0.20]],
     ['EyeL',       'Head',      [-0.17, 0.40, 0.42]],
     ['EyeR',       'Head',      [0.17, 0.40, 0.42]],
-    ['ShoulderL',  'Chest',     [-0.40, 0.46, 0]],
-    ['ShoulderR',  'Chest',     [0.40, 0.46, 0]],
-    ['UpperArmL',  'ShoulderL', [-0.12, 0, 0]],
-    ['UpperArmR',  'ShoulderR', [0.12, 0, 0]],
-    ['LowerArmL',  'UpperArmL', [0, -0.62, 0]],
-    ['LowerArmR',  'UpperArmR', [0, -0.62, 0]],
-    ['HandL',      'LowerArmL', [0, -0.58, 0]],
-    ['HandR',      'LowerArmR', [0, -0.58, 0]],
+    ['ShoulderL',  'Chest',     [-0.44, 0.46, 0]],
+    ['ShoulderR',  'Chest',     [0.42, 0.46, 0]],
+    ['UpperArmL',  'ShoulderL', [-0.27, 0, 0]],
+    ['UpperArmR',  'ShoulderR', [0.27, 0, 0]],
+    ['LowerArmL',  'UpperArmL', [0, -0.52, 0]],
+    ['LowerArmR',  'UpperArmR', [0, -0.52, 0]],
+    ['HandL',      'LowerArmL', [0, -0.44, 0]],
+    ['HandR',      'LowerArmR', [0, -0.44, 0]],
     ['UpperLegL',  'Hips',      [-0.24, -0.04, 0]],
     ['UpperLegR',  'Hips',      [0.24, -0.04, 0]],
     ['LowerLegL',  'UpperLegL', [0, -0.56, 0]],
@@ -78,19 +78,23 @@
   const FACES = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'sleepy', 'wink', 'smug', 'scared', 'talk', 'dead'];
   const HAIRS = ['none', 'short', 'spiky', 'long', 'bun', 'cap', 'mohawk'];
   const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'capsule'];
-  const DEFAULT_LOOK = { style: 'cartoon', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'short', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1 };
+  const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1 };
   const MAX_ACCESSORIES = 24;
+  // Todos los avatares son el muñeco de arcilla de un solo color (la referencia). Poner en false para volver a permitir 'cartoon'.
+  const FORCE_CLAY = true;
 
   const normalizeHex = (v, fallback) => (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) ? v : fallback;
+  // Aspecto obligatorio: muñeco de arcilla calvo, aunque el look guardado diga otra cosa.
+  function forceClay(o) { if (FORCE_CLAY) { o.style = 'stick'; o.hair = 'none'; } return o; }
   function sanitizeLook(src, base) {
     const o = Object.assign({}, base || DEFAULT_LOOK);
-    if (!src || typeof src !== 'object') return o;
+    if (!src || typeof src !== 'object') return forceClay(o);
     if (src.style === 'cartoon' || src.style === 'stick') o.style = src.style;
     for (const k of ['skin', 'shirt', 'pants', 'shoes', 'hairColor', 'eyes']) if (src[k] !== undefined) o[k] = src[k] === null ? null : normalizeHex(src[k], o[k]);
     if (HAIRS.includes(src.hair)) o.hair = src.hair;
     if (FACES.includes(src.face)) o.face = src.face;
     if (src.scale !== undefined) o.scale = clamp(num(src.scale, 1), 0.25, 4);
-    return o;
+    return forceClay(o);
   }
   const vec3 = (v, lo, hi, d = 0) => { const a = Array.isArray(v) ? v : (v && typeof v === 'object' ? [v.x, v.y, v.z] : null); return a ? [clamp(num(a[0], d), lo, hi), clamp(num(a[1], d), lo, hi), clamp(num(a[2], d), lo, hi)] : null; };
   // Propiedades de un hueso (rotación en GRADOS). Devuelve null si no hay nada válido.
@@ -158,6 +162,7 @@
   // ══ PARTE GRÁFICA (solo navegador, necesita THREE r128) ══════════════════════════════════════════════════════
   const THREE = global.THREE;
   if (!THREE) { global.CrixAvatarShared = Shared; return; }
+  const CLAY = 0xdcdad6;      // color del estilo 'stick' (muñeco de arcilla de un solo color)
   const BASE_SCALE = 0.83;   // el rig completo mide ~3.1 studs (caja de colisión del juego: 3.05)
 
   // ── Geometría (r128: no hay CapsuleGeometry) ──────────────────────────────────────────────────
@@ -177,6 +182,13 @@
       p.setXYZ(i, c.x + dir.x, c.y + dir.y, c.z + dir.z);
     }
     g.computeVertexNormals(); return g;
+  }
+  // Perfil de revolución suave (r, y) del tronco, de la entrepierna (y=-0.40) a la base del cuello (y=1.16) respecto del hueso Spine.
+  function torsoGeo() {
+    const prof = [[0, -0.40], [0.29, -0.36], [0.43, -0.20], [0.48, 0.02], [0.49, 0.28], [0.47, 0.55], [0.43, 0.80], [0.36, 1.00], [0.25, 1.12], [0, 1.18]];
+    const pts = new THREE.SplineCurve(prof.map(p => new THREE.Vector2(p[0], p[1]))).getPoints(56).map(v => new THREE.Vector2(Math.max(0, v.x), v.y));
+    pts[0].x = 0; pts[pts.length - 1].x = 0;
+    return new THREE.LatheGeometry(pts, 36);
   }
   const geoCache = {};
   function G(key, make) { return geoCache[key] || (geoCache[key] = make()); }
@@ -198,14 +210,13 @@
     av.mats.pants = new THREE.MeshPhongMaterial({ color: 0x3a4668, shininess: 15 });
     av.mats.shoes = new THREE.MeshPhongMaterial({ color: 0x22262e, shininess: 30 });
     av.mats.hair = new THREE.MeshPhongMaterial({ color: 0x3b2a1e, shininess: 40 });
-    av.mats.white = new THREE.MeshPhongMaterial({ color: 0xf5f7fa, shininess: 30 });
+    av.mats.white = new THREE.MeshPhongMaterial({ color: CLAY, shininess: 8 });
     av.mats.joint = new THREE.MeshPhongMaterial({ color: 0xb9c2d0, shininess: 40 });
     av.mats.eyeW = new THREE.MeshBasicMaterial({ color: 0xffffff });
     av.mats.eye = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.line = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.mouthIn = new THREE.MeshBasicMaterial({ color: 0x6a1d2a, side: THREE.DoubleSide });
-    av.mats.blush = new THREE.MeshBasicMaterial({ color: 0xff8a8a, transparent: true, opacity: 0.45 });
-    av.pose = {}; av.target = {}; av.layers = { anim: null, emote: null, over: {} };
+        av.pose = {}; av.target = {}; av.layers = { anim: null, emote: null, over: {} };
     av.state = { t: Math.random() * 10, blinkT: 2 + Math.random() * 3, blink: 0, face: look.face, faceT: 0, talk: 0, loco: 'idle', locoBlend: 0, phase: 0, landT: 0, lastGround: true, lastVy: 0, sitting: false };
     for (const n of BONE_NAMES) { av.pose[n] = { q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(1, 1, 1) }; }
     buildFace(av);
@@ -224,50 +235,32 @@
   }
 
   // Cuerpo: se vuelve a generar al cambiar de estilo.
+  // Ambos estilos comparten la MISMA silueta de muñeco blando (cabeza grande y redonda, torso en forma de pera, brazos y
+  // piernas gruesos que terminan en manoplas y pies redondos, sin cuello visible). Solo cambia el color:
+  //   'cartoon' → piel / camisa / pantalón / zapatos          'stick' → todo de un solo color de arcilla, sin articulaciones.
+  // Cada pieza es un elipsoide o una cápsula que nace en la articulación de su hueso, así que al doblarse las uniones
+  // quedan redondeadas y sin huecos.
   function buildBody(av, style) {
     clearTag(av, 'body'); clearTag(av, 'joint'); clearTag(av, 'hair');
-    const M = av.mats;
-    if (style === 'stick') {
-      const lim = M.white, jt = M.joint;
-      const limb = (bone, len, r, mat = lim) => addMesh(av, bone, G('cap' + r + 'x' + len, () => capsuleGeo(r, len - r * 2 + 0.001, 8)), mat, [0, -len / 2, 0]);
-      addMesh(av, 'Hips', G('sHips', () => new THREE.SphereGeometry(0.24, 14, 10)), lim, [0, 0.0, 0], null, [1.15, 0.8, 0.85]);
-      addMesh(av, 'Spine', G('sSpine', () => capsuleGeo(0.20, 0.34, 10)), lim, [0, 0.20, 0]);
-      addMesh(av, 'Chest', G('sChest', () => capsuleGeo(0.27, 0.34, 12)), lim, [0, 0.22, 0], null, [1.25, 1, 0.8]);
-      addMesh(av, 'Neck', G('sNeck', () => capsuleGeo(0.09, 0.10, 8)), lim, [0, 0.07, 0]);
-      addMesh(av, 'Head', G('sHead', () => new THREE.SphereGeometry(0.50, 24, 18)), lim, [0, 0.50, 0], null, [1, 0.96, 0.98]);
-      limb('UpperArmL', 0.62, 0.095); limb('UpperArmR', 0.62, 0.095); limb('LowerArmL', 0.58, 0.085); limb('LowerArmR', 0.58, 0.085);
-      limb('UpperLegL', 0.56, 0.12); limb('UpperLegR', 0.56, 0.12); limb('LowerLegL', 0.54, 0.105); limb('LowerLegR', 0.54, 0.105);
-      for (const s of ['L', 'R']) {
-        addMesh(av, 'Hand' + s, G('sHand', () => new THREE.SphereGeometry(0.12, 12, 10)), lim, [0, -0.08, 0], null, [1, 1.15, 0.8]);
-        addMesh(av, 'Foot' + s, G('sFoot', () => roundedBoxGeo(0.26, 0.14, 0.52, 0.06)), lim, [0, -0.04, 0.12]);
-        for (const b of ['ShoulderL', 'ShoulderR', 'LowerArmL', 'LowerArmR', 'LowerLegL', 'LowerLegR', 'HandL', 'HandR']) { /* articulaciones se agregan abajo */ }
-      }
-      // Articulaciones visibles (esferas grises): hombros, codos, muñecas, caderas, rodillas, tobillos, cuello y columna.
-      const J = (bone, r, pos) => addMesh(av, bone, G('jt' + r, () => new THREE.SphereGeometry(r, 12, 10)), jt, pos || [0, 0, 0], null, null, 'joint');
-      for (const s of ['L', 'R']) { J('UpperArm' + s, 0.13); J('LowerArm' + s, 0.115); J('Hand' + s, 0.095); J('UpperLeg' + s, 0.15); J('LowerLeg' + s, 0.13); J('Foot' + s, 0.115); }
-      J('Neck', 0.12); J('Spine', 0.17, [0, 0.12, 0]); J('Chest', 0.15, [0, 0.0, 0]);
-    } else {
-      // Cartoon: cabeza grande, cuerpo redondeado, ropa de colores.
-      const rb = (w, h, d, r) => G('rb' + [w, h, d, r].join(), () => roundedBoxGeo(w, h, d, r, 4));
-      addMesh(av, 'Hips', rb(0.80, 0.42, 0.52, 0.17), M.pants, [0, 0.02, 0]);
-      addMesh(av, 'Spine', rb(0.78, 0.50, 0.50, 0.19), M.shirt, [0, 0.20, 0]);
-      addMesh(av, 'Chest', rb(0.96, 0.62, 0.56, 0.22), M.shirt, [0, 0.24, 0]);
-      addMesh(av, 'Neck', G('cNeck', () => capsuleGeo(0.11, 0.08, 8)), M.skin, [0, 0.07, 0]);
-      addMesh(av, 'Head', G('cHead', () => new THREE.SphereGeometry(0.52, 28, 20)), M.skin, [0, 0.52, 0], null, [1.04, 0.98, 1.0]);
-      for (const s of ['L', 'R']) {
-        const sx = s === 'L' ? -1 : 1;
-        addMesh(av, 'Shoulder' + s, G('cSh', () => new THREE.SphereGeometry(0.19, 14, 10)), M.shirt, [0, 0, 0]);
-        addMesh(av, 'UpperArm' + s, G('cUA', () => capsuleGeo(0.14, 0.42, 10)), M.shirt, [0, -0.28, 0]);
-        addMesh(av, 'LowerArm' + s, G('cLA', () => capsuleGeo(0.125, 0.36, 10)), M.skin, [0, -0.27, 0]);
-        addMesh(av, 'Hand' + s, G('cHd', () => new THREE.SphereGeometry(0.16, 14, 12)), M.skin, [0, -0.10, 0], null, [1, 1.1, 0.85]);
-        addMesh(av, 'Hand' + s, G('cTh', () => new THREE.SphereGeometry(0.06, 8, 8)), M.skin, [sx * -0.10, -0.06, 0.07]); // pulgar
-        addMesh(av, 'UpperLeg' + s, G('cUL', () => capsuleGeo(0.17, 0.36, 10)), M.pants, [0, -0.28, 0]);
-        addMesh(av, 'LowerLeg' + s, G('cLL', () => capsuleGeo(0.15, 0.32, 10)), M.pants, [0, -0.27, 0]);
-        addMesh(av, 'Foot' + s, rb(0.32, 0.20, 0.50, 0.09), M.shoes, [0, -0.02, 0.10]);
-        addMesh(av, 'Toes' + s, G('cToe', () => new THREE.SphereGeometry(0.15, 10, 8)), M.shoes, [0, 0.02, 0.0], null, [1.05, 0.7, 0.9]);
-      }
-      // sombra/cinturón
-      addMesh(av, 'Hips', rb(0.84, 0.10, 0.56, 0.05), M.shoes, [0, 0.21, 0]);
+    const M = av.mats, clay = style === 'stick';
+    const C = clay ? { skin: M.white, shirt: M.white, pants: M.white, shoes: M.white } : { skin: M.skin, shirt: M.shirt, pants: M.pants, shoes: M.shoes };
+    const ell = (bone, mat, pos, r) => addMesh(av, bone, G('uSph', () => new THREE.SphereGeometry(1, 28, 20)), mat, pos, null, r);   // elipsoide de radios r
+    // cápsula colgando de la articulación: el cilindro baja `len` y las dos tapas redondeadas la suavizan
+    const cap = (bone, mat, r, len, dy = 0) => addMesh(av, bone, G('pc' + r + 'x' + len, () => capsuleGeo(r, len, 14)), mat, [0, -len / 2 - dy, 0]);
+    // tronco: una sola pieza lisa en forma de huevo/pera (sin anillos ni pliegues), colgada del hueso Spine
+    addMesh(av, 'Spine', G('torso', () => torsoGeo()), C.shirt, [0, 0, 0], null, [1, 1, 0.76]);
+    if (!clay) ell('Hips', C.pants, [0, -0.02, 0], [0.49, 0.30, 0.37]);   // parte baja con el color del pantalón
+    ell('Neck',  C.skin,  [0, 0.06, 0],  [0.24, 0.20, 0.22]);
+    addMesh(av, 'Head', G('cHead', () => new THREE.SphereGeometry(0.52, 32, 24)), C.skin, [0, 0.52, 0], null, [1.06, 1.0, 1.02]);
+    for (const s of ['L', 'R']) {
+      ell('Shoulder' + s, C.shirt, [0.0, -0.02, 0], [0.20, 0.19, 0.19]);
+      cap('UpperArm' + s, C.shirt, 0.20, 0.32, 0.05);
+      cap('LowerArm' + s, C.skin,  0.18, 0.26);
+      ell('Hand' + s, C.skin, [0, -0.12, 0], [0.19, 0.22, 0.17]);   // manopla redondeada
+      cap('UpperLeg' + s, C.pants, 0.22, 0.56);
+      cap('LowerLeg' + s, C.pants, 0.21, 0.33);
+      ell('Foot' + s, C.shoes, [0, -0.02, 0.06], [0.215, 0.15, 0.30]);
+      ell('Toes' + s, C.shoes, [0, 0.0, 0.02],   [0.19, 0.10, 0.16]);
     }
     buildHair(av, av.look.hair);
   }
@@ -285,7 +278,6 @@
       lid.scale.set(1, 1.2, 0.6); lid.userData.tag = 'face'; lid.position.z = 0.012; lid.rotation.x = -0.0; eyeBone.add(lid); lid.visible = false;
       eyes[s] = { white, pupil, glint, lid, bone: eyeBone };
       const brow = new THREE.Mesh(G('brow', () => capsuleGeo(0.032, 0.15, 6)), M.hair); brow.rotation.z = Math.PI / 2; brow.position.set(sx * 0.17, 0.60, 0.455); brow.userData.tag = 'face'; F.add(brow); brows[s] = brow;
-      const blush = new THREE.Mesh(G('blush', () => new THREE.CircleGeometry(0.07, 12)), M.blush); blush.position.set(sx * 0.29, 0.24, 0.43); blush.lookAt(sx * 0.5, 0.2, 1.2); blush.userData.tag = 'face'; F.add(blush); av.parts['blush' + s] = blush;
     }
     // Boca: línea (tubo) con curva editable + interior oscuro para abierta
     const mouthGroup = new THREE.Group(); mouthGroup.position.set(0, 0.15, 0.475); F.add(mouthGroup);
@@ -343,7 +335,7 @@
   function applyLook(av, look) {
     av.look = sanitizeLook(look, av.look);
     const L = av.look, M = av.mats;
-    M.skin.color.set(L.skin); M.pants.color.set(L.pants); M.shoes.color.set(L.shoes); M.hair.color.set(L.hairColor); M.eye.color.set(L.eyes);
+    M.skin.color.set(L.style === 'stick' ? CLAY : L.skin); M.pants.color.set(L.pants); M.shoes.color.set(L.shoes); M.hair.color.set(L.hairColor); M.eye.color.set(L.eyes);
     const shirt = L.shirt || (av.userColor || '#5b8def'); M.shirt.color.set(shirt);
     if (av.style !== L.style) { av.style = L.style; buildBody(av, L.style); }
     else buildHair(av, L.hair);
@@ -365,7 +357,7 @@
     const b = sin(t * 1.8), k = sin(t * 0.9);
     return { Hips: [0, 0, 0], _y: b * 0.015, Spine: [0.03 + b * 0.015, 0, 0], Chest: [0.02 + b * 0.02, k * 0.03, 0], Neck: [-0.03, k * 0.06, 0], Head: [0.02, -k * 0.05, 0],
       ShoulderL: [0, 0, 0.04 + b * 0.01], ShoulderR: [0, 0, -0.04 - b * 0.01],
-      UpperArmL: [0.05 + b * 0.02, 0, 0.08], UpperArmR: [0.05 + b * 0.02, 0, -0.08], LowerArmL: [-0.14, 0, 0], LowerArmR: [-0.14, 0, 0], HandL: [0, 0, 0.05], HandR: [0, 0, -0.05],
+      UpperArmL: [0.05 + b * 0.02, 0, 0.10], UpperArmR: [0.05 + b * 0.02, 0, -0.10], LowerArmL: [-0.14, 0, 0], LowerArmR: [-0.14, 0, 0], HandL: [0, 0, 0.05], HandR: [0, 0, -0.05],
       UpperLegL: [0, 0, 0.02], UpperLegR: [0, 0, -0.02], LowerLegL: [0.02, 0, 0], LowerLegR: [0.02, 0, 0], FootL: [0, 0, 0], FootR: [0, 0, 0] };
   }
   // Ciclo de marcha/carrera: fase p en [0, 2π). amp y lean dependen de la velocidad (0..1 caminar, 1..2 correr).
@@ -377,7 +369,7 @@
     return { _y: -0.02 + bob - smooth(0.0, 0.05, r), Hips: [lean * 0.4, sin(p) * 0.12 * smooth(1, 0.6, r), cc * 0.05],
       Spine: [lean * 0.5, -sin(p) * 0.16, -cc * 0.03], Chest: [lean * 0.7, -sin(p) * 0.18, 0], Neck: [-lean * 0.6, sin(p) * 0.06, 0], Head: [-lean * 0.4, sin(p) * 0.05, 0],
       ShoulderL: [0, 0, 0.03], ShoulderR: [0, 0, -0.03],
-      UpperArmL: [s2 * armAmp, 0, 0.10], UpperArmR: [s * armAmp, 0, -0.10],
+      UpperArmL: [s2 * armAmp, 0, 0.12], UpperArmR: [s * armAmp, 0, -0.12],
       LowerArmL: [-(0.35 + Math.max(0, -s2) * 0.7 * r + r * 0.5), 0, 0], LowerArmR: [-(0.35 + Math.max(0, -s) * 0.7 * r + r * 0.5), 0, 0], HandL: [0, 0, 0], HandR: [0, 0, 0],
       UpperLegL: [s * legAmp, 0, 0.02], UpperLegR: [s2 * legAmp, 0, -0.02],
       LowerLegL: [kneeL * (cc > 0 ? 1 : 0.35), 0, 0], LowerLegR: [kneeR * (c2 > 0 ? 1 : 0.35), 0, 0],
@@ -526,7 +518,6 @@
       e.bone.scale.set(1, Math.max(0.08, 1 - closeAmt * 0.92 + Math.max(0, -cur.lid) * 0.25), 1);
       e.pupil.position.x = lx; e.pupil.position.y = ly; e.glint.position.x = 0.025 + lx; e.glint.position.y = 0.03 + ly;
       f.brows[s].position.y = 0.60 + cur.browY + (name === 'wink' && s === 'R' ? -0.03 : 0); f.brows[s].rotation.z = Math.PI / 2 + sx * cur.browA * 0.55;   // browA > 0 (enojo): extremo interior hacia abajo
-      av.parts['blush' + s].material.opacity = 0.45 * clamp(cur.blushA * 2, 0, 1);
     }
     if (Math.abs(cur.open - (f._lo ?? -1)) > 0.01 || Math.abs(cur.curve - (f._lc ?? -9)) > 0.01 || Math.abs(cur.width - (f._lw ?? -1)) > 0.003) { f._lo = cur.open; f._lc = cur.curve; f._lw = cur.width; updateMouth(av); }
   }
