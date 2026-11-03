@@ -147,6 +147,46 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 .hub-history-btn:disabled{opacity:.4;cursor:default;}
 .hub-snap{width:72px;padding:3px 5px;font-size:10px;}
 .hub-explorer-search{margin:7px 7px 3px;width:calc(100% - 14px);font-size:11px;padding:6px 8px;}
+/* ═══ ASISTENTE IA (ventana flotante del Hub) ═══ */
+#ai-win{position:fixed;z-index:550;left:0;top:0;width:390px;height:540px;min-width:300px;min-height:240px;max-width:calc(100vw - 8px);max-height:calc(100vh - 8px);display:none;flex-direction:column;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.55);overflow:hidden;resize:both;font-family:var(--font);}
+#ai-win.open.studio-on{display:flex;}
+#ai-win.min{height:auto!important;min-height:0;resize:none;}
+#ai-win.min #ai-log,#ai-win.min #ai-foot,#ai-win.min #ai-chips{display:none;}
+#ai-head{display:flex;align-items:center;gap:6px;padding:7px 8px 7px 12px;background:var(--bg2);border-bottom:1px solid var(--border);cursor:grab;user-select:none;touch-action:none;flex-shrink:0;}
+#ai-head:active{cursor:grabbing;}
+#ai-head .ai-title{font:800 12px var(--display);letter-spacing:.5px;color:var(--text);}
+#ai-model{font-size:9px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;}
+#ai-head .ai-sp{flex:1;}
+.ai-ib{width:26px;height:24px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text2);cursor:pointer;font-size:12px;line-height:1;padding:0;}
+.ai-ib:hover{color:var(--text);border-color:var(--acc);}
+#ai-log{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;min-height:0;-webkit-overflow-scrolling:touch;}
+.ai-m{max-width:92%;padding:7px 10px;border-radius:10px;font-size:12px;line-height:1.5;word-break:break-word;}
+.ai-m.user{align-self:flex-end;background:var(--acc);color:#fff;border-bottom-right-radius:3px;white-space:pre-wrap;}
+.ai-m.bot{align-self:flex-start;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-bottom-left-radius:3px;}
+.ai-m.err{align-self:stretch;background:rgba(255,59,48,.12);border:1px solid rgba(255,59,48,.45);color:var(--text);}
+.ai-m.sys{align-self:stretch;background:transparent;border:1px dashed var(--border);color:var(--text2);font-size:11px;}
+.ai-m pre{margin:6px 0;padding:7px 9px;background:var(--bg);border:1px solid var(--border);border-radius:6px;overflow-x:auto;font:11px/1.45 ui-monospace,Consolas,monospace;white-space:pre;}
+.ai-m code{font:11px ui-monospace,Consolas,monospace;background:var(--bg);padding:1px 4px;border-radius:4px;}
+.ai-res{margin-top:6px;display:flex;flex-direction:column;gap:3px;}
+.ai-res div{font-size:11px;color:var(--text2);padding:3px 7px;border-radius:5px;background:var(--bg3);}
+.ai-res div.ok{border-left:3px solid var(--green);}
+.ai-res div.bad{border-left:3px solid var(--red,#ff3b30);}
+.ai-undo{margin-top:6px;font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;}
+.ai-undo:hover{border-color:var(--acc);}
+.ai-typing{display:inline-block;font-size:11px;color:var(--text2);}
+.ai-typing::after{content:'';display:inline-block;width:1.2em;text-align:left;animation:aiDots 1.2s steps(4,end) infinite;}
+@keyframes aiDots{0%{content:'';}25%{content:'.';}50%{content:'..';}75%{content:'...';}}
+#ai-chips{display:flex;flex-wrap:wrap;gap:5px;padding:0 10px 8px;flex-shrink:0;}
+#ai-chips button{font-size:10px;padding:4px 8px;border-radius:12px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;}
+#ai-chips button:hover{color:var(--text);border-color:var(--acc);}
+#ai-foot{display:flex;gap:6px;padding:8px;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0;align-items:flex-end;}
+#ai-input{flex:1;resize:none;min-height:34px;max-height:120px;padding:7px 9px;font-size:12px;line-height:1.4;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:var(--font);outline:none;}
+#ai-input:focus{border-color:var(--acc);}
+#ai-send{height:34px;min-width:38px;border-radius:8px;border:none;background:var(--acc);color:#fff;font-size:14px;cursor:pointer;flex-shrink:0;}
+#ai-send.stop{background:var(--red,#ff3b30);}
+#ai-send:disabled{opacity:.45;cursor:default;}
+#ai-btn.active{border-color:var(--acc);color:var(--text);}
+@media (max-width:640px){#ai-win{left:6px!important;right:6px!important;top:auto!important;bottom:6px!important;width:auto!important;height:62vh!important;max-width:none;resize:none;}#ai-win.min{height:auto!important;}#ai-head{cursor:default;}}
 #stu-toolbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
 .tb-row{display:flex;flex-wrap:nowrap;overflow-x:auto;align-items:center;gap:2px;padding:3px 6px;}
 .tb-row::-webkit-scrollbar{height:2px;}
@@ -692,6 +732,7 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
   <input class="hub-project-name" id="hub-project-name" value="Mi Primer Mapa" aria-label="Nombre del proyecto" onchange="setStudioProjectName(this.value)">
   <span class="hub-hint">RMB orbitar · Shift+arrastrar desplazar · rueda acercar · Ctrl+Z deshacer · F enfocar</span>
   <div class="hub-actions">
+    <button class="st-btn" id="ai-btn" onclick="aiToggle()" title="Asistente de IA: edita el mapa, los scripts y la interfaz por vos">🤖 Asistente</button>
     <button class="st-btn" id="team-btn" onclick="teamOpenModal()" title="Equipo del proyecto">👥 Equipo<span id="team-pill"></span></button>
     <button class="hub-history-btn" id="hub-undo" onclick="studioUndo()" title="Deshacer (Ctrl+Z)" disabled>↶</button>
     <button class="hub-history-btn" id="hub-redo" onclick="studioRedo()" title="Rehacer (Ctrl+Y)" disabled>↷</button>
@@ -868,6 +909,21 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
   <input type="file" id="gui-img-file" accept="image/*" style="display:none" onchange="guiEdPickImage(event)">
 </div>
 <!-- ═══ CODE EDITOR ═══ -->
+<div id="ai-win" role="dialog" aria-label="Asistente de IA">
+  <div id="ai-head">
+    <span class="ai-title">🤖 ASISTENTE</span><span id="ai-model"></span><span class="ai-sp"></span>
+    <button class="ai-ib" onclick="aiSave()" title="Guardar el proyecto">💾</button>
+    <button class="ai-ib" onclick="aiClear()" title="Nueva conversación">🗑</button>
+    <button class="ai-ib" onclick="aiMinimize()" title="Minimizar" id="ai-min">–</button>
+    <button class="ai-ib" onclick="aiToggle(false)" title="Cerrar">✕</button>
+  </div>
+  <div id="ai-log"></div>
+  <div id="ai-chips"></div>
+  <div id="ai-foot">
+    <textarea id="ai-input" rows="1" maxlength="4000" placeholder="Pedile algo: “agregá una torre”, “script de lava”…" onkeydown="aiKey(event)" oninput="aiGrow(this)"></textarea>
+    <button id="ai-send" onclick="aiSend()" title="Enviar (Enter)">➤</button>
+  </div>
+</div>
 <div id="code-overlay">
 <div id="code-hd">
   <div id="code-tabs-bar"></div>
@@ -6994,5 +7050,458 @@ function appearanceFields(d) {
   <div id="gp-actions" class="mo-btns"></div>
 </div>
 </div>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// ASISTENTE IA DEL CRIX HUB
+// Ventana flotante (abrible/cerrable, movible, redimensionable) conectada a /api/ai/chat.
+// El modelo contesta con bloques ```crix:accion ...``` y acá se validan y se aplican
+// directo sobre el estado del editor (stParts, stScripts, stLighting, stSettings, stGuis).
+// Como los cambios pasan por el mismo estado que usa el editor, también viajan por el
+// modo equipo, el deshacer (Ctrl+Z) y el guardado normal.
+// ═══════════════════════════════════════════════════════════════════════════
+const crixAi = { busy:false, mapId:null, msgs:[], status:null, ctl:null, lastUndo:null, seq:0, t0:0, timer:null, restored:false };
+const AI_CHIPS = ['Agregá una torre de 10 pisos con escalera', 'Hacé un script de lava que mate al tocarla', 'Creá un HUD con vida y monedas', 'Poné un atardecer con niebla'];
+const AI_PART_TYPES = ['Block','Sphere','Cylinder','Wedge','TrussPart','Spawn'];
+const AI_BEHAVIORS = ['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'];
+const AI_GUI_ACTIONS = ['none','toggleGui','showGui','hideGui','teleport','respawn','message','exit'];
+const AI_MAX_PARTS = 2000;
+
+function aiEl(id) { return document.getElementById(id); }
+function aiNum(v, d, lo, hi) { v = Number(v); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; }
+function aiHex(c, d) { c = String(c == null ? '' : c).trim(); return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c) ? c : d; }
+function aiBool(v, d) { return typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : d; }
+function aiId() { return 'ai' + Date.now().toString(36) + (++crixAi.seq).toString(36); }
+function aiReady() { return typeof stScene !== 'undefined' && !!stScene && !!stMapId; }
+
+// ── Persistencia local de la conversación (una por proyecto) ──
+function aiChatKey() { return 'crix_ai_chat_' + stMapId; }
+function aiLoadChat() {
+  crixAi.mapId = stMapId; crixAi.lastUndo = null; let m = [];
+  try { m = JSON.parse(localStorage.getItem(aiChatKey()) || '[]'); } catch {}
+  crixAi.msgs = Array.isArray(m) ? m.filter(x => x && (x.role === 'user' || x.role === 'assistant') && typeof x.content === 'string').slice(-30) : [];
+}
+function aiSaveChat() { if (!stMapId) return; try { localStorage.setItem(aiChatKey(), JSON.stringify(crixAi.msgs.filter(m => !m.local).slice(-30))); } catch {} }
+
+// ── Ventana: posición, tamaño, abrir/cerrar, minimizar ──
+function aiPlace() {
+  const w = aiEl('ai-win'); let g = null;
+  try { g = JSON.parse(localStorage.getItem('crix_ai_win') || 'null'); } catch {}
+  const vw = innerWidth, vh = innerHeight;
+  if (!g || typeof g !== 'object') g = { x: vw - 410, y: 110, w: 390, h: Math.min(560, vh - 140) };
+  g.w = Math.max(300, Math.min(Number(g.w) || 390, vw - 8)); g.h = Math.max(240, Math.min(Number(g.h) || 540, vh - 8));
+  g.x = Math.max(0, Math.min(Number(g.x) || 0, vw - g.w)); g.y = Math.max(0, Math.min(Number(g.y) || 0, vh - 60));
+  w.style.left = g.x + 'px'; w.style.top = g.y + 'px'; w.style.width = g.w + 'px'; w.style.height = g.h + 'px';
+}
+function aiSaveGeo() {
+  const w = aiEl('ai-win'); if (!w.classList.contains('open') || w.classList.contains('min') || innerWidth <= 640 || !w.offsetWidth) return;
+  const r = w.getBoundingClientRect();
+  try { localStorage.setItem('crix_ai_win', JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) })); } catch {}
+}
+function aiToggle(force) {
+  const w = aiEl('ai-win'), open = typeof force === 'boolean' ? force : !w.classList.contains('open');
+  w.classList.toggle('open', open); aiEl('ai-btn').classList.toggle('active', open);
+  try { localStorage.setItem('crix_ai_open', open ? '1' : '0'); } catch {}
+  if (!open) return;
+  aiSync(); aiPlace();
+  if (stMapId && crixAi.mapId !== stMapId) aiLoadChat();
+  aiRender(); aiLoadStatus().then(aiRender);
+  setTimeout(() => { const i = aiEl('ai-input'); if (i && !i.disabled) i.focus(); }, 60);
+}
+function aiMinimize() {
+  const w = aiEl('ai-win'), min = w.classList.toggle('min');
+  aiEl('ai-min').textContent = min ? '▢' : '–'; aiEl('ai-min').title = min ? 'Restaurar' : 'Minimizar';
+  if (!min) { aiPlace(); const l = aiEl('ai-log'); l.scrollTop = l.scrollHeight; }
+}
+function aiSync() {
+  const on = !!aiEl('s-studio')?.classList.contains('active'), w = aiEl('ai-win');
+  w.classList.toggle('studio-on', on);
+  if (!on) return;
+  if (!crixAi.restored) { crixAi.restored = true; try { if (localStorage.getItem('crix_ai_open') === '1') aiToggle(true); } catch {} }
+  if (w.classList.contains('open')) { setTimeout(() => { if (stMapId && crixAi.mapId !== stMapId) { aiLoadChat(); aiRender(); } }, 700); }
+}
+function aiSave() { if (aiReady()) stuSave(); else showToast('Abrí un proyecto primero'); }
+function aiClear() {
+  if (crixAi.busy && crixAi.ctl) crixAi.ctl.abort();
+  crixAi.msgs = []; crixAi.lastUndo = null; aiSaveChat(); aiRender();
+}
+function aiGrow(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+function aiKey(e) { e.stopPropagation(); if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); aiSend(); } }
+
+async function aiLoadStatus() {
+  if (crixAi.status) return crixAi.status;
+  try { crixAi.status = await apiRequest('/api/ai/status'); const m = aiEl('ai-model'); if (m) { m.textContent = String(crixAi.status.model || '').split('/').pop(); m.title = crixAi.status.model || ''; } }
+  catch (e) { return { ok:false, configured:true, allowed:true, soft:true }; }
+  return crixAi.status;
+}
+
+// ── Pintado del chat ──
+function aiInline(s) {
+  return esc(s).replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>').replace(/\n{3,}/g, '\n\n').replace(/\n/g, '<br>');
+}
+function aiRenderText(t) {
+  t = String(t || '').replace(/```crix:[a-z_]+[^\n]*\n[\s\S]*?(?:```|$)/g, '');
+  let out = '', last = 0, m; const re = /```[\w+-]*\n([\s\S]*?)```/g;
+  while ((m = re.exec(t))) { out += aiInline(t.slice(last, m.index)); out += '<pre>' + esc(m[1].replace(/\n$/, '')) + '</pre>'; last = re.lastIndex; }
+  return (out + aiInline(t.slice(last))).replace(/^(<br>)+|(<br>)+$/g, '').trim();
+}
+function aiRender() {
+  const log = aiEl('ai-log'), inp = aiEl('ai-input'), send = aiEl('ai-send'); if (!log) return;
+  if (stMapId && crixAi.mapId !== stMapId) aiLoadChat();
+  const st = crixAi.status, blocked = !!st && (st.configured === false || st.allowed === false);
+  const visible = crixAi.msgs.filter(m => !m.hidden);
+  let h = '';
+  if (st && st.configured === false) h += '<div class="ai-m sys">⚙️ El asistente todavía no está conectado a un modelo. En el servidor hay que definir <code>CRIX_AI_BASE_URL</code> (y <code>CRIX_AI_MODEL</code> / <code>CRIX_AI_API_KEY</code> si hacen falta). Está explicado en el README.</div>';
+  else if (st && st.allowed === false) h += '<div class="ai-m sys">🔒 El asistente está limitado a cuentas administradoras en este servidor.</div>';
+  else if (!visible.length) h += '<div class="ai-m sys">Contame qué querés hacer y lo edito directo en el Hub: piezas, scripts, luces, ajustes del juego e interfaz. Los cambios se pueden deshacer con Ctrl+Z y se guardan con 💾.</div>';
+  crixAi.msgs.forEach(m => {
+    if (m.hidden) return;
+    if (m.role === 'user') { h += '<div class="ai-m user">' + esc(m.content) + '</div>'; return; }
+    if (m.err) { h += '<div class="ai-m err">' + esc(m.content) + '</div>'; return; }
+    if (m.local) { h += '<div class="ai-m sys">' + esc(m.content) + '</div>'; return; }
+    const body = aiRenderText(m.content);
+    let r = '';
+    if (m.results && m.results.length) r = '<div class="ai-res">' + m.results.map(x => '<div class="' + (x.ok ? 'ok' : 'bad') + '">' + (x.ok ? '✅ ' : '⚠️ ') + esc(x.text) + '</div>').join('') + '</div>';
+    const undo = crixAi.lastUndo && crixAi.lastUndo.msg === m ? '<button class="ai-undo" onclick="aiUndo()">↶ Deshacer estos cambios</button>' : '';
+    h += '<div class="ai-m bot">' + (body || (r ? '' : '…')) + r + undo + '</div>';
+  });
+  if (crixAi.busy) h += '<div class="ai-m bot"><span class="ai-typing" id="ai-typing">Trabajando</span></div>';
+  log.innerHTML = h; log.scrollTop = log.scrollHeight;
+  const chips = aiEl('ai-chips');
+  if (!visible.length && !crixAi.busy && !blocked) { chips.innerHTML = AI_CHIPS.map(c => '<button onclick="aiChip(this)">' + esc(c) + '</button>').join(''); chips.style.display = 'flex'; } else chips.style.display = 'none';
+  inp.disabled = blocked; send.disabled = blocked;
+  send.textContent = crixAi.busy ? '■' : '➤'; send.classList.toggle('stop', crixAi.busy); send.title = crixAi.busy ? 'Detener' : 'Enviar (Enter)';
+}
+function aiChip(btn) { const i = aiEl('ai-input'); i.value = btn.textContent; aiGrow(i); aiSend(); }
+
+// ── Contexto que ve el modelo ──
+function aiContext() {
+  try { const ov = aiEl('code-overlay'); if (ov && ov.classList.contains('open')) saveActiveScript(); } catch {}
+  const m = (getMaps() || {})[stMapId] || {}, r2 = n => Math.round((Number(n) || 0) * 100) / 100, L = [];
+  L.push('Nombre del proyecto: ' + (m.name || 'Sin nombre'));
+  L.push('Ajustes del juego: ' + JSON.stringify(stSettings || {}));
+  L.push('Iluminación: ' + JSON.stringify(stLighting || {}));
+  if (selPart && selPart.data) L.push('Pieza seleccionada ahora: ' + (selPart.data.name || selPart.data.id));
+  L.push('PIEZAS (' + stParts.length + '), una por línea:');
+  const MAX = 250;
+  stParts.slice(0, MAX).forEach(e => {
+    const d = e.data, o = { id: d.id, name: d.name, type: d.type, x: r2(d.x), y: r2(d.y), z: r2(d.z), sx: r2(d.sx), sy: r2(d.sy), sz: r2(d.sz) };
+    if (d.rx || d.ry || d.rz) { o.rx = r2(d.rx); o.ry = r2(d.ry); o.rz = r2(d.rz); }
+    o.color = d.color; if (d.material && d.material !== 'SmoothPlastic') o.material = d.material;
+    if (d.anchored === false) o.anchored = false; if (d.canCollide === false) o.canCollide = false; if (d.transparent) o.transparent = d.transparent;
+    if (d.behavior && d.behavior !== 'none') { o.behavior = d.behavior; o.behaviorValue = d.behaviorValue; }
+    if (d.target) o.target = d.target; if (d.isNPC) o.npc = true; if (d.type === 'ImportedMesh') o.mesh = true;
+    L.push(JSON.stringify(o));
+  });
+  if (stParts.length > MAX) L.push('(… y ' + (stParts.length - MAX) + ' piezas más sin listar)');
+  L.push('SCRIPTS (' + stScripts.length + '):');
+  let budget = 14000;
+  [...stScripts].sort((a, b) => (b.id === activeScriptId) - (a.id === activeScriptId)).forEach(s => {
+    const code = String(s.code || ''), head = '--- ' + s.type + ' «' + s.name + '» (' + (s.language || 'javascript') + ') ---';
+    if (code.length <= budget) { budget -= code.length; L.push(head, code); } else L.push(head, '(' + code.length + ' caracteres; usá crix:read_script para leerlo)');
+  });
+  if (stGuis && stGuis.length) {
+    L.push('INTERFAZ (GUI):');
+    stGuis.forEach(g => L.push('Pantalla «' + g.name + '»' + (g.visible === false ? ' (oculta)' : '') + ': ' + g.elements.slice(0, 40).map(e => e.type + ' «' + e.name + '» [' + [e.x, e.y, e.w, e.h].map(r2).join(',') + ']' + (e.text ? ' "' + String(e.text).slice(0, 40) + '"' : '')).join('; ')));
+  }
+  let out = L.join('\n'); if (out.length > 45000) out = out.slice(0, 45000) + '\n(…estado recortado)';
+  return out;
+}
+function aiApiMessages() {
+  const arr = crixAi.msgs.filter(m => !m.local).slice(-14);
+  return arr.map((m, i) => ({ role: m.role, content: m.role === 'assistant' && i < arr.length - 3 ? m.content.replace(/```crix:([a-z_]+)[^\n]*\n[\s\S]*?```/g, '(bloque crix:$1 ya aplicado)') : m.content }));
+}
+
+// ── Lectura de las respuestas del modelo ──
+function aiAttrs(s) { const a = {}, re = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))/g; let m; while ((m = re.exec(s))) a[m[1]] = m[2] ?? m[3] ?? m[4]; return a; }
+function aiJson(body) {
+  let t = String(body).trim(); try { return JSON.parse(t); } catch {}
+  t = t.replace(/^\s*\/\/.*$/gm, '').replace(/,\s*([\]}])/g, '$1'); return JSON.parse(t);
+}
+function aiParse(reply) {
+  const actions = [], problems = [], re = /```crix:([a-z_]+)([^\n]*)\n([\s\S]*?)```/g; let m;
+  while ((m = re.exec(reply))) actions.push({ name: m[1], attrs: aiAttrs(m[2]), body: m[3] });
+  if (/```crix:[a-z_]+[^\n]*\n/.test(reply.replace(re, ''))) problems.push('El último bloque quedó cortado y no se aplicó. Pedile que continúe.');
+  return { actions, problems };
+}
+
+// ── Aplicación sobre el editor ──
+function aiFind(t) {
+  t = String(t == null ? '' : t).trim(); if (!t) return [];
+  if (t.endsWith('*')) { const p = t.slice(0, -1).toLowerCase(); return stParts.filter(e => String(e.data.name || '').toLowerCase().startsWith(p)); }
+  let r = stParts.filter(e => String(e.data.id) === t); if (r.length) return r;
+  r = stParts.filter(e => e.data.name === t); if (r.length) return r;
+  const l = t.toLowerCase(); return stParts.filter(e => String(e.data.name || '').toLowerCase() === l);
+}
+function aiApplyFields(d, src) {
+  const pos = src.position && typeof src.position === 'object' ? src.position : {}, size = src.size && typeof src.size === 'object' ? src.size : {};
+  if (src.name !== undefined) { const n = String(src.name).trim().slice(0, 80); if (n) d.name = n; }
+  const P = { x: pos.x ?? pos.X, y: pos.y ?? pos.Y, z: pos.z ?? pos.Z }, S = { sx: size.x ?? size.X, sy: size.y ?? size.Y, sz: size.z ?? size.Z };
+  ['x', 'y', 'z'].forEach(k => { const v = src[k] !== undefined ? src[k] : P[k]; if (v !== undefined) d[k] = aiNum(v, d[k] || 0, -10000, 10000); });
+  ['sx', 'sy', 'sz'].forEach(k => { const v = src[k] !== undefined ? src[k] : S[k]; if (v !== undefined) d[k] = aiNum(v, d[k] || 4, 0.1, 1000); });
+  ['rx', 'ry', 'rz'].forEach(k => { if (src[k] !== undefined) d[k] = aiNum(src[k], d[k] || 0, -1000, 1000); });
+  if (src.color !== undefined) d.color = aiHex(src.color, d.color || '#5b8def');
+  if (src.material !== undefined && MATERIAL_DEFS[src.material]) d.material = src.material;
+  if (src.anchored !== undefined) d.anchored = aiBool(src.anchored, d.anchored !== false);
+  if (src.canCollide !== undefined) d.canCollide = aiBool(src.canCollide, d.canCollide !== false);
+  if (src.transparent !== undefined) d.transparent = aiNum(src.transparent, 0, 0, 0.95);
+  if (src.behavior !== undefined && AI_BEHAVIORS.includes(src.behavior)) {
+    d.behavior = src.behavior;
+    if (BEHAVIOR_COLOR[src.behavior] && src.color === undefined) { d.color = BEHAVIOR_COLOR[src.behavior]; if (['kill', 'speed', 'coin', 'win'].includes(src.behavior) && src.material === undefined) d.material = 'Neon'; }
+  }
+  if (src.behaviorValue !== undefined) d.behaviorValue = aiNum(src.behaviorValue, 0, -1000, 1000);
+  if (src.target !== undefined) d.target = String(src.target).slice(0, 80);
+  ['friction', 'bounce', 'drag'].forEach(k => { if (src[k] !== undefined) d[k] = aiNum(src[k], 0, 0, 1); });
+  if (src.gravityScale !== undefined) d.gravityScale = aiNum(src.gravityScale, 1, -5, 5);
+  return d;
+}
+function aiNewPart(src) {
+  const type = AI_PART_TYPES.includes(src.type) ? src.type : 'Block';
+  const d = { id: aiId(), type, name: type === 'Spawn' ? 'SpawnLocation' : 'Parte', x: 0, y: 0, z: 0, sx: 4, sy: 4, sz: 4, rx: 0, ry: 0, rz: 0, color: '#5b8def', material: 'SmoothPlastic', anchored: true, canCollide: true, transparent: 0 };
+  if (type === 'Spawn') Object.assign(d, { sy: 0.4, color: '#00ff88', material: 'Neon', canCollide: false, transparent: 0.5 });
+  return aiApplyFields(d, src);
+}
+function aiReplacePart(entry, data) {
+  const wasSel = selPart === entry, i = stParts.indexOf(entry);
+  stScene.remove(entry.mesh);
+  const ne = addPartMesh(data); stParts.pop(); if (i >= 0) stParts.splice(i, 0, ne); else stParts.push(ne);
+  if (wasSel) { try { selectPart(ne); } catch {} }
+  return ne;
+}
+function aiList(v) { const a = Array.isArray(v) ? v : (v && typeof v === 'object' ? (v.items || v.names || v.targets || v.parts || [v]) : [v]); return a.map(x => typeof x === 'string' ? x : x && (x.target || x.name || x.id)).filter(Boolean).map(String); }
+function aiSetScript(attrs, code) {
+  const name = String(attrs.name || '').trim().slice(0, 60); if (!name) throw new Error('falta name="…"');
+  const kind = ['Script', 'LocalScript', 'ModuleScript'].includes(attrs.kind) ? attrs.kind : null;
+  code = String(code).replace(/\r\n/g, '\n').replace(/\s+$/, '').slice(0, 60000);
+  let s = stScripts.find(x => String(x.name).toLowerCase() === name.toLowerCase()), created = false;
+  if (s) { s.code = code; if (kind && kind !== s.type) { s.type = kind; s.parent = kind === 'LocalScript' ? 'StarterPlayerScripts' : 'ServerScriptService'; } }
+  else {
+    if (stScripts.length >= 80) throw new Error('límite de 80 scripts');
+    const k = kind || 'Script';
+    s = { id: 'scr_' + aiId(), name, type: k, code, language: 'javascript', event: 'onStart', parent: k === 'LocalScript' ? 'StarterPlayerScripts' : 'ServerScriptService' }; stScripts.push(s); created = true;
+  }
+  return { s, created, lines: code ? code.split('\n').length : 0 };
+}
+function aiSetLighting(o) {
+  if (!o || typeof o !== 'object') throw new Error('JSON inválido');
+  const c = {};
+  ['brightness', 'sunIntensity', 'sunElevation', 'sunAzimuth', 'fogDensity', 'colorBrightness', 'colorContrast', 'colorSaturation'].forEach(k => { if (o[k] !== undefined && Number.isFinite(Number(o[k]))) c[k] = Number(o[k]); });
+  ['shadows', 'fog', 'bloom', 'blur', 'sunRays'].forEach(k => { if (o[k] !== undefined) c[k] = aiBool(o[k], LIGHTING_DEFAULTS[k]); });
+  ['ambient', 'fogColor'].forEach(k => { if (o[k] !== undefined) c[k] = aiHex(o[k], LIGHTING_DEFAULTS[k]); });
+  stLighting = normalizeLighting({ ...stLighting, ...c }); applyLighting();
+  return Object.keys(c);
+}
+function aiSetSettings(o) {
+  if (!o || typeof o !== 'object') throw new Error('JSON inválido');
+  const c = {}, R = { speed: [20, 400], jump: [20, 400], gravity: [10, 400], maxHealth: [1, 10000], maxPlayers: [1, 200] };
+  for (const k in R) if (o[k] !== undefined) c[k] = aiNum(o[k], undefined, R[k][0], R[k][1]);
+  ['health', 'hud'].forEach(k => { if (o[k] !== undefined) c[k] = aiBool(o[k], true); });
+  if (o.welcome !== undefined) c.welcome = String(o.welcome).slice(0, 120);
+  Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; });
+  Object.assign(stSettings, c); return Object.keys(c);
+}
+function aiGuiFields(e, s) {
+  const n = (k, lo, hi) => { if (s[k] !== undefined) e[k] = guiNum(s[k], e[k], lo, hi); };
+  n('x', -50, 150); n('y', -50, 150); n('w', 1, 150); n('h', 1, 150); n('fontSize', 6, 160); n('opacity', 0, 100); n('radius', 0, 100); n('border', 0, 12); n('value', 0, 1);
+  ['color', 'bg', 'borderColor'].forEach(k => { if (s[k] !== undefined) e[k] = guiColor(s[k], e[k]); });
+  ['text', 'placeholder'].forEach(k => { if (s[k] !== undefined) e[k] = String(s[k]).slice(0, 300); });
+  if (['left', 'center', 'right'].includes(s.align)) e.align = s.align;
+  if (['none', 'health'].includes(s.bind)) e.bind = s.bind;
+  if (typeof s.visible === 'boolean') e.visible = s.visible;
+  if (s.action && typeof s.action === 'object' && e.type === 'TextButton') e.action = { type: AI_GUI_ACTIONS.includes(s.action.type) ? s.action.type : 'none', target: String(s.action.target || '').slice(0, 80) };
+}
+function aiSetGui(o) {
+  if (!o || typeof o !== 'object') throw new Error('JSON inválido');
+  const name = String(o.screen || o.name || 'HUD').trim().slice(0, 40) || 'HUD';
+  let g = stGuis.find(x => String(x.name).toLowerCase() === name.toLowerCase());
+  if (!g) { g = { id: guiUid('g'), name, visible: true, elements: [] }; stGuis.push(g); }
+  if (o.replace === true) g.elements = [];
+  if (typeof o.visible === 'boolean') g.visible = o.visible;
+  let added = 0, updated = 0;
+  for (const src of (Array.isArray(o.elements) ? o.elements.slice(0, 60) : [])) {
+    if (!src || typeof src !== 'object') continue;
+    let e = src.name ? g.elements.find(x => x.name === String(src.name)) : null;
+    const type = e ? e.type : (GUI_TYPES[src.type] ? src.type : null); if (!type) continue;
+    if (!e) {
+      const nm = src.name ? String(src.name).slice(0, 40) : type;
+      e = { id: guiUid('e'), name: guiAllNames().has(nm) ? guiUniqueName(nm) : nm, type, x: 35, y: 40, visible: true, ...JSON.parse(JSON.stringify(GUI_DEFAULTS[type])) };
+      g.elements.push(e); added++;
+    } else updated++;
+    aiGuiFields(e, src);
+  }
+  return { added, updated, screen: g.name };
+}
+
+function aiApply(actions) {
+  const results = [], reads = [], flags = { hist: false, settings: false, guis: false };
+  let began = false, pushed = false, partsTouched = false, scriptsTouched = false;
+  const begin = () => { if (began) return; began = true; if (typeof stPhys !== 'undefined' && stPhys.on) stuTogglePhysics(); const before = stUndoStack.length; recordStudioHistory(); pushed = stUndoStack.length > before; };
+  const changed = () => { flags.hist = true; };
+  const ok = t => results.push({ ok: true, text: t }), bad = t => results.push({ ok: false, text: t });
+  for (const a of actions) {
+    try {
+      switch (a.name) {
+        case 'add_parts': {
+          const j = aiJson(a.body), list = (Array.isArray(j) ? j : (j && Array.isArray(j.parts) ? j.parts : [j])).filter(x => x && typeof x === 'object').slice(0, 150);
+          begin(); let n = 0, skipped = 0;
+          for (const src of list) {
+            if (stParts.length >= AI_MAX_PARTS) { skipped++; continue; }
+            if (src.type === 'Spawn' && stParts.some(p => p.data.type === 'Spawn')) { skipped++; continue; }
+            addPartMesh(aiNewPart(src)); n++;
+          }
+          partsTouched = true; if (n) { changed(); ok(n + (n === 1 ? ' pieza agregada' : ' piezas agregadas')); } if (skipped) bad(skipped + ' piezas omitidas (límite o SpawnLocation repetido)');
+          if (!n && !skipped) bad('add_parts vino vacío');
+          break;
+        }
+        case 'update_parts': {
+          const j = aiJson(a.body), list = (Array.isArray(j) ? j : [j]).filter(x => x && typeof x === 'object' && x.target !== undefined);
+          begin(); let n = 0;
+          for (const it of list) {
+            const found = aiFind(it.target);
+            if (!found.length) { bad('No encontré la pieza «' + it.target + '»'); continue; }
+            for (const e of found) {
+              const d = aiApplyFields({ ...e.data }, it);
+              if (it.type !== undefined && AI_PART_TYPES.includes(it.type) && e.data.type !== 'ImportedMesh' && !e.data.isNPC && it.type !== 'Spawn') d.type = it.type;
+              aiReplacePart(e, d); n++;
+            }
+          }
+          partsTouched = true; if (n) { changed(); ok(n + (n === 1 ? ' pieza modificada' : ' piezas modificadas')); }
+          break;
+        }
+        case 'delete_parts': {
+          const names = aiList(aiJson(a.body)); begin(); let n = 0;
+          for (const t of names) {
+            const found = aiFind(t); if (!found.length) { bad('No encontré la pieza «' + t + '»'); continue; }
+            for (const e of found) { if (selPart === e) deselect(); stScene.remove(e.mesh); stParts = stParts.filter(x => x !== e); n++; }
+          }
+          partsTouched = true; if (n) { changed(); ok(n + (n === 1 ? ' pieza borrada' : ' piezas borradas')); }
+          break;
+        }
+        case 'set_script': {
+          begin(); const r = aiSetScript(a.attrs, a.body); scriptsTouched = true; changed();
+          ok('Script «' + r.s.name + '» (' + r.s.type + ') ' + (r.created ? 'creado' : 'actualizado') + ' · ' + r.lines + ' líneas');
+          break;
+        }
+        case 'delete_script': {
+          const names = aiList(aiJson(a.body)); begin();
+          for (const t of names) {
+            const s = stScripts.find(x => x.id === t || String(x.name).toLowerCase() === t.toLowerCase());
+            if (!s) { bad('No existe el script «' + t + '»'); continue; }
+            if (s.id === activeScriptId) activeScriptId = null;
+            stScripts = stScripts.filter(x => x !== s); scriptsTouched = true; changed(); ok('Script «' + s.name + '» borrado');
+          }
+          break;
+        }
+        case 'read_script': {
+          for (const t of aiList(aiJson(a.body))) {
+            const s = stScripts.find(x => x.id === t || String(x.name).toLowerCase() === t.toLowerCase());
+            if (s) reads.push({ name: s.name, code: String(s.code || '') }); else bad('No existe el script «' + t + '»');
+          }
+          break;
+        }
+        case 'set_lighting': { begin(); const k = aiSetLighting(aiJson(a.body)); changed(); ok('Iluminación: ' + (k.join(', ') || 'sin cambios')); break; }
+        case 'set_settings': { const k = aiSetSettings(aiJson(a.body)); flags.settings = true; ok('Ajustes del juego: ' + (k.join(', ') || 'sin cambios')); break; }
+        case 'set_gui': {
+          const r = aiSetGui(aiJson(a.body)); flags.guis = true;
+          ok('Pantalla «' + r.screen + '»: ' + r.added + ' elementos nuevos' + (r.updated ? ', ' + r.updated + ' actualizados' : ''));
+          if (aiEl('gui-overlay')?.classList.contains('open')) { try { guiEdRenderAll(); } catch {} }
+          break;
+        }
+        case 'rename_project': {
+          let t = a.body.trim(); try { const j = JSON.parse(t); if (typeof j === 'string') t = j; } catch {}
+          t = t.replace(/^["']|["']$/g, '').trim(); if (!t) throw new Error('nombre vacío');
+          begin(); const maps = getMaps(), map = maps[stMapId]; if (!map) throw new Error('no hay proyecto abierto');
+          map.name = t.slice(0, 80); setMaps(maps); const ni = aiEl('hub-project-name'); if (ni) ni.value = map.name; updateStStatus(); changed();
+          ok('Proyecto renombrado a «' + map.name + '»'); break;
+        }
+        default: bad('Acción desconocida: ' + a.name);
+      }
+    } catch (err) { bad('«' + a.name + '»: ' + (err && err.message ? err.message : 'no se pudo aplicar')); }
+  }
+  if (pushed && !flags.hist) { stUndoStack.pop(); try { updateHubHistoryButtons(); } catch {} }
+  if (partsTouched || scriptsTouched) { try { refreshExplorer(); updateStStatus(); } catch {} }
+  if (scriptsTouched && activeScriptId) {
+    // El área de texto del editor de código guarda lo que haya adentro al presionar 💾: se la mantiene al día para que no pise el cambio.
+    try { if (stScripts.some(s => s.id === activeScriptId)) { loadScript(activeScriptId); if (aiEl('code-overlay')?.classList.contains('open')) renderCodeUI(); } else activeScriptId = null; } catch {}
+  }
+  return { results, reads, flags };
+}
+
+// ── Enviar ──
+async function aiSend() {
+  if (crixAi.busy) { if (crixAi.ctl) crixAi.ctl.abort(); return; }
+  const inp = aiEl('ai-input'), text = inp.value.trim(); if (!text) return;
+  const st = await aiLoadStatus();
+  if (st.configured === false || st.allowed === false) { aiRender(); return; }
+  if (!aiReady()) { showToast('Abrí un proyecto en el Hub primero'); return; }
+  if (stMapId && crixAi.mapId !== stMapId) aiLoadChat();
+  inp.value = ''; aiGrow(inp);
+  crixAi.msgs.push({ role: 'user', content: text }); crixAi.busy = true; crixAi.lastUndo = null; crixAi.t0 = Date.now();
+  clearInterval(crixAi.timer);
+  crixAi.timer = setInterval(() => { const t = aiEl('ai-typing'); if (t) t.textContent = 'Trabajando · ' + Math.round((Date.now() - crixAi.t0) / 1000) + ' s'; }, 1000);
+  aiRender();
+  const pre = { settings: JSON.stringify(stSettings || {}), guis: JSON.stringify(stGuis || []) }, total = { hist: false, settings: false, guis: false };
+  let changedMsg = null, rounds = 0;
+  try {
+    for (;;) {
+      const ctl = new AbortController(); crixAi.ctl = ctl;
+      const resp = await fetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DB.get('token') }, body: JSON.stringify({ messages: aiApiMessages(), context: aiContext() }), signal: ctl.signal });
+      let data = {}; try { data = await resp.json(); } catch {}
+      if (!resp.ok || data.ok === false) throw new Error(data.err || ('Error ' + resp.status));
+      const parsed = aiParse(String(data.reply || '')), out = aiApply(parsed.actions);
+      parsed.problems.forEach(p => out.results.push({ ok: false, text: p }));
+      if (data.truncated && !parsed.problems.length) out.results.push({ ok: false, text: 'La respuesta se cortó por longitud. Pedile que continúe.' });
+      const msg = { role: 'assistant', content: String(data.reply || ''), results: out.results };
+      crixAi.msgs.push(msg);
+      if (out.flags.hist || out.flags.settings || out.flags.guis) { total.hist = total.hist || out.flags.hist; total.settings = total.settings || out.flags.settings; total.guis = total.guis || out.flags.guis; changedMsg = msg; }
+      if (out.reads.length && rounds < 2) {
+        rounds++;
+        crixAi.msgs.push({ role: 'user', hidden: true, content: '[Editor] Código pedido:\n' + out.reads.map(r => '--- «' + r.name + '» ---\n' + r.code).join('\n\n') + '\n\nContinuá con lo que te pedí.' });
+        aiRender(); continue;
+      }
+      break;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') crixAi.msgs.push({ role: 'assistant', local: true, content: 'Detenido.' });
+    else crixAi.msgs.push({ role: 'assistant', local: true, err: true, content: (e && e.message) || 'No se pudo contactar al asistente.' });
+  } finally {
+    clearInterval(crixAi.timer); crixAi.busy = false; crixAi.ctl = null;
+    if (changedMsg) crixAi.lastUndo = { msg: changedMsg, pre, ...total };
+    if (crixAi.msgs.length > 40) crixAi.msgs = crixAi.msgs.slice(-40);
+    aiSaveChat(); aiRender();
+  }
+}
+function aiUndo() {
+  const u = crixAi.lastUndo; if (!u || crixAi.busy) return;
+  try {
+    if (u.hist) studioUndo();
+    if (u.settings) stSettings = JSON.parse(u.pre.settings);
+    if (u.guis) { stGuis = JSON.parse(u.pre.guis); if (aiEl('gui-overlay')?.classList.contains('open')) guiEdRenderAll(); }
+    if (activeScriptId) { if (stScripts.some(s => s.id === activeScriptId)) loadScript(activeScriptId); else activeScriptId = null; }
+  } catch {}
+  crixAi.lastUndo = null; aiRender(); showToast('↶ Cambios del asistente deshechos');
+}
+
+// ── Arranque: arrastrar la ventana, recordar tamaño, seguir la pantalla del Hub ──
+(function aiInit() {
+  const head = aiEl('ai-head'), win = aiEl('ai-win'); let drag = null;
+  head.addEventListener('pointerdown', e => {
+    if (e.target.closest('button') || innerWidth <= 640) return;
+    const r = win.getBoundingClientRect(); drag = { dx: e.clientX - r.left, dy: e.clientY - r.top }; head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener('pointermove', e => {
+    if (!drag) return;
+    win.style.left = Math.max(0, Math.min(innerWidth - win.offsetWidth, e.clientX - drag.dx)) + 'px';
+    win.style.top = Math.max(0, Math.min(innerHeight - 40, e.clientY - drag.dy)) + 'px';
+  });
+  const end = () => { if (drag) { drag = null; aiSaveGeo(); } };
+  head.addEventListener('pointerup', end); head.addEventListener('pointercancel', end);
+  head.addEventListener('dblclick', e => { if (!e.target.closest('button')) aiMinimize(); });
+  win.addEventListener('keydown', e => e.stopPropagation());
+  let t = null; if (window.ResizeObserver) new ResizeObserver(() => { clearTimeout(t); t = setTimeout(aiSaveGeo, 300); }).observe(win);
+  addEventListener('resize', () => { if (win.classList.contains('open') && !win.classList.contains('min')) aiPlace(); });
+  const studio = aiEl('s-studio'); if (studio) new MutationObserver(aiSync).observe(studio, { attributes: true, attributeFilter: ['class'] });
+  aiSync();
+})();
+</script>
 </body>
 </html>

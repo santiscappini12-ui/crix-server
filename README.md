@@ -236,6 +236,34 @@ const caja = game.getPart("Caja");                // estado actual, también por
 
 Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor visual de rigging, huesos ni animación (ver *Lo que todavía no existe en avatares y NPC*).
 
+### Asistente de IA en Crix Hub
+
+El botón **🤖 Asistente** de Crix Hub abre una ventana flotante (se mueve, se redimensiona, se minimiza y se cierra; recuerda su posición) donde se le pide al modelo que edite el proyecto abierto: **piezas** (crear, modificar, borrar), **scripts** (crear o reescribir `Script`, `LocalScript` y `ModuleScript`), **iluminación**, **ajustes del juego**, **pantallas de GUI** y el nombre del proyecto. Los cambios se aplican directo en el editor, por el mismo camino que los cambios manuales: se pueden deshacer con Ctrl+Z (o con el botón *Deshacer estos cambios* del chat), viajan por el modo equipo y se guardan con 💾. No se guarda nada en el servidor hasta que la persona guarda. El asistente ve el estado actual del proyecto (piezas, scripts, ajustes, GUI) en cada mensaje.
+
+El servidor no ejecuta el modelo: reenvía la conversación a cualquier endpoint compatible con la API de OpenAI (`/v1/chat/completions`) y la clave queda en el servidor. Variables de entorno:
+
+| Variable | Valor |
+| --- | --- |
+| `CRIX_AI_BASE_URL` | URL del servidor del modelo, por ejemplo `http://mi-gpu:8000/v1`. Sin esta variable el asistente queda desactivado. |
+| `CRIX_AI_MODEL` | (opcional) por defecto `mshodiqul/qwen3.5-9b-uncensored` |
+| `CRIX_AI_API_KEY` | (opcional) clave o token que pida el endpoint |
+| `CRIX_AI_THINKING` | (opcional) `1` deja que Qwen razone antes de responder: mejores resultados, bastante más lento. Por defecto apagado. |
+| `CRIX_AI_MAX_TOKENS` | (opcional) tope de la respuesta, por defecto 3500 |
+| `CRIX_AI_TIMEOUT_MS` | (opcional) por defecto 180000 |
+| `CRIX_AI_RPM` | (opcional) pedidos por minuto y persona, por defecto 12 |
+| `CRIX_AI_ADMIN_ONLY` | (opcional) `1` limita el asistente a cuentas administradoras |
+
+**Dónde correr el modelo.** `mshodiqul/qwen3.5-9b-uncensored` no está disponible en ningún proveedor de Inference Providers de Hugging Face, y 9.000 millones de parámetros en BF16 necesitan una GPU con unos 20 GB de VRAM, así que no puede correr en el plan gratis de Render. Opciones: un Inference Endpoint dedicado de Hugging Face, una GPU alquilada o propia, o cualquier servidor compatible con OpenAI. Con vLLM:
+
+```bash
+vllm serve mshodiqul/qwen3.5-9b-uncensored --max-model-len 32768 --reasoning-parser qwen3
+# CRIX_AI_BASE_URL=http://TU-HOST:8000/v1
+```
+
+El asistente no usa *tool calling* nativo: el modelo escribe bloques ` ```crix:accion ` (`add_parts`, `update_parts`, `delete_parts`, `set_script`, `delete_script`, `read_script`, `set_lighting`, `set_settings`, `set_gui`, `rename_project`) y el editor los valida (rangos, colores, materiales, tipos) antes de aplicarlos; lo que no cumple se ignora y se informa en el chat. Por eso funciona con cualquier backend sin flags especiales. Rutas: `GET /api/ai/status` y `POST /api/ai/chat` (requieren sesión).
+
+Al ser un modelo sin filtros, cualquier persona con sesión podría usarlo para generar lo que quiera dentro de sus propios proyectos: si hace falta, `CRIX_AI_ADMIN_ONLY=1` o `CRIX_AI_RPM` bajo lo acotan.
+
 ## Sincronización del mundo entre jugadores
 
 Todo lo que cambia en una partida online se ve igual para todos los jugadores de la instancia:

@@ -1610,6 +1610,9 @@ app.post('/api/posts/:id/reply', (req, res) => {
 });
 
 // ── STATUS ──
+// Asistente de IA del Crix Hub (proxy hacia un modelo compatible con la API de OpenAI)
+require('./ai-assistant')(app, { requireAuth, log });
+
 app.get('/status', (req, res) => res.json({
   ok:true, online: Object.keys(onlineUsers).length,
   users: Object.keys(DB.users).length,
