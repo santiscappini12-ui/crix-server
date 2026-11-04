@@ -72,10 +72,10 @@
     for (const b of BONE_NAMES) if (b.toLowerCase() === low) return b;
     return BONE_ALIAS[low] || null;
   }
-  const ANIM_NAMES = ['wave', 'cheer', 'point', 'clap', 'dance', 'attack', 'punch', 'shrug', 'salute', 'sit', 'crouch', 'sleep', 'dead', 'swim', 'tpose', 'think', 'laugh'];
-  const ANIM_ALIAS = { saludar: 'wave', saludo: 'wave', celebrar: 'cheer', festejar: 'cheer', apuntar: 'point', aplaudir: 'clap', bailar: 'dance', golpear: 'punch', ataque: 'attack', sentarse: 'sit', sentado: 'sit', agacharse: 'crouch', dormir: 'sleep', muerto: 'dead', nadar: 'swim', pensar: 'think', reir: 'laugh', reirse: 'laugh', encoger: 'shrug' };
+  const ANIM_NAMES = ['wave', 'cheer', 'point', 'clap', 'dance', 'attack', 'punch', 'shrug', 'salute', 'sit', 'crouch', 'sleep', 'dead', 'swim', 'tpose', 'think', 'laugh', 'nod', 'no', 'bow', 'facepalm', 'flex', 'stretch', 'yawn', 'kick', 'spin', 'jumpingjacks', 'robot', 'floss', 'cry', 'fistpump', 'lookaround', 'backflip'];
+  const ANIM_ALIAS = { saludar: 'wave', saludo: 'wave', celebrar: 'cheer', festejar: 'cheer', apuntar: 'point', aplaudir: 'clap', bailar: 'dance', golpear: 'punch', ataque: 'attack', sentarse: 'sit', sentado: 'sit', agacharse: 'crouch', dormir: 'sleep', muerto: 'dead', nadar: 'swim', pensar: 'think', reir: 'laugh', reirse: 'laugh', encoger: 'shrug', asentir: 'nod', si: 'nod', negar: 'no', reverencia: 'bow', inclinarse: 'bow', musculos: 'flex', estirar: 'stretch', estirarse: 'stretch', bostezar: 'yawn', patada: 'kick', patear: 'kick', girar: 'spin', tijeras: 'jumpingjacks', llorar: 'cry', puno: 'fistpump', mirar: 'lookaround', voltereta: 'backflip', saltomortal: 'backflip' };
   function resolveAnim(name) { const s = String(name || '').toLowerCase(); return ANIM_NAMES.includes(s) ? s : (ANIM_ALIAS[s] || null); }
-  const FACES = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'sleepy', 'wink', 'smug', 'scared', 'talk', 'dead'];
+  const FACES = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'sleepy', 'wink', 'smug', 'scared', 'talk', 'dead', 'laugh', 'cry', 'love', 'dizzy', 'hurt', 'yawn', 'tongue', 'evil'];
   const HAIRS = ['none', 'short', 'spiky', 'long', 'bun', 'cap', 'mohawk'];
   const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'capsule'];
   const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1 };
@@ -165,6 +165,243 @@
   const CLAY = 0xdcdad6;      // color del estilo 'stick' (muñeco de arcilla de un solo color)
   const BASE_SCALE = 0.83;   // el rig completo mide ~3.1 studs (caja de colisión del juego: 3.05)
 
+  // ══ MODELO 3D (crix-avatar.glb = Rigged_Crix_Rig.glb) ═══════════════════════════════════════════════════════
+  // El .glb trae un muñeco articulado de piezas RÍGIDAS (pelvis, abdomen, pecho, 3 piezas por brazo, 3 por pierna) y una cabeza esférica
+  // negra; está en T-pose y mira hacia +X. Aquí se monta cada pieza sobre el hueso lógico que le corresponde (así TODAS las animaciones,
+  // los scripts, setBone y la red siguen funcionando igual), con los brazos ya bajados. La cara original son planos sueltos que flotan
+  // fuera de la esfera (por eso se veía rota): se descarta y se reconstruye curvada sobre la cabeza (ver buildModelFace).
+  const MODEL = { state: 'idle', parts: null, geo: null, callbacks: [] };
+  const MODEL_URL = '/crix-avatar.glb';
+  const MK = 3.67 / 0.511;                                  // unidades del .glb → unidades internas del rig (3.67 × BASE_SCALE ≈ 3.05 studs)
+  const HEAD = { c: [0, 0.515, 0.047], R: 0.614 };          // centro y radio de la esfera de la cabeza, en el espacio del hueso Head
+  const LIVE = new Set();
+  const MODEL_POS = {
+    Hips: [0, 1.27, 0], Spine: [0, 0.32, 0], Chest: [0, 0.405, 0], Neck: [0, 0.548, 0], Head: [0, 0, 0], Jaw: [0, 0.18, 0.46],
+    ShoulderL: [-0.46, 0.294, 0], ShoulderR: [0.46, 0.294, 0], UpperArmL: [-0.29, 0, 0], UpperArmR: [0.29, 0, 0],
+    LowerArmL: [0, -0.634, 0], LowerArmR: [0, -0.634, 0], HandL: [0, -0.52, 0], HandR: [0, -0.52, 0],
+    UpperLegL: [-0.275, 0.158, 0], UpperLegR: [0.275, 0.158, 0], LowerLegL: [0, -0.618, 0], LowerLegR: [0, -0.618, 0],
+    FootL: [0, -0.481, 0], FootR: [0, -0.481, 0], ToesL: [0, -0.2, 0.3], ToesR: [0, -0.2, 0.3],
+  };
+  const MODEL_ROT = {};
+  // posición (yaw, pitch) sobre la esfera de la cabeza y orientación de la base (z saliendo de la superficie)
+  const headPoint = (yaw, pitch, r) => { const R = r || HEAD.R; return [HEAD.c[0] + R * Math.sin(yaw) * Math.cos(pitch), HEAD.c[1] + R * Math.sin(pitch), HEAD.c[2] + R * Math.cos(yaw) * Math.cos(pitch)]; };
+  const headQuat = (yaw, pitch) => new THREE.Quaternion().setFromEuler(new THREE.Euler(-pitch, yaw, 0, 'YXZ'));
+  const EYE_YAW = 0.58, EYE_PITCH = 0.42, MOUTH_PITCH = -0.38;
+  for (const s of ['L', 'R']) { const sx = s === 'L' ? -1 : 1; MODEL_POS['Eye' + s] = headPoint(sx * EYE_YAW, EYE_PITCH); MODEL_ROT['Eye' + s] = headQuat(sx * EYE_YAW, EYE_PITCH); }
+
+  // [malla del .glb, hueso lógico, articulación (nodo del .glb) sobre la que gira la pieza]
+  const MODEL_PARTS = [
+    ['mesh_id267', 'Hips', 'Bone'], ['mesh_id259', 'Spine', 'Bone001'], ['mesh_id252', 'Chest', 'Bone002'], ['Sphere', 'Head', 'Bone003'],
+    ['mesh_id223004', 'UpperArmR', 'Bone005'], ['mesh_id222004', 'LowerArmR', 'Bone006'], ['mesh_id221004', 'HandR', 'Bone007'],
+    ['mesh_id223', 'UpperArmL', 'Bone009'], ['mesh_id222', 'LowerArmL', 'Bone010'], ['mesh_id221', 'HandL', 'Bone011'],
+    ['mesh_id223006', 'UpperLegL', 'Bone013'], ['mesh_id222006', 'LowerLegL', 'Bone014'], ['mesh_id221006', 'FootL', 'Bone015'],
+    ['mesh_id223005', 'UpperLegR', 'Bone017'], ['mesh_id222005', 'LowerLegR', 'Bone018'], ['mesh_id221005', 'FootR', 'Bone019'],
+  ];
+  function extractModel(gltf) {
+    const scene = gltf.scene; scene.updateMatrixWorld(true);
+    const byName = {}; scene.traverse(o => { if (!byName[o.name]) byName[o.name] = o; });
+    // espacio del proyecto: de frente +X a frente +Z, centrado en (cx, cz), pies en y = 0, y escalado al rig
+    const toInt = new THREE.Matrix4().makeScale(MK, MK, MK).multiply(new THREE.Matrix4().makeTranslation(0.0037, 0.27, -0.0275)).multiply(new THREE.Matrix4().makeRotationY(-Math.PI / 2));
+    const jp = n => { if (!byName[n]) throw new Error('falta ' + n); return new THREE.Vector3().setFromMatrixPosition(byName[n].matrixWorld).applyMatrix4(toInt); };
+    const parts = [];
+    for (const [meshName, bone, jointName] of MODEL_PARTS) {
+      const mesh = byName[meshName]; if (!mesh || !mesh.geometry) throw new Error('falta ' + meshName);
+      const J = jp(jointName), M = toInt.clone().multiply(mesh.matrixWorld);
+      const arm = /^(UpperArm|LowerArm|Hand)/.test(bone);
+      let B = new THREE.Matrix4().makeTranslation(-J.x, -J.y, -J.z).multiply(M);
+      if (arm) B = new THREE.Matrix4().makeRotationZ(J.x > 0 ? -Math.PI / 2 : Math.PI / 2).multiply(B);   // T-pose → brazos colgando
+      const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); B.decompose(p, q, s);
+      parts.push({ bone, geo: mesh.geometry, p, q, s, head: bone === 'Head' });
+    }
+    MODEL.parts = parts;
+  }
+  function loadModel(url) {
+    if (MODEL.state !== 'idle') return;
+    if (!THREE.GLTFLoader) { MODEL.state = 'failed'; return; }
+    MODEL.state = 'loading';
+    const done = () => { for (const av of Array.from(LIVE)) { if (!av.root.parent && av.root.userData.avatar !== av) LIVE.delete(av); else upgradeAvatar(av); } };
+    new THREE.GLTFLoader().load(url || MODEL_URL, gltf => {
+      try { extractModel(gltf); MODEL.state = 'ready'; } catch (e) { console.warn('[CrixAvatar] modelo inválido, uso el muñeco básico:', e); MODEL.state = 'failed'; }
+      done();
+    }, undefined, e => { console.warn('[CrixAvatar] no se pudo cargar el modelo, uso el muñeco básico', e); MODEL.state = 'failed'; done(); });
+  }
+  function layoutBones(av, model) {
+    for (const [name, , pos] of BONES) {
+      const b = av.bones[name], p = model && MODEL_POS[name] ? MODEL_POS[name] : pos;
+      b.position.set(p[0], p[1], p[2]); b.quaternion.identity(); if (model && MODEL_ROT[name]) b.quaternion.copy(MODEL_ROT[name]);
+      b.userData.rest = { p: b.position.clone(), q: b.quaternion.clone() };
+    }
+  }
+  function buildModelBody(av) {
+    clearTag(av, 'body'); clearTag(av, 'joint'); clearTag(av, 'hair');
+    if (MODEL.state !== 'ready') return;
+    const clay = av.look.style === 'stick';
+    for (const part of MODEL.parts) {
+      const m = new THREE.Mesh(part.geo, part.head ? av.mats.head : av.mats.white);
+      m.position.copy(part.p); m.quaternion.copy(part.q); m.scale.copy(part.s); m.userData.tag = 'body';
+      av.visuals[part.bone].add(m);
+    }
+    buildHair(av, av.look.hair);
+  }
+  // Pasa un avatar "pendiente" a modelo listo, o a muñeco básico si el .glb no cargó.
+  function upgradeAvatar(av) {
+    if (av.kind !== 'model' || av.built) return;
+    if (MODEL.state === 'ready') {
+      av.built = true; av.root.visible = true; buildModelBody(av); buildModelFace(av); applyLook(av, av.look);
+    } else if (MODEL.state === 'failed') {
+      av.kind = 'legacy'; av.built = true; av.root.visible = true; layoutBones(av, false); buildFace(av); av.style = null; applyLook(av, av.look);
+    }
+  }
+
+  // ── Cara curvada sobre la esfera ─────────────────────────────────────────────────────────────
+  // Todos los parches se dibujan en el plano tangente de su ancla y se "doblan" con sagZ para que sigan la curva de la cabeza.
+  const sagZ = (x, y, R) => Math.sqrt(Math.max(R * R - x * x - y * y, R * R * 0.25)) - R;
+  function setCurved(pos, nor, i, x, y, eps, R) { const z = eps + sagZ(x, y, R), l = Math.hypot(x, y, z + R) || 1; pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z; nor[i * 3] = x / l; nor[i * 3 + 1] = y / l; nor[i * 3 + 2] = (z + R) / l; }
+  // Parche con forma de superelipse (exp 2 = elipse, ~3 = rectángulo redondeado), centrado en (0, yOff)
+  function superPatch(w, h, eps, exp, yOff, zOff) {
+    const R = HEAD.R, rings = 4, seg = 22, n = 1 + rings * seg, pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), idx = [];
+    yOff = yOff || 0; zOff = zOff || 0; setCurved(pos, nor, 0, 0, yOff, eps, R); pos[2] -= zOff;
+    for (let r = 1; r <= rings; r++) for (let j = 0; j < seg; j++) {
+      const a = j / seg * Math.PI * 2, c = Math.cos(a), s = Math.sin(a), k = Math.pow(Math.pow(Math.abs(c), exp) + Math.pow(Math.abs(s), exp), -1 / exp), i = 1 + (r - 1) * seg + j;
+      setCurved(pos, nor, i, c * k * r / rings * w / 2, yOff + s * k * r / rings * h / 2, eps, R); pos[i * 3 + 2] -= zOff;
+    }
+    for (let j = 0; j < seg; j++) idx.push(0, 1 + j, 1 + (j + 1) % seg);
+    for (let r = 1; r < rings; r++) for (let j = 0; j < seg; j++) { const a = 1 + (r - 1) * seg + j, b = 1 + (r - 1) * seg + (j + 1) % seg, c = 1 + r * seg + j, d = 1 + r * seg + (j + 1) % seg; idx.push(a, c, d, a, d, b); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setIndex(idx); return g;
+  }
+  // Malla en rejilla (cols × rows) cuyos vértices se reescriben con fill(i, j, set) — boca y párpado
+  function gridMesh(cols, rows, mat) {
+    const n = (cols + 1) * (rows + 1), g = new THREE.BufferGeometry(), idx = [];
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const a = j * (cols + 1) + i, b = a + 1, c = a + cols + 1, d = c + 1; idx.push(a, c, d, a, d, b); }
+    g.setIndex(idx); const m = new THREE.Mesh(g, mat); m.frustumCulled = false; m.userData.tag = 'face'; m.userData.grid = { cols, rows }; return m;
+  }
+  function tubeLine(pts, r, mat, seg) { const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], p[1], 0))), seg || 24, r, 6, false), mat); m.userData.tag = 'face'; return m; }
+  function heartGeo(s) {
+    const sh = new THREE.Shape(); sh.moveTo(0, -0.5 * s);
+    sh.bezierCurveTo(-0.15 * s, -0.35 * s, -0.5 * s, -0.15 * s, -0.5 * s, 0.12 * s); sh.bezierCurveTo(-0.5 * s, 0.4 * s, -0.1 * s, 0.5 * s, 0, 0.22 * s);
+    sh.bezierCurveTo(0.1 * s, 0.5 * s, 0.5 * s, 0.4 * s, 0.5 * s, 0.12 * s); sh.bezierCurveTo(0.5 * s, -0.15 * s, 0.15 * s, -0.35 * s, 0, -0.5 * s);
+    return new THREE.ShapeGeometry(sh, 10);
+  }
+
+  function buildModelFace(av) {
+    if (av.face && av.face.group && av.face.group.parent) av.face.group.parent.remove(av.face.group);
+    for (const s of ['L', 'R']) clearTag(av, 'face');
+    const M = av.mats, F = new THREE.Group(); F.name = 'Face'; F.userData.noShadow = true; av.visuals.Head.add(F);
+    const f = { kind: 'model', group: F, eyes: {}, brows: {}, cur: { open: 0, curve: 0.2, w: 0.16, browA: 0, browY: 0, cover: 0, ps: 1, big: 0, tongue: 0, lx: 0, ly: 0 } };
+    const fm = (geo, mat, z) => { const m = new THREE.Mesh(geo, mat); m.userData.tag = 'face'; m.position.z = z || 0; return m; };
+    for (const s of ['L', 'R']) {
+      const sx = s === 'L' ? -1 : 1, bone = av.visuals['Eye' + s], e = { bone, sx };
+      e.white = fm(superPatch(0.42, 0.44, 0.006, 2.8), M.eyeW);
+      e.pupil = fm(new THREE.CircleGeometry(0.088, 18), M.eye, 0.016); e.glint = fm(new THREE.CircleGeometry(0.026, 10), M.eyeW, 0.02);
+      e.heart = fm(heartGeo(0.30), M.heart, 0.02); e.heart.visible = false;
+      e.spiral = (() => { const pts = []; for (let i = 0; i <= 40; i++) { const a = i / 40 * Math.PI * 5, r = 0.012 + i / 40 * 0.15; pts.push([Math.cos(a) * r, Math.sin(a) * r]); } const m = tubeLine(pts, 0.011, M.eye, 60); m.position.z = 0.02; m.visible = false; return m; })();
+      e.xmark = new THREE.Group(); e.xmark.userData.tag = 'face'; e.xmark.visible = false; e.xmark.position.z = 0.02;
+      for (const a of [Math.PI / 4, -Math.PI / 4]) { const b = fm(new THREE.BoxGeometry(0.3, 0.05, 0.012), M.eyeW); b.rotation.z = a; e.xmark.add(b); }
+      e.arc = tubeLine([[-0.15, -0.05], [-0.07, 0.04], [0, 0.07], [0.07, 0.04], [0.15, -0.05]], 0.026, M.eyeW, 20); e.arc.position.set(0, -0.02, 0.012); e.arc.visible = false;
+      e.hurt = new THREE.Group(); e.hurt.userData.tag = 'face'; e.hurt.visible = false; e.hurt.position.z = 0.02;
+      for (const a of [0.55, -0.55]) { const b = fm(new THREE.BoxGeometry(0.17, 0.045, 0.012), M.eyeW); b.position.set(-sx * 0.03, a * 0.1, 0); b.rotation.z = -sx * a; e.hurt.add(b); }
+      e.lid = gridMesh(8, 3, M.head); e.lid.position.z = 0; e.lid._cov = -9;
+      e.tear = fm(new THREE.SphereGeometry(0.034, 8, 6), M.tear, 0.03); e.tear.scale.set(1, 1.5, 0.4); e.tear.visible = false;
+      for (const k of ['white', 'pupil', 'glint', 'heart', 'spiral', 'xmark', 'arc', 'hurt', 'lid', 'tear']) bone.add(e[k]);
+      f.eyes[s] = e;
+      // ceja: pivote sobre el ojo, curvada a la altura que le toca
+      const piv = new THREE.Group(); piv.position.copy(MODEL_POS['Eye' + s]); piv.quaternion.copy(MODEL_ROT['Eye' + s]); piv.userData.tag = 'face'; F.add(piv);
+      const brow = new THREE.Group(); brow.userData.tag = 'face'; piv.add(brow);
+      const bm = fm(superPatch(0.30, 0.062, 0.012, 3.2, 0.31, sagZ(0, 0.31, HEAD.R)), M.eyeW); bm.position.y = -0.31; brow.add(bm); brow.position.y = 0.31; brow.position.z = sagZ(0, 0.31, HEAD.R);
+      f.brows[s] = { piv, brow };
+    }
+    // boca (blanca, como la del modelo original): malla deformable entre el labio superior y el inferior
+    const G = new THREE.Group(); G.position.fromArray(headPoint(0, MOUTH_PITCH)); G.quaternion.copy(headQuat(0, MOUTH_PITCH)); G.userData.tag = 'face'; F.add(G);
+    f.mouthGroup = G; f.mouth = gridMesh(20, 4, M.mouthW); G.add(f.mouth);
+    f.tongue = fm(superPatch(0.2, 0.13, 0.008, 2.4), M.tongue, 0.012); f.tongue.visible = false; G.add(f.tongue);
+    av.face = f; updateMouthModel(av);
+  }
+  function updateMouthModel(av) {
+    const f = av.face, c = f.cur, R = HEAD.R, m = f.mouth, g = m.userData.grid, pos = m.geometry.attributes.position.array, nor = m.geometry.attributes.normal.array;
+    const w = c.w, cv = c.curve * 0.1, op = c.open * 0.2, th = 0.045;
+    for (let i = 0; i <= g.cols; i++) {
+      const t = i / g.cols * 2 - 1, q = 1 - t * t, yb = -cv * q, tt = th * (0.35 + 0.65 * q) * 0.5, yU = yb + tt, yD = yb - tt - op * Math.pow(q, 0.7);
+      for (let j = 0; j <= g.rows; j++) setCurved(pos, nor, j * (g.cols + 1) + i, t * w, yU + (yD - yU) * j / g.rows, 0.008, R);
+    }
+    m.geometry.attributes.position.needsUpdate = true; m.geometry.attributes.normal.needsUpdate = true;
+    const lowY = -cv - op * 0.55, showT = c.tongue > 0.05 || c.open > 0.6;
+    f.tongue.visible = showT;
+    if (showT) { const out = c.tongue; f.tongue.position.set(0, lowY - 0.02 - out * 0.07, 0.012 + sagZ(0, lowY, R) * 0 + out * 0.01); f.tongue.scale.set(0.7 + out * 0.5, 0.7 + out * 0.7, 1); }
+  }
+  function updateLid(e, cover, R) {
+    const g = e.lid.userData.grid, pos = e.lid.geometry.attributes.position.array, nor = e.lid.geometry.attributes.normal.array, yb = 0.22 * (1 - 2 * cover);
+    for (let j = 0; j <= g.rows; j++) for (let i = 0; i <= g.cols; i++) setCurved(pos, nor, j * (g.cols + 1) + i, -0.25 + i / g.cols * 0.5, yb + (g.rows - j) / g.rows * 0.28, 0.022, R);
+    e.lid.geometry.attributes.position.needsUpdate = true; e.lid.geometry.attributes.normal.needsUpdate = true; e.lid.geometry.computeBoundingSphere();
+  }
+  // Presets de cara. open/curve/w: boca · browA: inclinación de cejas y párpados (+ enojo, − tristeza) · cover: párpado bajado · ps: pupila
+  // eye: 'n' normal, 'heart', 'spiral', 'x', 'arc' (^ ^), 'hurt' (> <) · close: ojo cerrado · wink: lado guiñado · tear/tongue
+  const MFACE = {
+    neutral:   { open: 0,    curve: 0.12, w: 0.15, browA: 0,    browY: 0,     cover: 0 },
+    happy:     { open: 0.12, curve: 0.6,  w: 0.24, browA: 0.05, browY: 0.02,  cover: 0 },
+    sad:       { open: 0,    curve: -0.7, w: 0.15, browA: -0.55, browY: 0,    cover: 0.28, ps: 1.1 },
+    angry:     { open: 0.08, curve: -0.5, w: 0.2,  browA: 0.65, browY: -0.03, cover: 0.32 },
+    surprised: { open: 0.85, curve: 0,    w: 0.11, browA: 0,    browY: 0.1,   cover: 0, ps: 0.55, big: 0.12 },
+    sleepy:    { open: 0,    curve: 0.05, w: 0.12, browA: -0.1, browY: -0.02, cover: 0.65 },
+    wink:      { open: 0.12, curve: 0.6,  w: 0.24, browA: 0.05, browY: 0.02,  cover: 0, wink: 'R' },
+    smug:      { open: 0,    curve: 0.4,  w: 0.2,  browA: 0.35, browY: 0,     cover: 0.38 },
+    scared:    { open: 0.5,  curve: -0.3, w: 0.17, browA: -0.4, browY: 0.09,  cover: 0, ps: 0.45, big: 0.08, shake: 1 },
+    talk:      { open: 0.2,  curve: 0.25, w: 0.18, browA: 0.05, browY: 0.01,  cover: 0 },
+    dead:      { open: 0.2,  curve: -0.3, w: 0.15, browA: -0.2, browY: 0,     cover: 0, eye: 'x' },
+    laugh:     { open: 0.95, curve: 0.75, w: 0.3,  browA: 0,    browY: 0.06,  cover: 0, eye: 'arc', bounce: 1 },
+    cry:       { open: 0.4,  curve: -0.7, w: 0.19, browA: -0.6, browY: 0.01,  cover: 0.2, ps: 1.15, tear: 1, shake: 0.5 },
+    love:      { open: 0.2,  curve: 0.65, w: 0.22, browA: 0,    browY: 0.04,  cover: 0, eye: 'heart' },
+    dizzy:     { open: 0.18, curve: 0,    w: 0.15, browA: -0.1, browY: 0.02,  cover: 0, eye: 'spiral' },
+    hurt:      { open: 0.45, curve: -0.4, w: 0.2,  browA: -0.4, browY: 0.04,  cover: 0, eye: 'hurt' },
+    yawn:      { open: 1.0,  curve: 0,    w: 0.13, browA: -0.1, browY: 0.05,  cover: 0, close: 1 },
+    tongue:    { open: 0.4,  curve: 0.55, w: 0.22, browA: 0.1,  browY: 0.03,  cover: 0, tongue: 1, wink: 'L' },
+    evil:      { open: 0.2,  curve: 0.8,  w: 0.3,  browA: 0.75, browY: -0.04, cover: 0.4 },
+  };
+  const eyeModes = ['heart', 'spiral', 'xmark', 'arc', 'hurt'], modeKey = { heart: 'heart', spiral: 'spiral', x: 'xmark', arc: 'arc', hurt: 'hurt' };
+  function updateFaceModel(av, dt, hint, talk, ctx) {
+    const S = av.state, f = av.face, c = f.cur, R = HEAD.R; S.faceT += dt;
+    let name = av.layers.face || hint || (av.layers.anim && EMOTES[av.layers.anim.name] && EMOTES[av.layers.anim.name].fn(0, 1)._face) || (S.loco === 'fall' ? 'scared' : S.face);
+    if (!MFACE[name]) name = 'neutral';
+    const pr = MFACE[name], k = 1 - Math.exp(-dt * 12), talking = Math.max(talk || 0, av.layers.talk ? 1 : 0, name === 'talk' ? 1 : 0);
+    // visemas: la boca salta a aperturas al azar mientras habla, con suavizado
+    S.visT = (S.visT || 0) - dt; if (S.visT <= 0) { S.visT = 0.07 + Math.random() * 0.09; S.visA = 0.1 + Math.random() * 0.9; }
+    S.visS = (S.visS || 0) + ((S.visA || 0) - (S.visS || 0)) * (1 - Math.exp(-dt * 22));
+    let open = pr.open, w = pr.w;
+    if (talking) { open = 0.12 + S.visS * 0.6 * talking; w = pr.w * (0.8 + 0.35 * (1 - S.visS)); }
+    if (pr.bounce) open *= 0.75 + 0.25 * Math.abs(Math.sin(S.t * 16));
+    c.open += (open - c.open) * k; c.curve += (pr.curve - c.curve) * k; c.w += (w - c.w) * k; c.browA += (pr.browA - c.browA) * k; c.browY += (pr.browY - c.browY) * k;
+    c.cover += ((pr.cover || 0) - c.cover) * k; c.ps += ((pr.ps || 1) - c.ps) * k; c.big += ((pr.big || 0) - c.big) * k; c.tongue += ((pr.tongue || 0) - c.tongue) * k;
+    // parpadeo (a veces doble) y mirada con sacádicos
+    S.blinkT -= dt; if (S.blinkT <= 0) { S.blink = 1; S.blinkT = Math.random() < 0.22 ? 0.22 : 2 + Math.random() * 4; }
+    if (S.blink > 0) S.blink = Math.max(0, S.blink - dt * 7);
+    const blinkK = Math.sin(S.blink * Math.PI);
+    S.sacT = (S.sacT === undefined ? 1 : S.sacT) - dt; if (S.sacT <= 0) { S.sacT = 0.8 + Math.random() * 3; S.sx = (Math.random() * 2 - 1) * 0.6; S.sy = (Math.random() * 2 - 1) * 0.4; }
+    const hasLook = ctx && ctx.lookX !== undefined, tx = hasLook ? clamp(num(ctx.lookX), -1, 1) : (S.sx || 0), ty = hasLook ? clamp(num(ctx.lookY), -1, 1) : (S.sy || 0), lk = 1 - Math.exp(-dt * 14);
+    c.lx += (tx - c.lx) * lk; c.ly += (ty - c.ly) * lk;
+    const mode = pr.eye || 'n', shake = pr.shake ? Math.sin(S.t * 38) * 0.012 * pr.shake : 0;
+    for (const s of ['L', 'R']) {
+      const e = f.eyes[s], sx = e.sx, normal = mode === 'n', closeAmt = clamp(Math.max(normal ? blinkK : 0, pr.close || 0, pr.wink === s ? 1 : 0), 0, 1);
+      const sq = Math.max(0.08, 1 - closeAmt * 0.92), big = 1 + c.big;
+      e.bone.scale.set(big, sq * big, 1);
+      e.white.visible = normal || mode === 'heart' || mode === 'spiral'; e.pupil.visible = normal; e.glint.visible = normal;
+      for (const m of eyeModes) e[m].visible = false; if (!normal) e[modeKey[mode]].visible = true;
+      if (mode === 'heart') { e.heart.scale.setScalar(1 + Math.abs(Math.sin(S.t * 6)) * 0.18); e.white.visible = true; }
+      if (mode === 'spiral') e.spiral.rotation.z = -S.t * 7 * sx;
+      if (mode === 'arc' || mode === 'x' || mode === 'hurt') e.white.visible = false;
+      // pupila: se mueve con la mirada, se achica o agranda
+      const px = c.lx * 0.075 + shake, py = c.ly * 0.06, ps = c.ps;
+      e.pupil.position.set(px, py, sagZ(px, py, R) + 0.016); e.pupil.scale.set(ps, ps * 1.05, 1); e.glint.position.set(px + 0.03 * ps, py + 0.035 * ps, sagZ(px, py, R) + 0.02);
+      // párpado negro: baja desde arriba e inclina según la emoción (enojo: lado interior abajo; tristeza: al revés)
+      const cov = clamp(c.cover, 0, 0.95); e.lid.visible = normal && cov > 0.01;
+      if (e.lid.visible) { if (Math.abs(cov - e.lid._cov) > 0.004) { e.lid._cov = cov; updateLid(e, cov, R); } e.lid.rotation.z = sx * c.browA * 0.5; }
+      // lágrima que cae
+      e.tear.visible = !!pr.tear; if (pr.tear) { const ph = (S.t * 0.9 + (s === 'L' ? 0 : 0.5)) % 1; e.tear.position.set(sx * 0.07, -0.16 - ph * 0.34, sagZ(0, -0.2 - ph * 0.34, R) + 0.03); e.tear.scale.set(1, 1.5, 0.4).multiplyScalar(1 - ph * 0.4); }
+      // ceja
+      const b = f.brows[s]; b.brow.position.y = 0.31 + c.browY + (pr.wink === s ? -0.025 : 0); b.brow.position.z = sagZ(0, b.brow.position.y, R); b.brow.rotation.z = sx * c.browA * 0.55;
+    }
+    if (Math.abs(c.open - (f._lo === undefined ? -1 : f._lo)) > 0.008 || Math.abs(c.curve - (f._lc === undefined ? -9 : f._lc)) > 0.008 || Math.abs(c.w - (f._lw === undefined ? -1 : f._lw)) > 0.003 || Math.abs(c.tongue - (f._lt === undefined ? -1 : f._lt)) > 0.01) { f._lo = c.open; f._lc = c.curve; f._lw = c.w; f._lt = c.tongue; updateMouthModel(av); }
+  }
+
   // ── Geometría (r128: no hay CapsuleGeometry) ──────────────────────────────────────────────────
   function capsuleGeo(radius, length, seg = 10) {
     // Perfil de abajo hacia arriba (y ascendente, x: 0 → r → 0): así las normales de LatheGeometry salen hacia afuera.
@@ -204,7 +441,8 @@
       const v = new THREE.Group(); v.name = name + '_vis'; b.add(v); visuals[name] = v;
       b.userData.rest = { p: b.position.clone(), q: b.quaternion.clone() };
     }
-    const av = { root, bones, visuals, look, mats, parts: {}, accessories: {}, face: null, hair: null, joints: [], style: null };
+    const av = { root, bones, visuals, look, mats, parts: {}, accessories: {}, face: null, hair: null, joints: [], style: null, kind: MODEL.state === 'failed' ? 'legacy' : 'model', built: false };
+    layoutBones(av, av.kind === 'model');
     av.mats.skin = new THREE.MeshPhongMaterial({ color: 0xffd9b3, shininess: 20 });
     av.mats.shirt = new THREE.MeshPhongMaterial({ color: 0x5b8def, shininess: 25 });
     av.mats.pants = new THREE.MeshPhongMaterial({ color: 0x3a4668, shininess: 15 });
@@ -216,10 +454,14 @@
     av.mats.eye = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.line = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.mouthIn = new THREE.MeshBasicMaterial({ color: 0x6a1d2a, side: THREE.DoubleSide });
+    av.mats.head = new THREE.MeshPhongMaterial({ color: 0x15171d, specular: 0x1c1f27, shininess: 35 });
+    av.mats.mouthW = new THREE.MeshBasicMaterial({ color: 0xffffff }); av.mats.tongue = new THREE.MeshBasicMaterial({ color: 0xe5566f });
+    av.mats.heart = new THREE.MeshBasicMaterial({ color: 0xff3b5c, side: THREE.DoubleSide }); av.mats.tear = new THREE.MeshBasicMaterial({ color: 0x7fd0ff });
         av.pose = {}; av.target = {}; av.layers = { anim: null, emote: null, over: {} };
     av.state = { t: Math.random() * 10, blinkT: 2 + Math.random() * 3, blink: 0, face: look.face, faceT: 0, talk: 0, loco: 'idle', locoBlend: 0, phase: 0, landT: 0, lastGround: true, lastVy: 0, sitting: false };
     for (const n of BONE_NAMES) { av.pose[n] = { q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(1, 1, 1) }; }
-    buildFace(av);
+    if (av.kind === 'model') { LIVE.add(av); if (MODEL.state === 'ready') { av.built = true; buildModelBody(av); buildModelFace(av); } else root.visible = false; }
+    else { av.built = true; buildFace(av); }
     applyLook(av, look);
     if (opts && opts.shadows !== false) root.traverse(o => { if (o.isMesh && !o.userData.noShadow) { o.castShadow = true; o.receiveShadow = false; } });
     root.userData.avatar = av;
@@ -241,6 +483,7 @@
   // Cada pieza es un elipsoide o una cápsula que nace en la articulación de su hueso, así que al doblarse las uniones
   // quedan redondeadas y sin huecos.
   function buildBody(av, style) {
+    if (av.kind === 'model') return buildModelBody(av);
     clearTag(av, 'body'); clearTag(av, 'joint'); clearTag(av, 'hair');
     const M = av.mats, clay = style === 'stick';
     const C = clay ? { skin: M.white, shirt: M.white, pants: M.white, shoes: M.white } : { skin: M.skin, shirt: M.shirt, pants: M.pants, shoes: M.shoes };
@@ -416,7 +659,26 @@
     tpose:  { loop: true,  base: true, fn: t => ({ UpperArmL: [0, 0, PI / 2], UpperArmR: [0, 0, -PI / 2] }) },
     think:  { loop: true,  fn: t => ({ UpperArmR: [-1.0, 0.5, -0.2], LowerArmR: [-2.2, 0, 0], Head: [0.1, 0.25, 0.1], _face: 'neutral' }) },
     laugh:  { loop: true,  fn: t => ({ Chest: [-0.15 + sin(t * 18) * 0.05, 0, 0], Head: [-0.25 + sin(t * 18) * 0.05, 0, 0], UpperArmL: [-0.5, 0, 0.3], UpperArmR: [-0.5, 0, -0.3], LowerArmL: [-1.4, 0, 0], LowerArmR: [-1.4, 0, 0], _face: 'happy', _talk: 1 }) },
+    // ── Animaciones nuevas (el .glb solo trae T-pose): corporales + faciales ──
+    nod:    { loop: true,  fn: t => ({ Head: [0.32 * sin(t * 8) - 0.04, 0, 0], Neck: [0.1 * sin(t * 8), 0, 0], Chest: [0.03 * sin(t * 8), 0, 0], _face: 'happy' }) },
+    no:     { loop: true,  fn: t => ({ Head: [0, 0.55 * sin(t * 9), 0], Neck: [0, 0.2 * sin(t * 9), 0], Chest: [0, 0.06 * sin(t * 9), 0], _face: 'neutral' }) },
+    bow:    { loop: false, dur: 1.7, fn: (t, d) => { const k = sin(clamp(t / d, 0, 1) * PI), e = Math.min(1, k * 1.6); return { Spine: [0.55 * e, 0, 0], Chest: [0.45 * e, 0, 0], Neck: [0.1 * e, 0, 0], Head: [0.2 * e, 0, 0], UpperArmL: [0.25 * e, 0, 0.1 * e], UpperArmR: [0.25 * e, 0, -0.1 * e], UpperLegL: [-0.1 * e, 0, 0], UpperLegR: [-0.1 * e, 0, 0], _face: 'happy' }; } },
+    facepalm: { loop: true, fn: t => ({ UpperArmR: [-1.75, 0.25, 0.1], LowerArmR: [-1.95, 0, 0], HandR: [0, 0, 0], Head: [0.38 + sin(t * 2) * 0.02, 0.05, 0], Chest: [0.1, 0, 0], _face: 'sad' }) },
+    flex:   { loop: true,  fn: t => { const p = 0.5 + 0.5 * sin(t * 4); return { UpperArmL: [0, 0, -(1.35 + 0.2 * p)], UpperArmR: [0, 0, 1.35 + 0.2 * p], LowerArmL: [0, 0, -(1.6 + 0.4 * p)], LowerArmR: [0, 0, 1.6 + 0.4 * p], Chest: [-0.12, 0, 0], Head: [-0.12, 0, 0], UpperLegL: [0, 0, -0.12], UpperLegR: [0, 0, 0.12], _face: 'smug' }; } },
+    stretch: { loop: true, fn: t => { const s = sin(t * 1.6); return { UpperArmL: [-3.0, 0, -0.25 - 0.1 * s], UpperArmR: [-3.0, 0, 0.25 + 0.1 * s], Chest: [-0.22, 0, 0.1 * s], Spine: [-0.1, 0, 0.06 * s], Head: [-0.35, 0, 0], _face: 'yawn' }; } },
+    yawn:   { loop: false, dur: 2.6, fn: (t, d) => { const k = sin(clamp(t / d, 0, 1) * PI), e = Math.min(1, k * 2); return { Head: [-0.35 * e, 0, 0], Chest: [-0.1 * e, 0, 0], UpperArmR: [-1.9 * e, 0, 0], LowerArmR: [-2.0 * e, 0, 0], _face: 'yawn' }; } },
+    kick:   { loop: false, dur: 0.7, fn: (t, d) => { const k = clamp(t / d, 0, 1), e = Math.sin(Math.min(1, k * 1.15) * PI); return { Spine: [-0.18 * e, 0, 0], UpperLegR: [-1.55 * e, 0, 0], LowerLegR: [(0.9 - 0.9 * e) * e + 0.15 * e, 0, 0], FootR: [0.3 * e, 0, 0], UpperArmL: [-0.7 * e, 0, -0.35 * e], UpperArmR: [0.5 * e, 0, 0.3 * e], _face: 'angry' }; } },
+    spin:   { loop: false, dur: 0.75, fn: (t, d) => { const k = clamp(t / d, 0, 1), e = k * k * (3 - 2 * k); return { _y: Math.sin(k * PI) * 0.3, Hips: [0, PI * 2 * e, 0], UpperArmL: [0, 0, -1.2 * Math.sin(k * PI)], UpperArmR: [0, 0, 1.2 * Math.sin(k * PI)], _face: 'happy' }; } },
+    jumpingjacks: { loop: true, fn: t => { const k = 0.5 + 0.5 * sin(t * 10); return { _y: k * 0.14, UpperArmL: [0, 0, -(0.15 + 2.9 * k)], UpperArmR: [0, 0, 0.15 + 2.9 * k], UpperLegL: [0, 0, -(0.04 + 0.4 * k)], UpperLegR: [0, 0, 0.04 + 0.4 * k], LowerLegL: [0.1 * (1 - k), 0, 0], LowerLegR: [0.1 * (1 - k), 0, 0], _face: 'happy' }; } },
+    robot:  { loop: true,  fn: t => { const st = Math.floor(t * 4), a = st % 2, b = (st >> 1) % 2; return { Head: [0, (b ? 0.5 : -0.5), 0], Chest: [0, (b ? -0.2 : 0.2), 0], UpperArmR: [-1.57 * a, 0, 0.15], LowerArmR: [-1.57 * (1 - a), 0, 0], UpperArmL: [-1.57 * (1 - a), 0, -0.15], LowerArmL: [-1.57 * a, 0, 0], UpperLegL: [0, 0, -0.1], UpperLegR: [0, 0, 0.1], _face: 'neutral' }; } },
+    floss:  { loop: true,  fn: t => { const s = sin(t * 9); return { _y: -0.06 + Math.abs(s) * 0.03, Hips: [0, 0, -s * 0.22], Spine: [0.08, 0, s * 0.1], UpperArmL: [-0.5, 0, 0.1 + 0.95 * s], UpperArmR: [-0.5, 0, 0.95 * s - 0.1], LowerArmL: [-0.5, 0, 0], LowerArmR: [-0.5, 0, 0], UpperLegL: [-0.2, 0, 0], UpperLegR: [-0.2, 0, 0], LowerLegL: [0.4, 0, 0], LowerLegR: [0.4, 0, 0], Head: [0, 0, -s * 0.12], _face: 'smug' }; } },
+    cry:    { loop: true,  fn: t => { const q = sin(t * 14) * 0.04; return { UpperArmL: [-2.05, 0.35, 0.0], UpperArmR: [-2.05, -0.35, 0.0], LowerArmL: [-1.9, 0, 0], LowerArmR: [-1.9, 0, 0], Head: [0.32 + q, 0, 0], Chest: [0.12 + q, 0, 0], Spine: [0.08, 0, 0], _face: 'cry' }; } },
+    fistpump: { loop: true, fn: t => { const k = Math.max(0, sin(t * 8)); return { _y: k * 0.06, UpperArmR: [-0.4 - 1.5 * k, 0, 0.3], LowerArmR: [-1.5 - 0.3 * k, 0, 0], Chest: [-0.05, 0.15, 0], Head: [-0.12 * k, 0.1, 0], _face: 'happy' }; } },
+    lookaround: { loop: true, fn: t => { const s = sin(t * 1.5); return { Head: [0.02, 0.85 * s, 0], Neck: [0, 0.3 * s, 0], Chest: [0, 0.15 * s, 0], _face: 'neutral' }; } },
+    backflip: { loop: false, dur: 0.95, fn: (t, d) => { const k = clamp(t / d, 0, 1), e = k * k * (3 - 2 * k), tuck = Math.sin(clamp((k - 0.1) / 0.8, 0, 1) * PI); return { _y: Math.sin(k * PI) * 1.5, Hips: [-PI * 2 * e, 0, 0], UpperLegL: [-1.6 * tuck, 0, 0], UpperLegR: [-1.6 * tuck, 0, 0], LowerLegL: [1.9 * tuck, 0, 0], LowerLegR: [1.9 * tuck, 0, 0], UpperArmL: [-1.3 * tuck, 0, -0.3], UpperArmR: [-1.3 * tuck, 0, 0.3], _face: 'surprised' }; } },
   };
+
+  for (const n of ['nod', 'no', 'bow', 'facepalm', 'flex', 'stretch', 'yawn', 'kick', 'spin', 'jumpingjacks', 'robot', 'floss', 'cry', 'fistpump', 'lookaround', 'backflip']) EMOTES[n].phys = true;
 
   // update(av, dt, ctx): avanza la animación.
   //   ctx.speed    velocidad horizontal en studs/s (13.8 = velocidad normal del juego)
@@ -432,6 +694,11 @@
     const T = av.target[name] || (av.target[name] = { q: new THREE.Quaternion(), has: false });
     const qq = IDENT.clone().slerp(q, clamp(w, 0, 1)); if (!T.has) { T.q.copy(qq); T.has = true; } else T.q.multiply(qq);
   }
+  // Las poses ORIGINALES se escribieron suponiendo que +Z en un hueso L es "hacia afuera" (ver poseFall: "brazos abiertos"), pero físicamente es hacia
+  // adentro: por eso el reposo apretaba los brazos contra el torso y el salto los cruzaba. Se invierte Z de los huesos laterales al aplicarlas.
+  // Las animaciones nuevas (marcadas phys) ya están escritas con Z físico (L: negativo = afuera, R: positivo = afuera).
+  const LATERAL = /^(Shoulder|UpperArm|LowerArm|Hand|UpperLeg|LowerLeg|Foot|Toes)[LR]$/;
+  const flipQ = (n, a) => eulerQ(LATERAL.test(n) ? [a[0], a[1], -(a[2] || 0)] : a);
   const eulerQ = (a) => { E.set(a[0] || 0, a[1] || 0, a[2] || 0, 'XYZ'); return new THREE.Quaternion().setFromEuler(E); };
 
   function update(av, dt, ctx) {
@@ -452,11 +719,11 @@
     else if (loco === 'jump') base = poseJump(vy); else if (loco === 'fall') base = poseFall(S.t);
     else if (loco === 'move') base = poseLocomotion(S.phase, run, ctx); else base = poseIdle(S.t, ctx);
     av.target = {};
-    for (const n of BONE_NAMES) if (base[n]) blendInto(av, n, eulerQ(base[n]), 1);
+    for (const n of BONE_NAMES) if (base[n]) blendInto(av, n, held && animDef.phys ? eulerQ(base[n]) : flipQ(n, base[n]), 1);
     let y = base._y || 0;
     if (S.landT > 0.01 && !held && loco !== 'fall' && loco !== 'jump') {      // amortiguación al aterrizar
       const lp = poseLand(S.landT * S.landT), m = clamp(1 - speed * 0.04, 0.4, 1), w = clamp(S.landT * 1.4, 0, 1) * m;
-      for (const n of BONE_NAMES) if (lp[n]) blendInto(av, n, eulerQ(lp[n]), w);
+      for (const n of BONE_NAMES) if (lp[n]) blendInto(av, n, flipQ(n, lp[n]), w);
       y += (lp._y || 0) * m;
     }
 
@@ -468,7 +735,7 @@
       else {
         const w = clamp(el / 0.18, 0, 1) * (def.loop ? 1 : clamp((dur - el) / 0.2, 0, 1)), pp = def.fn(el * (em.speed || 1), dur);
         const moving = loco === 'move';
-        for (const n of Object.keys(pp)) { if (!BONE_SET.has(n)) continue; if (moving && (LEGS.test(n) || n === 'Hips')) continue; blendInto(av, n, eulerQ(pp[n]), w); }
+        for (const n of Object.keys(pp)) { if (!BONE_SET.has(n)) continue; if (moving && (LEGS.test(n) || n === 'Hips')) continue; blendInto(av, n, def.phys ? eulerQ(pp[n]) : flipQ(n, pp[n]), w); }
         if (pp._y && !moving) y += pp._y * w;
         if (pp._face) faceHint = pp._face; if (pp._talk) talk = pp._talk;
       }
@@ -498,6 +765,7 @@
   }
 
   function updateFace(av, dt, hint, talk, ctx) {
+    if (!av.face) return; if (av.face.kind === 'model') return updateFaceModel(av, dt, hint, talk, ctx);
     const S = av.state, f = av.face, cur = f.cur; S.faceT += dt;
     let name = av.layers.face || hint || (av.layers.anim && EMOTES[av.layers.anim.name] && EMOTES[av.layers.anim.name].fn(0, 1)._face) || (S.loco === 'fall' ? 'scared' : S.face);
     if (!FACE_PRESETS[name]) name = 'neutral';
@@ -560,7 +828,7 @@
     av.style = null; applyLook(av, av.look); // restablece materiales por hueso
   }
   function setLook(av, look) { applyLook(av, look); }
-  function setFace(av, name, talk) { if (name === null || name === undefined || name === 'auto') av.layers.face = null; else if (FACE_PRESETS[name]) av.layers.face = name; if (talk !== undefined) av.layers.talk = !!talk; }
+  function setFace(av, name, talk) { if (name === null || name === undefined || name === 'auto') av.layers.face = null; else if (FACES.includes(name)) av.layers.face = name; if (talk !== undefined) av.layers.talk = !!talk; }
 
   // ── Accesorios pegados a un hueso (espada, sombrero, mochila…) — solo visuales, sin colisión ──
   const ACC_SHAPES = { box: () => new THREE.BoxGeometry(1, 1, 1), sphere: () => new THREE.SphereGeometry(0.5, 14, 10), cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 14), cone: () => new THREE.ConeGeometry(0.5, 1, 14), capsule: () => capsuleGeo(0.5, 0.0001, 10) };
@@ -589,9 +857,10 @@
     if (st.acc) for (const id of Object.keys(st.acc)) { const a = st.acc[id]; if (a === null) removeAccessory(av, id); else addAccessory(av, id, a.bone, a); }
   }
 
-  function dispose(av) { av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
+  function dispose(av) { LIVE.delete(av); av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
 
   global.CrixAvatar = Object.assign({}, Shared, { ANIMATIONS: Object.keys(EMOTES),
-    build: buildAvatar, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
+    build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
   global.CrixAvatarShared = Shared;
+  loadModel(MODEL_URL);
 })(typeof window !== 'undefined' ? window : globalThis);

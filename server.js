@@ -637,7 +637,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js',
+const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 

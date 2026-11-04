@@ -1059,6 +1059,7 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 </div>
 <div id="toast"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="/GLTFLoader.js"></script>
 <script src="/crix-avatar.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -3467,7 +3468,7 @@ function _avatarFromScript(target, cmd) {
 function avatarChatCommand(text) {
   const m = /^\/(e|emote|emote|cara|face)\s*(\S*)/i.exec(text); if (!m) return false;
   const kind = m[1].toLowerCase(), arg = (m[2] || '').toLowerCase();
-  if (kind === 'cara' || kind === 'face') { const f = { feliz:'happy', triste:'sad', enojado:'angry', sorpresa:'surprised', sueno:'sleepy', guino:'wink' }[arg] || arg; if (CrixAvatar.FACES.includes(f)) _avatarSelf([{ op:'face', name:f }]); else addGMsg('Caras: ' + CrixAvatar.FACES.join(', '), 'sys'); return true; }
+  if (kind === 'cara' || kind === 'face') { const f = { feliz:'happy', triste:'sad', enojado:'angry', sorpresa:'surprised', sueno:'sleepy', guino:'wink', risa:'laugh', reir:'laugh', llanto:'cry', llorar:'cry', amor:'love', enamorado:'love', mareado:'dizzy', dolor:'hurt', bostezo:'yawn', lengua:'tongue', malvado:'evil', neutral:'neutral' }[arg] || arg; if (CrixAvatar.FACES.includes(f)) _avatarSelf([{ op:'face', name:f }]); else addGMsg('Caras: ' + CrixAvatar.FACES.join(', '), 'sys'); return true; }
   if (!arg || arg === 'stop' || arg === 'parar') { _avatarSelf([{ op:'stop' }, { op:'face', name:null }]); return true; }
   if (CrixAvatar.resolveAnim(arg)) _avatarSelf([{ op:'anim', name:arg }]); else addGMsg('Emotes: ' + CrixAvatar.ANIMATIONS.join(', '), 'sys');
   return true;
