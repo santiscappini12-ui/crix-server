@@ -4,9 +4,10 @@
  *  Un único módulo que construye el MISMO avatar para el jugador local, los jugadores remotos y los NPC.
  *  El origen del grupo está en los PIES (y = 0 es el suelo) y mide ~3.05 studs, igual que la caja de colisión.
  *
- *  Esqueleto (24 huesos, jerarquía real: cada hueso rota alrededor de su articulación):
+ *  Esqueleto (25 huesos, jerarquía real: cada hueso rota alrededor de su articulación):
  *
  *     Root ─ Hips ─┬─ Spine ─ Chest ─┬─ Neck ─ Head ─┬─ Jaw
+ *                  │                 │               ├─ Teeth  (dientes: setBone('Teeth', { visible: true|false }); sin orden, salen solos al abrir la boca)
  *                  │                 │               ├─ EyeL / EyeR
  *                  │                 │               └─ BrowL / BrowR (en la cara)
  *                  │                 ├─ ShoulderL ─ UpperArmL ─ LowerArmL ─ HandL
@@ -35,6 +36,7 @@
     ['Neck',       'Chest',     [0, 0.56, 0]],
     ['Head',       'Neck',      [0, 0.16, 0]],
     ['Jaw',        'Head',      [0, 0.08, 0.20]],
+    ['Teeth',      'Head',      [0, 0.29, 0.62]],
     ['EyeL',       'Head',      [-0.17, 0.40, 0.42]],
     ['EyeR',       'Head',      [0.17, 0.40, 0.42]],
     ['ShoulderL',  'Chest',     [-0.44, 0.46, 0]],
@@ -57,7 +59,7 @@
   const BONE_NAMES = BONES.map(b => b[0]);
   const BONE_SET = new Set(BONE_NAMES);
   const BONE_ALIAS = {
-    pelvis: 'Hips', cadera: 'Hips', torso: 'Chest', pecho: 'Chest', espalda: 'Spine', cuello: 'Neck', cabeza: 'Head', mandibula: 'Jaw',
+    pelvis: 'Hips', cadera: 'Hips', torso: 'Chest', pecho: 'Chest', espalda: 'Spine', cuello: 'Neck', cabeza: 'Head', mandibula: 'Jaw', dientes: 'Teeth', dentadura: 'Teeth',
     brazoizq: 'UpperArmL', brazoder: 'UpperArmR', antebrazoizq: 'LowerArmL', antebrazoder: 'LowerArmR', manoizq: 'HandL', manoder: 'HandR',
     piernaizq: 'UpperLegL', piernader: 'UpperLegR', pantorrillaizq: 'LowerLegL', pantorrillader: 'LowerLegR', pieizq: 'FootL', pieder: 'FootR',
     hombroizq: 'ShoulderL', hombroder: 'ShoulderR', ojoizq: 'EyeL', ojoder: 'EyeR',
@@ -177,7 +179,7 @@
   const LIVE = new Set();
   const MODEL_POS = {
     Hips: [0, 1.27, 0], Spine: [0, 0.32, 0], Chest: [0, 0.405, 0], Neck: [0, 0.548, 0], Head: [0, 0, 0], Jaw: [0, 0.18, 0.46],
-    ShoulderL: [-0.46, 0.294, 0], ShoulderR: [0.46, 0.294, 0], UpperArmL: [-0.29, 0, 0], UpperArmR: [0.29, 0, 0],
+    ShoulderL: [-0.31, 0.294, 0], ShoulderR: [0.31, 0.294, 0], UpperArmL: [-0.29, 0, 0], UpperArmR: [0.29, 0, 0],
     LowerArmL: [0, -0.634, 0], LowerArmR: [0, -0.634, 0], HandL: [0, -0.52, 0], HandR: [0, -0.52, 0],
     UpperLegL: [-0.275, 0.158, 0], UpperLegR: [0.275, 0.158, 0], LowerLegL: [0, -0.618, 0], LowerLegR: [0, -0.618, 0],
     FootL: [0, -0.481, 0], FootR: [0, -0.481, 0], ToesL: [0, -0.2, 0.3], ToesR: [0, -0.2, 0.3],
@@ -188,6 +190,7 @@
   const headQuat = (yaw, pitch) => new THREE.Quaternion().setFromEuler(new THREE.Euler(-pitch, yaw, 0, 'YXZ'));
   const EYE_YAW = 0.58, EYE_PITCH = 0.42, MOUTH_PITCH = -0.38;
   for (const s of ['L', 'R']) { const sx = s === 'L' ? -1 : 1; MODEL_POS['Eye' + s] = headPoint(sx * EYE_YAW, EYE_PITCH); MODEL_ROT['Eye' + s] = headQuat(sx * EYE_YAW, EYE_PITCH); }
+MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH_PITCH);   // mismo punto y orientación que la boca
 
   // [malla del .glb, hueso lógico, articulación (nodo del .glb) sobre la que gira la pieza]
   const MODEL_PARTS = [
@@ -293,29 +296,47 @@
     for (const s of ['L', 'R']) {
       const sx = s === 'L' ? -1 : 1, bone = av.visuals['Eye' + s], e = { bone, sx };
       e.white = fm(superPatch(0.42, 0.44, 0.006, 2.8), M.eyeW);
+      e.rim = (() => { const pts = [], R0 = HEAD.R; for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a), k = Math.pow(Math.pow(Math.abs(c), 2.8) + Math.pow(Math.abs(sn), 2.8), -1 / 2.8), x = c * k * 0.21, y = sn * k * 0.22; pts.push(new THREE.Vector3(x, y, 0.006 + sagZ(x, y, R0))); }
+        const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 48, 0.011, 5, true), M.line); m.userData.tag = 'face'; return m; })();   // contorno oscuro del ojo
       e.pupil = fm(new THREE.CircleGeometry(0.088, 18), M.eye, 0.016); e.glint = fm(new THREE.CircleGeometry(0.026, 10), M.eyeW, 0.02);
       e.heart = fm(heartGeo(0.30), M.heart, 0.02); e.heart.visible = false;
       e.spiral = (() => { const pts = []; for (let i = 0; i <= 40; i++) { const a = i / 40 * Math.PI * 5, r = 0.012 + i / 40 * 0.15; pts.push([Math.cos(a) * r, Math.sin(a) * r]); } const m = tubeLine(pts, 0.011, M.eye, 60); m.position.z = 0.02; m.visible = false; return m; })();
       e.xmark = new THREE.Group(); e.xmark.userData.tag = 'face'; e.xmark.visible = false; e.xmark.position.z = 0.02;
-      for (const a of [Math.PI / 4, -Math.PI / 4]) { const b = fm(new THREE.BoxGeometry(0.3, 0.05, 0.012), M.eyeW); b.rotation.z = a; e.xmark.add(b); }
-      e.arc = tubeLine([[-0.15, -0.05], [-0.07, 0.04], [0, 0.07], [0.07, 0.04], [0.15, -0.05]], 0.026, M.eyeW, 20); e.arc.position.set(0, -0.02, 0.012); e.arc.visible = false;
+      for (const a of [Math.PI / 4, -Math.PI / 4]) { const b = fm(new THREE.BoxGeometry(0.3, 0.05, 0.012), M.line); b.rotation.z = a; e.xmark.add(b); }
+      e.arc = tubeLine([[-0.15, -0.05], [-0.07, 0.04], [0, 0.07], [0.07, 0.04], [0.15, -0.05]], 0.026, M.line, 20); e.arc.position.set(0, -0.02, 0.012); e.arc.visible = false;
       e.hurt = new THREE.Group(); e.hurt.userData.tag = 'face'; e.hurt.visible = false; e.hurt.position.z = 0.02;
-      for (const a of [0.55, -0.55]) { const b = fm(new THREE.BoxGeometry(0.17, 0.045, 0.012), M.eyeW); b.position.set(-sx * 0.03, a * 0.1, 0); b.rotation.z = -sx * a; e.hurt.add(b); }
+      for (const a of [0.55, -0.55]) { const b = fm(new THREE.BoxGeometry(0.17, 0.045, 0.012), M.line); b.position.set(-sx * 0.03, a * 0.1, 0); b.rotation.z = -sx * a; e.hurt.add(b); }
       e.lid = gridMesh(8, 3, M.head); e.lid.position.z = 0; e.lid._cov = -9;
       e.tear = fm(new THREE.SphereGeometry(0.034, 8, 6), M.tear, 0.03); e.tear.scale.set(1, 1.5, 0.4); e.tear.visible = false;
-      for (const k of ['white', 'pupil', 'glint', 'heart', 'spiral', 'xmark', 'arc', 'hurt', 'lid', 'tear']) bone.add(e[k]);
+      for (const k of ['white', 'rim', 'pupil', 'glint', 'heart', 'spiral', 'xmark', 'arc', 'hurt', 'lid', 'tear']) bone.add(e[k]);
       f.eyes[s] = e;
       // ceja: pivote sobre el ojo, curvada a la altura que le toca
-      const piv = new THREE.Group(); piv.position.copy(MODEL_POS['Eye' + s]); piv.quaternion.copy(MODEL_ROT['Eye' + s]); piv.userData.tag = 'face'; F.add(piv);
+      const piv = new THREE.Group(); piv.position.fromArray(MODEL_POS['Eye' + s]); piv.quaternion.copy(MODEL_ROT['Eye' + s]); piv.userData.tag = 'face'; F.add(piv);
       const brow = new THREE.Group(); brow.userData.tag = 'face'; piv.add(brow);
-      const bm = fm(superPatch(0.30, 0.062, 0.012, 3.2, 0.31, sagZ(0, 0.31, HEAD.R)), M.eyeW); bm.position.y = -0.31; brow.add(bm); brow.position.y = 0.31; brow.position.z = sagZ(0, 0.31, HEAD.R);
+      const bm = fm(superPatch(0.30, 0.062, 0.012, 3.2, 0.31, sagZ(0, 0.31, HEAD.R)), M.line); bm.position.y = -0.31; brow.add(bm); brow.position.y = 0.31; brow.position.z = sagZ(0, 0.31, HEAD.R);
       f.brows[s] = { piv, brow };
     }
     // boca (blanca, como la del modelo original): malla deformable entre el labio superior y el inferior
     const G = new THREE.Group(); G.position.fromArray(headPoint(0, MOUTH_PITCH)); G.quaternion.copy(headQuat(0, MOUTH_PITCH)); G.userData.tag = 'face'; F.add(G);
     f.mouthGroup = G; f.mouth = gridMesh(20, 4, M.mouthW); G.add(f.mouth);
+    // dientes (hueso 'Teeth', mismo punto y orientación que la boca): 6 arriba + 6 abajo; cuelgan del labio superior y suben desde el inferior
+    const TG = G_geo('tooth', () => new THREE.BoxGeometry(1, 1, 1)); f.teeth = { up: [], dn: [] };
+    for (const row of ['up', 'dn']) for (let i = 0; i < TEETH_N; i++) { const t = new THREE.Mesh(TG, M.teeth); t.userData.tag = 'face'; t.userData.noShadow = true; t.frustumCulled = false; av.visuals.Teeth.add(t); f.teeth[row].push(t); }
     f.tongue = fm(superPatch(0.2, 0.13, 0.008, 2.4), M.tongue, 0.012); f.tongue.visible = false; G.add(f.tongue);
     av.face = f; updateMouthModel(av);
+  }
+  const TEETH_N = 6;
+  const G_geo = (key, make) => (geoCache[key] || (geoCache[key] = make()));
+  // Coloca los dientes siguiendo exactamente el contorno de la boca (mismas fórmulas que updateMouthModel)
+  function updateTeeth(av) {
+    const f = av.face; if (!f || !f.teeth) return; const c = f.cur, R = HEAD.R, w = c.w, cv = c.curve * 0.1, op = c.open * 0.2, th = 0.045, slot = 2 * w * 0.82 / TEETH_N;
+    for (let i = 0; i < TEETH_N; i++) {
+      const t = ((i + 0.5) / TEETH_N * 2 - 1) * 0.82, q = 1 - t * t, yb = -cv * q, tt = th * (0.35 + 0.65 * q) * 0.5, yU = yb + tt, yD = yb - tt - op * Math.pow(q, 0.7);
+      const h = Math.min(0.046, (yU - yD) * 0.5), x = t * w, up = f.teeth.up[i], dn = f.teeth.dn[i], show = h > 0.004;
+      up.visible = dn.visible = show; if (!show) continue;
+      up.scale.set(slot * 0.88, h, 0.01); up.position.set(x, yU - h / 2, 0.011 + sagZ(x, yU - h / 2, R));
+      dn.scale.set(slot * 0.88, h, 0.01); dn.position.set(x, yD + h / 2, 0.011 + sagZ(x, yD + h / 2, R));
+    }
   }
   function updateMouthModel(av) {
     const f = av.face, c = f.cur, R = HEAD.R, m = f.mouth, g = m.userData.grid, pos = m.geometry.attributes.position.array, nor = m.geometry.attributes.normal.array;
@@ -328,6 +349,7 @@
     const lowY = -cv - op * 0.55, showT = c.tongue > 0.05 || c.open > 0.6;
     f.tongue.visible = showT;
     if (showT) { const out = c.tongue; f.tongue.position.set(0, lowY - 0.02 - out * 0.07, 0.012 + sagZ(0, lowY, R) * 0 + out * 0.01); f.tongue.scale.set(0.7 + out * 0.5, 0.7 + out * 0.7, 1); }
+    updateTeeth(av);
   }
   function updateLid(e, cover, R) {
     const g = e.lid.userData.grid, pos = e.lid.geometry.attributes.position.array, nor = e.lid.geometry.attributes.normal.array, yb = 0.22 * (1 - 2 * cover);
@@ -340,11 +362,11 @@
     neutral:   { open: 0,    curve: 0.12, w: 0.15, browA: 0,    browY: 0,     cover: 0 },
     happy:     { open: 0.12, curve: 0.6,  w: 0.24, browA: 0.05, browY: 0.02,  cover: 0 },
     sad:       { open: 0,    curve: -0.7, w: 0.15, browA: -0.55, browY: 0,    cover: 0.28, ps: 1.1 },
-    angry:     { open: 0.08, curve: -0.5, w: 0.2,  browA: 0.65, browY: -0.03, cover: 0.32 },
+    angry:     { open: 0.08, curve: -0.5, w: 0.2,  browA: 0.65, browY: -0.03, cover: 0.32, teeth: 1 },
     surprised: { open: 0.85, curve: 0,    w: 0.11, browA: 0,    browY: 0.1,   cover: 0, ps: 0.55, big: 0.12 },
     sleepy:    { open: 0,    curve: 0.05, w: 0.12, browA: -0.1, browY: -0.02, cover: 0.65 },
     wink:      { open: 0.12, curve: 0.6,  w: 0.24, browA: 0.05, browY: 0.02,  cover: 0, wink: 'R' },
-    smug:      { open: 0,    curve: 0.4,  w: 0.2,  browA: 0.35, browY: 0,     cover: 0.38 },
+    smug:      { open: 0,    curve: 0.4,  w: 0.2,  browA: 0.35, browY: 0,     cover: 0.38, teeth: 1 },
     scared:    { open: 0.5,  curve: -0.3, w: 0.17, browA: -0.4, browY: 0.09,  cover: 0, ps: 0.45, big: 0.08, shake: 1 },
     talk:      { open: 0.2,  curve: 0.25, w: 0.18, browA: 0.05, browY: 0.01,  cover: 0 },
     dead:      { open: 0.2,  curve: -0.3, w: 0.15, browA: -0.2, browY: 0,     cover: 0, eye: 'x' },
@@ -355,7 +377,7 @@
     hurt:      { open: 0.45, curve: -0.4, w: 0.2,  browA: -0.4, browY: 0.04,  cover: 0, eye: 'hurt' },
     yawn:      { open: 1.0,  curve: 0,    w: 0.13, browA: -0.1, browY: 0.05,  cover: 0, close: 1 },
     tongue:    { open: 0.4,  curve: 0.55, w: 0.22, browA: 0.1,  browY: 0.03,  cover: 0, tongue: 1, wink: 'L' },
-    evil:      { open: 0.2,  curve: 0.8,  w: 0.3,  browA: 0.75, browY: -0.04, cover: 0.4 },
+    evil:      { open: 0.2,  curve: 0.8,  w: 0.3,  browA: 0.75, browY: -0.04, cover: 0.4, teeth: 1 },
   };
   const eyeModes = ['heart', 'spiral', 'xmark', 'arc', 'hurt'], modeKey = { heart: 'heart', spiral: 'spiral', x: 'xmark', arc: 'arc', hurt: 'hurt' };
   function updateFaceModel(av, dt, hint, talk, ctx) {
@@ -388,6 +410,7 @@
       if (mode === 'heart') { e.heart.scale.setScalar(1 + Math.abs(Math.sin(S.t * 6)) * 0.18); e.white.visible = true; }
       if (mode === 'spiral') e.spiral.rotation.z = -S.t * 7 * sx;
       if (mode === 'arc' || mode === 'x' || mode === 'hurt') e.white.visible = false;
+      e.rim.visible = e.white.visible;
       // pupila: se mueve con la mirada, se achica o agranda
       const px = c.lx * 0.075 + shake, py = c.ly * 0.06, ps = c.ps;
       e.pupil.position.set(px, py, sagZ(px, py, R) + 0.016); e.pupil.scale.set(ps, ps * 1.05, 1); e.glint.position.set(px + 0.03 * ps, py + 0.035 * ps, sagZ(px, py, R) + 0.02);
@@ -399,6 +422,9 @@
       // ceja
       const b = f.brows[s]; b.brow.position.y = 0.31 + c.browY + (pr.wink === s ? -0.025 : 0); b.brow.position.z = sagZ(0, b.brow.position.y, R); b.brow.rotation.z = sx * c.browA * 0.55;
     }
+    // dientes: av.teethMode = 'on' | 'off' (forzado con setBone('Teeth', { visible })) o null (automático)
+    const tm = av.teethMode, autoTeeth = c.open > 0.1 || !!pr.teeth;
+    av.visuals.Teeth.visible = (tm === 'on' ? true : tm === 'off' ? false : autoTeeth) && av.visuals.Head.visible;
     if (Math.abs(c.open - (f._lo === undefined ? -1 : f._lo)) > 0.008 || Math.abs(c.curve - (f._lc === undefined ? -9 : f._lc)) > 0.008 || Math.abs(c.w - (f._lw === undefined ? -1 : f._lw)) > 0.003 || Math.abs(c.tongue - (f._lt === undefined ? -1 : f._lt)) > 0.01) { f._lo = c.open; f._lc = c.curve; f._lw = c.w; f._lt = c.tongue; updateMouthModel(av); }
   }
 
@@ -454,8 +480,9 @@
     av.mats.eye = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.line = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.mouthIn = new THREE.MeshBasicMaterial({ color: 0x6a1d2a, side: THREE.DoubleSide });
-    av.mats.head = new THREE.MeshPhongMaterial({ color: 0x15171d, specular: 0x1c1f27, shininess: 35 });
-    av.mats.mouthW = new THREE.MeshBasicMaterial({ color: 0xffffff }); av.mats.tongue = new THREE.MeshBasicMaterial({ color: 0xe5566f });
+    av.mats.head = av.mats.skin;   // la cabeza usa el color de piel (arcilla en el estilo 'stick'), igual que el cuerpo: ya no es negra
+    av.mats.mouthW = new THREE.MeshBasicMaterial({ color: 0x2b1118 });   // interior de la boca (oscuro, para que resalten los dientes sobre la cabeza clara)
+    av.mats.teeth = new THREE.MeshBasicMaterial({ color: 0xfaf6ea, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); av.mats.tongue = new THREE.MeshBasicMaterial({ color: 0xe5566f });
     av.mats.heart = new THREE.MeshBasicMaterial({ color: 0xff3b5c, side: THREE.DoubleSide }); av.mats.tear = new THREE.MeshBasicMaterial({ color: 0x7fd0ff });
         av.pose = {}; av.target = {}; av.layers = { anim: null, emote: null, over: {} };
     av.state = { t: Math.random() * 10, blinkT: 2 + Math.random() * 3, blink: 0, face: look.face, faceT: 0, talk: 0, loco: 'idle', locoBlend: 0, phase: 0, landT: 0, lastGround: true, lastVy: 0, sitting: false };
@@ -814,7 +841,7 @@
     if (props.scale) o.scl = props.scale;
     if (props.weight !== undefined) o.w = props.weight;
     if (props.mode) o.mode = props.mode;
-    if (props.visible !== undefined) av.visuals[n].visible = props.visible;
+    if (props.visible !== undefined) { av.visuals[n].visible = props.visible; if (n === 'Teeth') av.teethMode = props.visible ? 'on' : 'off'; }
     if (props.color) setBoneColor(av, n, props.color);
     return true;
   }
@@ -823,8 +850,8 @@
     av.visuals[n].traverse(m => { if (m.isMesh && m.userData.tag === 'body') { if (!m.userData.ownMat) { m.material = m.material.clone(); m.userData.ownMat = true; } m.material.color.set(c); } });
   }
   function resetBone(av, n) {
-    if (n) { delete av.layers.over[n]; av.visuals[n].visible = true; av.visuals[n].traverse(m => { if (m.isMesh && m.userData.ownMat) { m.userData.ownMat = false; } }); return; }
-    av.layers.over = {}; for (const b of BONE_NAMES) av.visuals[b].visible = true;
+    if (n) { delete av.layers.over[n]; av.visuals[n].visible = true; if (n === 'Teeth') av.teethMode = null; av.visuals[n].traverse(m => { if (m.isMesh && m.userData.ownMat) { m.userData.ownMat = false; } }); return; }
+    av.layers.over = {}; av.teethMode = null; for (const b of BONE_NAMES) av.visuals[b].visible = true;
     av.style = null; applyLook(av, av.look); // restablece materiales por hueso
   }
   function setLook(av, look) { applyLook(av, look); }
