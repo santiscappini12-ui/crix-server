@@ -287,10 +287,10 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     return new THREE.ShapeGeometry(sh, 10);
   }
 
-  const BROW_Y = 0.30, PUPIL_R = 0.108, EYE_A = 0.21, EYE_B = 0.22, EYE_E = 2.8;
+  const BROW_Y = 0.30, PUPIL_R = 0.108, PUPIL_IN = 0.05, EYE_A = 0.21, EYE_B = 0.22, EYE_E = 2.8;
   // Mantiene la pupila (círculo de radio r) siempre dentro del blanco del ojo, con margen, sin importar hacia dónde mire
   function fitPupil(px, py, r) {
-    const a = Math.max(0.01, EYE_A - 0.03 - r), b = Math.max(0.01, EYE_B - 0.03 - r), k = Math.pow(Math.pow(Math.abs(px) / a, EYE_E) + Math.pow(Math.abs(py) / b, EYE_E), 1 / EYE_E);
+    const a = Math.max(0.01, EYE_A - 0.025 - r), b = Math.max(0.01, EYE_B - 0.025 - r), k = Math.pow(Math.pow(Math.abs(px) / a, EYE_E) + Math.pow(Math.abs(py) / b, EYE_E), 1 / EYE_E);
     return k > 1 ? [px / k, py / k] : [px, py];
   }
   // Ceja: banda arqueada, más gruesa en el extremo interior (hacia la nariz) y afinada hacia afuera; sigue la curvatura de la cabeza
@@ -429,7 +429,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       if (shut) e.arc.visible = true;   // ojo cerrado (parpadeo/guiño) = una línea curva oscura; se compensa el aplastado del hueso para que no desaparezca
       e.arc.scale.y = shut ? 0.45 / (sq * big) : 1;
       // pupila: se mueve con la mirada, se achica o agranda
-      const ps = c.ps, [px, py] = fitPupil(c.lx * 0.035 + shake, c.ly * 0.028 - 0.01, PUPIL_R * ps);   // mirada contenida: la pupila nunca se acerca al borde
+      const ps = c.ps, [px, py] = fitPupil(c.lx * 0.035 - sx * PUPIL_IN + shake, c.ly * 0.028 - 0.03, PUPIL_R * ps);   // PUPIL_IN: las dos pupilas se acercan a la nariz (convergen) para que no miren cada una hacia un lado   // mirada contenida: la pupila nunca se acerca al borde
       e.pupil.position.set(px, py, sagZ(px, py, R) + 0.016); e.pupil.scale.set(ps, ps, 1); e.glint.position.set(px + 0.034 * ps, py + 0.038 * ps, sagZ(px, py, R) + 0.02);
       // párpado negro: baja desde arriba e inclina según la emoción (enojo: lado interior abajo; tristeza: al revés)
       const cov = clamp(c.cover, 0, 0.95); e.lid.visible = normal && cov > 0.01;
