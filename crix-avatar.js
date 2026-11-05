@@ -287,7 +287,12 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     return new THREE.ShapeGeometry(sh, 10);
   }
 
-  const BROW_Y = 0.30;
+  const BROW_Y = 0.30, PUPIL_R = 0.108, EYE_A = 0.21, EYE_B = 0.22, EYE_E = 2.8;
+  // Mantiene la pupila (círculo de radio r) siempre dentro del blanco del ojo, con margen, sin importar hacia dónde mire
+  function fitPupil(px, py, r) {
+    const a = Math.max(0.01, EYE_A - 0.03 - r), b = Math.max(0.01, EYE_B - 0.03 - r), k = Math.pow(Math.pow(Math.abs(px) / a, EYE_E) + Math.pow(Math.abs(py) / b, EYE_E), 1 / EYE_E);
+    return k > 1 ? [px / k, py / k] : [px, py];
+  }
   // Ceja: banda arqueada, más gruesa en el extremo interior (hacia la nariz) y afinada hacia afuera; sigue la curvatura de la cabeza
   function browMesh(sx, mat) {
     const R = HEAD.R, cols = 16, rows = 2, m = gridMesh(cols, rows, mat), pos = m.geometry.attributes.position.array, nor = m.geometry.attributes.normal.array, L = 0.17, T = 0.088, z0 = sagZ(0, BROW_Y, R);
@@ -309,7 +314,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       e.white = fm(superPatch(0.42, 0.44, 0.006, 2.8), M.eyeW);
       e.rim = (() => { const pts = [], R0 = HEAD.R; for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a), k = Math.pow(Math.pow(Math.abs(c), 2.8) + Math.pow(Math.abs(sn), 2.8), -1 / 2.8), x = c * k * 0.21, y = sn * k * 0.22; pts.push(new THREE.Vector3(x, y, 0.006 + sagZ(x, y, R0))); }
         const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 48, 0.011, 5, true), M.line); m.userData.tag = 'face'; return m; })();   // contorno oscuro del ojo
-      e.pupil = fm(new THREE.CircleGeometry(0.088, 18), M.eye, 0.016); e.glint = fm(new THREE.CircleGeometry(0.026, 10), M.eyeW, 0.02);
+      e.pupil = fm(new THREE.CircleGeometry(PUPIL_R, 24), M.eye, 0.016); e.glint = fm(new THREE.CircleGeometry(0.03, 12), M.eyeW, 0.02);
       e.heart = fm(heartGeo(0.30), M.heart, 0.02); e.heart.visible = false;
       e.spiral = (() => { const pts = []; for (let i = 0; i <= 40; i++) { const a = i / 40 * Math.PI * 5, r = 0.012 + i / 40 * 0.15; pts.push([Math.cos(a) * r, Math.sin(a) * r]); } const m = tubeLine(pts, 0.011, M.eye, 60); m.position.z = 0.02; m.visible = false; return m; })();
       e.xmark = new THREE.Group(); e.xmark.userData.tag = 'face'; e.xmark.visible = false; e.xmark.position.z = 0.02;
@@ -370,23 +375,23 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   const MFACE = {
     neutral:   { open: 0,    curve: 0.12, w: 0.15, browA: 0,    browY: 0,     cover: 0 },
     happy:     { open: 0.12, curve: 0.6,  w: 0.24, browA: 0.05, browY: 0.02,  cover: 0 },
-    sad:       { open: 0,    curve: -0.7, w: 0.15, browA: -0.55, browY: 0,    cover: 0.28, ps: 1.1 },
-    angry:     { open: 0.08, curve: -0.5, w: 0.2,  browA: 0.65, browY: -0.03, cover: 0.32 },
-    surprised: { open: 0.85, curve: 0,    w: 0.11, browA: 0,    browY: 0.05,   cover: 0, ps: 0.55, big: 0.12 },
+    sad:       { open: 0,    curve: -0.7, w: 0.15, browA: -0.55, browY: 0,    cover: 0.28, ps: 1.1, brows: 1 },
+    angry:     { open: 0.08, curve: -0.5, w: 0.2,  browA: 0.65, browY: -0.03, cover: 0.32, brows: 1 },
+    surprised: { open: 0.85, curve: 0,    w: 0.11, browA: 0,    browY: 0.05,   cover: 0, ps: 0.55, big: 0.12, brows: 1 },
     sleepy:    { open: 0,    curve: 0.05, w: 0.12, browA: -0.1, browY: -0.02, cover: 0.65 },
     wink:      { open: 0.12, curve: 0.6,  w: 0.24, browA: 0.05, browY: 0.02,  cover: 0, wink: 'R' },
-    smug:      { open: 0,    curve: 0.4,  w: 0.2,  browA: 0.35, browY: 0,     cover: 0.38 },
-    scared:    { open: 0.5,  curve: -0.3, w: 0.17, browA: -0.4, browY: 0.09,  cover: 0, ps: 0.45, big: 0.08, shake: 1 },
+    smug:      { open: 0,    curve: 0.4,  w: 0.2,  browA: 0.35, browY: 0,     cover: 0.38, brows: 1 },
+    scared:    { open: 0.5,  curve: -0.3, w: 0.17, browA: -0.4, browY: 0.09,  cover: 0, ps: 0.45, big: 0.08, shake: 1, brows: 1 },
     talk:      { open: 0.2,  curve: 0.25, w: 0.18, browA: 0.05, browY: 0.01,  cover: 0, teeth: 1 },
     dead:      { open: 0.2,  curve: -0.3, w: 0.15, browA: -0.2, browY: 0,     cover: 0, eye: 'x' },
     laugh:     { open: 0.95, curve: 0.75, w: 0.3,  browA: 0,    browY: 0.02,  cover: 0, eye: 'arc', bounce: 1, teeth: 1 },
-    cry:       { open: 0.4,  curve: -0.7, w: 0.19, browA: -0.6, browY: 0.01,  cover: 0.2, ps: 1.15, tear: 1, shake: 0.5 },
+    cry:       { open: 0.4,  curve: -0.7, w: 0.19, browA: -0.6, browY: 0.01,  cover: 0.2, ps: 1.15, tear: 1, shake: 0.5, brows: 1 },
     love:      { open: 0.2,  curve: 0.65, w: 0.22, browA: 0,    browY: 0.04,  cover: 0, eye: 'heart' },
     dizzy:     { open: 0.18, curve: 0,    w: 0.15, browA: -0.1, browY: 0.02,  cover: 0, eye: 'spiral' },
-    hurt:      { open: 0.45, curve: -0.4, w: 0.2,  browA: -0.4, browY: 0.04,  cover: 0, eye: 'hurt' },
+    hurt:      { open: 0.45, curve: -0.4, w: 0.2,  browA: -0.4, browY: 0.04,  cover: 0, eye: 'hurt', brows: 1 },
     yawn:      { open: 1.0,  curve: 0,    w: 0.13, browA: -0.1, browY: 0.05,  cover: 0, close: 1 },
     tongue:    { open: 0.4,  curve: 0.55, w: 0.22, browA: 0.1,  browY: 0.03,  cover: 0, tongue: 1, wink: 'L', teeth: 1 },
-    evil:      { open: 0.2,  curve: 0.8,  w: 0.3,  browA: 0.75, browY: -0.04, cover: 0.4, teeth: 1 },
+    evil:      { open: 0.2,  curve: 0.8,  w: 0.3,  browA: 0.75, browY: -0.04, cover: 0.4, teeth: 1, brows: 1 },
   };
   const eyeModes = ['heart', 'spiral', 'xmark', 'arc', 'hurt'], modeKey = { heart: 'heart', spiral: 'spiral', x: 'xmark', arc: 'arc', hurt: 'hurt' };
   function updateFaceModel(av, dt, hint, talk, ctx) {
@@ -406,7 +411,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     S.blinkT -= dt; if (S.blinkT <= 0) { S.blink = 1; S.blinkT = Math.random() < 0.22 ? 0.22 : 2 + Math.random() * 4; }
     if (S.blink > 0) S.blink = Math.max(0, S.blink - dt * 7);
     const blinkK = Math.sin(S.blink * Math.PI);
-    S.sacT = (S.sacT === undefined ? 1 : S.sacT) - dt; if (S.sacT <= 0) { S.sacT = 0.8 + Math.random() * 3; S.sx = (Math.random() * 2 - 1) * 0.6; S.sy = (Math.random() * 2 - 1) * 0.4; }
+    S.sacT = (S.sacT === undefined ? 1 : S.sacT) - dt; if (S.sacT <= 0) { S.sacT = 0.8 + Math.random() * 3; S.sx = (Math.random() * 2 - 1) * 0.5; S.sy = (Math.random() * 2 - 1) * 0.3; }
     const hasLook = ctx && ctx.lookX !== undefined, tx = hasLook ? clamp(num(ctx.lookX), -1, 1) : (S.sx || 0), ty = hasLook ? clamp(num(ctx.lookY), -1, 1) : (S.sy || 0), lk = 1 - Math.exp(-dt * 14);
     c.lx += (tx - c.lx) * lk; c.ly += (ty - c.ly) * lk;
     const mode = pr.eye || 'n', shake = pr.shake ? Math.sin(S.t * 38) * 0.012 * pr.shake : 0;
@@ -424,15 +429,16 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       if (shut) e.arc.visible = true;   // ojo cerrado (parpadeo/guiño) = una línea curva oscura; se compensa el aplastado del hueso para que no desaparezca
       e.arc.scale.y = shut ? 0.45 / (sq * big) : 1;
       // pupila: se mueve con la mirada, se achica o agranda
-      const px = c.lx * 0.075 + shake, py = c.ly * 0.06, ps = c.ps;
-      e.pupil.position.set(px, py, sagZ(px, py, R) + 0.016); e.pupil.scale.set(ps, ps * 1.05, 1); e.glint.position.set(px + 0.03 * ps, py + 0.035 * ps, sagZ(px, py, R) + 0.02);
+      const ps = c.ps, [px, py] = fitPupil(c.lx * 0.035 + shake, c.ly * 0.028 - 0.01, PUPIL_R * ps);   // mirada contenida: la pupila nunca se acerca al borde
+      e.pupil.position.set(px, py, sagZ(px, py, R) + 0.016); e.pupil.scale.set(ps, ps, 1); e.glint.position.set(px + 0.034 * ps, py + 0.038 * ps, sagZ(px, py, R) + 0.02);
       // párpado negro: baja desde arriba e inclina según la emoción (enojo: lado interior abajo; tristeza: al revés)
       const cov = clamp(c.cover, 0, 0.95); e.lid.visible = normal && cov > 0.01;
       if (e.lid.visible) { if (Math.abs(cov - e.lid._cov) > 0.004) { e.lid._cov = cov; updateLid(e, cov, R); } e.lid.rotation.z = sx * c.browA * 0.5; }
       // lágrima que cae
       e.tear.visible = !!pr.tear; if (pr.tear) { const ph = (S.t * 0.9 + (s === 'L' ? 0 : 0.5)) % 1; e.tear.position.set(sx * 0.07, -0.16 - ph * 0.34, sagZ(0, -0.2 - ph * 0.34, R) + 0.03); e.tear.scale.set(1, 1.5, 0.4).multiplyScalar(1 - ph * 0.4); }
       // ceja
-      const b = f.brows[s]; b.brow.position.y = BROW_Y + c.browY + (pr.wink === s ? -0.025 : 0); b.brow.position.z = sagZ(0, b.brow.position.y, R); b.brow.rotation.z = sx * c.browA * 0.55;
+      const b = f.brows[s]; b.piv.visible = !!pr.brows;   // las cejas solo se ven en las expresiones que las usan
+      b.brow.position.y = BROW_Y + c.browY + (pr.wink === s ? -0.025 : 0); b.brow.position.z = sagZ(0, b.brow.position.y, R); b.brow.rotation.z = sx * c.browA * 0.55;
     }
     // dientes: av.teethMode = 'on' | 'off' (forzado con setBone('Teeth', { visible })) o null (automático)
     const tm = av.teethMode, autoTeeth = (pr.teeth ? c.open > 0.14 : talking > 0 && c.open > 0.3);   // solo en caras que los piden, o al hablar con la boca bien abierta if ((tm || null) !== f._tm) updateTeeth(av);
