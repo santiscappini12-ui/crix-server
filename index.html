@@ -2021,7 +2021,7 @@ async function uploadProfileAvatar(event) {
     const cropWidth = size / scale, cropHeight = size / scale;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(image, (image.width - cropWidth) / 2, (image.height - cropHeight) / 2, cropWidth, cropHeight, 0, 0, size, size);
-    const avatar = canvas.toDataURL('image/jpeg', 0.78);
+    const avatar = canvas.toDataURL('image/jpeg', 0.92);
     if (avatar.length > 180000) { showToast('La foto quedó demasiado pesada; probá con otra imagen'); return; }
     await apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:{ avatar } });
     ME.avatar = avatar;
@@ -2695,7 +2695,7 @@ function toggleProp(k){if(!selPart)return;recordStudioHistory();selPart.data[k]=
 function rebuildMesh(){ if(!selPart) return; stScene.remove(selPart.mesh); if(selOutline){stScene.remove(selOutline);selOutline=null;} selPart.mesh=selPart.data.isNPC?makeHumanoidRig(selPart.data):makeMesh(selPart.data);stScene.add(selPart.mesh);clearGizmo();selectPart(selPart); }
 function addScriptToPart(type){ if(!selPart){showToast('Seleccioná una parte primero');return;} const id='scr_'+Date.now(); stScripts.push({id,name:type+'_'+selPart.data.name,type,language:'javascript',event:'onStart',code:'function onStart() {\n  print("Script iniciado");\n}',parent:'ServerScriptService'}); refreshExplorer();openCodeEditor(id); }
 const FOLDERS = [
-  {id:'Workspace',icon:'🌍',label:'Workspace',addable:['Block','Sphere','Cylinder','Wedge','Script','LocalScript']},
+  {id:'Workspace',icon:'🌍',label:'Workspace',addable:['Block','Sphere','Cylinder','Wedge','Script','LocalScript','Sound']},
   {id:'ServerScriptService',icon:'🖥️',label:'ServerScriptService',addable:['Script','ModuleScript']},
   {id:'LocalScriptService',icon:'💻',label:'LocalScriptService',addable:['LocalScript','ModuleScript']},
   {id:'ReplicatedStorage',icon:'🔄',label:'ReplicatedStorage',addable:['ModuleScript','RemoteEvent']},
@@ -2739,8 +2739,8 @@ function refreshExplorer() {
       ).join('');
     }
     html2 += scripts.map(s =>
-      '<div class="exp-item" onclick="openCodeEditor(\''+s.id+'\')">'+
-      '<span style="font-size:10px">'+(s.type==='Script'?'📜':s.type==='LocalScript'?'📋':s.type==='RemoteEvent'?'📡':'📦')+'</span>'+
+      '<div class="exp-item" onclick="'+(s.type==='Sound'?'openSoundProps':'openCodeEditor')+'(\''+s.id+'\')">'+
+      '<span style="font-size:10px">'+(s.type==='Script'?'📜':s.type==='LocalScript'?'📋':s.type==='RemoteEvent'?'📡':s.type==='Sound'?'🔊':'📦')+'</span>'+
       '<span style="flex:1">'+esc(s.name)+'</span>'+
       '<span class="exp-ctx" onclick="event.stopPropagation();delScript(\''+s.id+'\')">✕</span>'+
       '</div>'
@@ -2750,6 +2750,7 @@ function refreshExplorer() {
   el.innerHTML = html2; updateStStatus();
 }
 function stuAddToFolder(type, folderId) {
+  if (type === 'Sound') { stuAddSound(folderId); return; }
   if (['Script','LocalScript','ModuleScript','RemoteEvent','Sound','BloomEffect','BlurEffect','SunRaysEffect'].includes(type)) {
     recordStudioHistory();
     const id = 'scr_'+Date.now();
@@ -2790,7 +2791,7 @@ function applyLighting() {
   if (stMapId) { const maps=getMaps(); if(maps[stMapId]){maps[stMapId].lighting=JSON.parse(JSON.stringify(stLighting));setMaps(maps);} }
 }
 function toggleFolder(el) { el.classList.toggle('open'); }
-function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖',ImportedMesh:'🧩'}[t]||'📦'; }
+function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖',ImportedMesh:'🧩',Sound:'🔊'}[t]||'📦'; }
 function updateStStatus() { document.getElementById('stu-status').textContent = `${stParts.length} partes · ${stScripts.length} scripts · #${stMapId||'?'}`; }
 function delScript(id) { if(!stScripts.some(s=>s.id===id))return;recordStudioHistory();stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
 function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); maps[stMapId].textureNames = {...stTexNames}; setMaps(maps); showToast('💾 Guardado'); if (Object.keys(stTexData).length) setTimeout(stPushTextures, 900); }
@@ -3197,6 +3198,9 @@ const localPlayer = {
 ['health','maxHealth','coins','deaths'].forEach(key => Object.defineProperty(localPlayer, key, {get: () => (playerState ? playerState[key] : 0)}));
 Object.defineProperty(localPlayer, 'position', {get: () => clone((playerState || {}).position || {x:0,y:0,z:0})});
 game.player = localPlayer; game.gui = gui;
+const sndCmd = (op, name, extra) => sendCommand('sound', Object.assign({op:op, name:String(name === undefined ? '' : name).slice(0,80)}, extra || {}));
+game.sound = { play:(name, opts) => sndCmd('play', name, opts || {}), stop:name => sndCmd('stop', name), pause:name => sndCmd('pause', name), resume:name => sndCmd('resume', name), setVolume:(name, v) => sndCmd('volume', name, {value:number(v,1)}), setSpeed:(name, v) => sndCmd('speed', name, {value:number(v,1)}), stopAll:() => sndCmd('stopAll', '') };
+game.playSound = game.sound.play; game.stopSound = game.sound.stop;
 const avCmd = (target, cmd) => sendCommand('avatar', {target: (target === undefined || target === null) ? 'me' : (typeof target === 'object' ? String(target.userId !== undefined ? target.userId : (target.id !== undefined ? target.id : target.name)) : String(target)), cmd: cmd});
 const avDefs = {
   playAnimation: (n, o) => Object.assign({op:'anim', name:String(n)}, o || {}), stopAnimation: n => ({op:'stop', name:n === undefined ? '' : String(n)}),
@@ -3376,6 +3380,7 @@ function playMap(mapId) {
   if (!gGameInited) { _initGame(); gGameInited = true; }
   _loadMap(m);
   startGameScripts(m.scripts||[],m.parts||[]);
+  CrixAudio.beginGame(mapId);
   if(runtimePhysicsHandle)clearInterval(runtimePhysicsHandle);runtimePhysicsHandle=setInterval(_stepScriptParts,16);
   document.getElementById('g-map-name').textContent = m.name;
 }
@@ -3608,7 +3613,7 @@ async function crixShare(kind, key) {
     try { document.getElementById('mo-game-page').classList.remove('open'); if (route) crixOpenRoute(route); else goTab0('home'); } finally { setTimeout(() => { window.__crixLock = false; }, 0); }
   });
 })();
-function exitGame() { gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
+function exitGame() { try{CrixAudio.stopAll();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
 const NET_RATE = 3;
 let remotePlayers = {};
@@ -3642,6 +3647,7 @@ function netConnect() {
   socket.on('join_ack',({playerCount})=>{updateNetPill('🟢',`${playerCount} jugador${playerCount!==1?'es':''}`);addGMsg(`✅ Conectado (${playerCount} en sala)`,'sys');});
   socket.on('player_joined',playerData=>{spawnRemote(playerData);addGMsg(`→ ${playerData.username} entró`,'sys');updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('player_moved',({socketId,x,y,z,ry,anim,moving,og})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.targetRY=ry;rp.anim=anim;rp.moving=moving;rp.og=og!==false;});
+  socket.on('sound_cmd',cmd=>{try{CrixAudio.command(cmd);}catch(_){}});
   socket.on('avatar_cmd',({target,diff}={})=>{if(target&&diff)applyAvatarDiff(target,diff);});
   socket.on('player_left',({socketId})=>{const rp=remotePlayers[socketId];if(rp){if(gScene)gScene.remove(rp.group);addGMsg(`← ${rp.data.username} salió`,'sys');delete remotePlayers[socketId];}updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});
@@ -4286,7 +4292,7 @@ function openUploadVideo() {
 }
 async function previewVideoUpload(e) {
   const file = e.target.files && e.target.files[0]; if (!file) return;
-  if (file.size > 60 * 1024 * 1024) { showToast('El video debe pesar menos de 60 MB'); e.target.value = ''; return; }
+  if (file.size > 2048 * 1024 * 1024) { showToast('El video debe pesar menos de 2 GB'); e.target.value = ''; return; }
   if (file.type && !/^video\/(mp4|webm|ogg|quicktime|x-m4v)$/.test(file.type)) { showToast('Formato no soportado. Usá MP4, WebM u OGG.'); e.target.value = ''; return; }
   _uvFile = file; _uvThumb = null;
   const preview = document.getElementById('uv-preview');
@@ -5275,6 +5281,7 @@ function _handleExtendedCommand(run, message) {
   if (c === 'guiSet') { if (typeof guiSet === 'function') guiSet(String(payload.name||''), String(payload.prop||''), payload.value); return true; }
   if (c === 'remote') { if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('script_remote', {name:String(payload.name||'').slice(0,40), data:payload.data}); return true; }
   if (c === 'avatar') { _avatarFromScript(String(payload.target || 'me'), payload.cmd); return true; }
+  if (c === 'sound') { CrixAudio.command({ ...payload, op: payload.op, name: payload.name }); return true; }
   if (c === 'toast') { gameBanner(String(payload.text||''), Number(payload.seconds)||3); return true; }
   return false;
 }
@@ -5514,9 +5521,9 @@ function guiEdPickImage(ev) {
   if (!/^image\//.test(file.type)) { showToast('Elegí una imagen'); return; }
   const reader = new FileReader();
   reader.onload = () => { const img = new Image(); img.onload = () => {
-    const max = 512, k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+    const max = 2048, k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    const data = c.toDataURL('image/png'); if (data.length > 380000) { showToast('La imagen es muy pesada, probá con una más simple'); return; }
+    const data = c.toDataURL('image/png'); if (data.length > 24000000) { showToast('La imagen es demasiado pesada'); return; }
     e.image = data; guiEdRenderStage(); guiEdRenderProps();
   }; img.src = reader.result; };
   reader.readAsDataURL(file);
@@ -5740,6 +5747,7 @@ const CODE_DOCS_HTML = '<h4>Tipos de script</h4><p><b>LocalScript</b>: corre en 
 '<h4>Eventos</h4><pre>game.onTouched("Pieza", () => { });\ngame.onKey("e", () => { });  // "space", "shift"…\ngame.on("died", () => { });  // won, coin</pre>'+
 '<h4>Contactos e impactos (Script de servidor)</h4><pre>game.onTouched("Pieza", (jugador, info) => { });  // jugador es null si la toca otra pieza\ngame.onTouchEnded("Pieza", (jugador, info) => { });\ngame.onImpact("Pieza", info => { }, 5);  // solo golpes &ge; 5 studs/s\nconst p = game.getPart("Pieza");  // estado actual</pre><p><code>info</code>: <code>speed</code> (studs/s), <code>normal</code> (de la otra pieza hacia esta), <code>velocity</code>, <code>part</code> y <code>other</code> ({kind:"player"|"part", name, x, y, z…}).</p>'+
 '<h4>GUI</h4><pre>const txt = gui.get("Puntos");\ntxt.text = "Puntos: 10";\ntxt.visible = false;\ngui.get("Barra").value = 0.5;\ngui.get("Boton").onClick(() => { });\ngui.get("Caja").onSubmit(v => { });\ngui.show("Menu"); gui.hide("Menu");\ngui.toast("¡Hola!", 3);</pre><p>Propiedades: <code>text visible value x y w h color bg opacity fontSize image</code>.</p>'+
+'<h4>Sonido</h4><pre>game.sound.play("Explosión");              // nombre de un Sound o de un audio importado\ngame.sound.play("Musica", {loop:true, volume:0.6});\ngame.sound.play("Motor", {part:"Auto"});   // 3D: sale de esa pieza\ngame.sound.stop("Musica"); game.sound.pause("Musica"); game.sound.resume("Musica");\ngame.sound.setVolume("Musica", 0.3); game.sound.setSpeed("Motor", 1.5);\ngame.sound.stopAll();</pre><p>Importá audios en 🔊 SoundService → + Sound (MP3, OGG, WAV, FLAC, M4A…). En Script de servidor, <code>game.sound.play(nombre, opts, jugador)</code> suena solo para ese jugador.</p>'+
 '<h4>Utilidades</h4><pre>task.wait(1);\ntask.delay(2, fn);\nconst id = task.every(1, fn); task.cancel(id);\nmath.random(1, 10); math.clamp(v, 0, 1);\nmath.lerp(a, b, t); math.dist(p1, p2);\ntime()  // segundos</pre>'+
 '<h4>Comportamientos sin código</h4><p>Seleccioná una pieza y elegí un <b>Comportamiento</b>: lava, trampolín, checkpoint, acelerador, moneda, cura, teletransporte o meta. En ⚙ Juego ajustás velocidad, salto, gravedad y vida.</p>';
 function codeToggleDocs() { const d = document.getElementById('code-docs'); if (!d.innerHTML) d.innerHTML = CODE_DOCS_HTML; d.classList.toggle('open'); }
@@ -5780,8 +5788,8 @@ function makeVideoThumb(file) {
     video.onloadedmetadata = () => { try { video.currentTime = Math.min(1, (video.duration || 2) / 4); } catch { finish(null); } };
     video.onseeked = () => {
       try {
-        const w = 320, h = Math.round(w * (video.videoHeight || 9) / (video.videoWidth || 16)), c = document.createElement('canvas'); c.width = w; c.height = h;
-        c.getContext('2d').drawImage(video, 0, 0, w, h); const d = c.toDataURL('image/jpeg', 0.72); finish(d.length < 190000 ? d : null);
+        const w = 640, h = Math.round(w * (video.videoHeight || 9) / (video.videoWidth || 16)), c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(video, 0, 0, w, h); const d = c.toDataURL('image/jpeg', 0.9); finish(d.length < 1900000 ? d : null);
       } catch { finish(null); }
     };
     video.onerror = () => finish(null);
@@ -6925,18 +6933,19 @@ async function stPushTextures(attempt) {
     else if (err.status !== 404) showToast('No se pudo subir la textura: ' + err.message);
   }
 }
+// Sin recomprimir cuando se puede: si la imagen ya entra en la resolución máxima se sube el ARCHIVO ORIGINAL (cero pérdida).
+// Solo si es más grande que `max` px se reduce (4096 por defecto, el máximo que soportan casi todas las GPU de celular).
 function downscaleImageFile(file, max) {
-  max = max || 512;
+  max = max || 4096;
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const po2 = n => { let q = 1; while (q * 2 <= n) q *= 2; return q; }, k = Math.min(1, max / Math.max(img.width, img.height));
-      const w = po2(Math.max(8, Math.round(img.width * k))), h = po2(Math.max(8, Math.round(img.height * k))), c = document.createElement('canvas');
-      c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h);
-      let out = /png|webp|gif/.test(file.type) ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.88);
-      if (out.length > 600000) out = c.toDataURL('image/jpeg', 0.72);
-      out.length > 600000 ? reject(new Error('La imagen es muy pesada; probá con una más chica')) : resolve({ url:out, w, h });
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      if (k === 1) { const r = new FileReader(); r.onload = () => resolve({ url: r.result, w: img.width, h: img.height }); r.onerror = () => reject(new Error('No se pudo leer la imagen')); r.readAsDataURL(file); return; }
+      const w = Math.max(8, Math.round(img.width * k)), h = Math.max(8, Math.round(img.height * k)), c = document.createElement('canvas');
+      c.width = w; c.height = h; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, w, h);
+      resolve({ url: file.type === 'image/jpeg' ? c.toDataURL('image/jpeg', 0.95) : c.toDataURL('image/png'), w, h });
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen')); };
     img.src = url;
@@ -6945,9 +6954,9 @@ function downscaleImageFile(file, max) {
 async function stuImportTexture(e) {
   const file = e.target.files && e.target.files[0]; e.target.value = ''; if (!file || !selPart) return;
   if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { showToast('Usá una imagen PNG, JPG, WEBP o GIF'); return; }
-  if (file.size > 12 * 1024 * 1024) { showToast('La imagen pesa más de 12 MB'); return; }
+  if (file.size > 64 * 1024 * 1024) { showToast('La imagen pesa más de 64 MB'); return; }
   try {
-    const { url } = await downscaleImageFile(file, 512);
+    const { url } = await downscaleImageFile(file, 4096);
     const id = stuAddTextureFromDataUrl(url, file.name.replace(/\.[^.]+$/, '')); if (!id) return;
     stuApplyTexture(id); showToast('🖼 Textura aplicada');
   } catch (err) { showToast(err.message); }
@@ -7515,6 +7524,193 @@ function aiUndo() {
   const studio = aiEl('s-studio'); if (studio) new MutationObserver(aiSync).observe(studio, { attributes: true, attributeFilter: ['class'] });
   aiSync();
 })();
+
+// ═══ Audio del juego (Sound): importar, reproducir, 3D y API de scripts ═══
+// Audios cortos → AudioBuffer (instantáneos). Audios largos (> 6 MB) → streaming con <audio>, sin decodificar todo en memoria.
+const CrixAudio = (() => {
+  let ctx = null, master = null, mapId = null, seq = 0, raf = 0, masterVol = 1;
+  const voices = new Map(), bufCache = new Map(), BIG = 6 * 1048576;
+  const mapObj = () => { try { return getMaps()[mapId] || null; } catch { return null; } };
+  const enc = encodeURIComponent;
+  function ac() {
+    if (!ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; ctx = new AC(); master = ctx.createGain(); master.gain.value = masterVol; master.connect(ctx.destination); }
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    return ctx;
+  }
+  const unlock = () => { try { ac(); } catch {} };
+  ['pointerdown', 'keydown', 'touchstart'].forEach(ev => addEventListener(ev, unlock, { passive: true }));
+  function url(mid, sid) {
+    const m = getMaps()[mid], base = '/api/maps/' + enc(mid) + '/sounds/' + enc(sid), token = DB.get('token');
+    return (m && (m.privacy || 'public') !== 'public' && token) ? base + '?t=' + enc(token) : base;
+  }
+  // key puede ser el nombre de un objeto Sound del explorador, el nombre de un audio importado o su id.
+  function resolve(key, mid) {
+    const m = (mid ? getMaps()[mid] : mapObj()); if (!m) return null; mid = mid || mapId;
+    key = String(key || ''); const low = key.toLowerCase(), assets = m.sounds || {};
+    const inst = (m.scripts || []).find(s => s.type === 'Sound' && (s.id === key || String(s.name).toLowerCase() === low));
+    if (inst && assets[inst.soundId]) return { mid, sid: inst.soundId, meta: assets[inst.soundId], volume: inst.volume ?? 1, loop: !!inst.looped, speed: inst.speed ?? 1, part: inst.part || '', maxDistance: inst.maxDistance ?? 120, refDistance: inst.refDistance ?? 8, inst };
+    const sid = Object.keys(assets).find(k => k === key || String(assets[k].name).toLowerCase() === low);
+    if (sid) return { mid, sid, meta: assets[sid], volume: 1, loop: false, speed: 1, part: '', maxDistance: 120, refDistance: 8 };
+    return null;
+  }
+  async function loadBuffer(mid, sid) {
+    const k = mid + '/' + sid; if (bufCache.has(k)) return bufCache.get(k);
+    const p = fetch(url(mid, sid)).then(r => { if (!r.ok) throw new Error('No se pudo bajar el audio (' + r.status + ')'); return r.arrayBuffer(); }).then(ab => ctx.decodeAudioData(ab));
+    bufCache.set(k, p); p.catch(() => bufCache.delete(k)); return p;
+  }
+  function partPos(name) {
+    try { for (const o of runtimeObjects.values()) if (o && o.mesh && o.data && (o.data.name === name || o.data.id === name || o.id === name)) return o.mesh.position; } catch {}
+    return null;
+  }
+  function setPanner(p, v3) { if (p.positionX) { p.positionX.value = v3.x; p.positionY.value = v3.y; p.positionZ.value = v3.z; } else p.setPosition(v3.x, v3.y, v3.z); }
+  function tick() {
+    raf = 0; let spatial = 0;
+    try {
+      const L = ctx && ctx.listener;
+      if (L && typeof gCamera !== 'undefined' && gCamera) {
+        const p = gCamera.position, f = new THREE.Vector3(0, 0, -1).applyQuaternion(gCamera.quaternion), u = new THREE.Vector3(0, 1, 0).applyQuaternion(gCamera.quaternion);
+        if (L.positionX) { L.positionX.value = p.x; L.positionY.value = p.y; L.positionZ.value = p.z; L.forwardX.value = f.x; L.forwardY.value = f.y; L.forwardZ.value = f.z; L.upX.value = u.x; L.upY.value = u.y; L.upZ.value = u.z; }
+        else { L.setPosition(p.x, p.y, p.z); L.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z); }
+      }
+      for (const v of voices.values()) if (v.panner) { spatial++; const pos = partPos(v.part); if (pos) setPanner(v.panner, pos); }
+    } catch {}
+    if (spatial) raf = requestAnimationFrame(tick);
+  }
+  function endVoice(v) { if (voices.get(v.id) === v) voices.delete(v.id); try { v.gain.disconnect(); if (v.panner) v.panner.disconnect(); } catch {} }
+  async function play(key, o = {}, opts = {}) {
+    const d = (opts.direct && opts.direct.sid) ? opts.direct : resolve(key); if (!d) { try { appendOutput('[warn] Sonido no encontrado: ' + key, 'warn'); } catch {} return null; }
+    if (!ac()) return null;
+    const num = (v, lo, hi, def) => { v = Number(v); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def; };
+    const vol = num(o.volume, 0, 10, d.volume), speed = num(o.speed, 0.1, 4, d.speed), loop = o.loop !== undefined ? !!o.loop : d.loop;
+    const part = o.part !== undefined ? String(o.part || '') : d.part;
+    const id = o.id ? String(o.id) : 'k:' + String(key);
+    const prev = voices.get(id); if (prev) stopVoice(prev);
+    const v = { id, name: String(key), sid: d.sid, part, gain: ctx.createGain(), panner: null, loop, speed, kind: d.meta.size > BIG ? 'media' : 'buf', startedAt: 0, offset: 0, paused: false };
+    v.gain.gain.value = vol; voices.set(id, v);
+    let tail = v.gain;
+    if (part) {
+      const pn = ctx.createPanner(); pn.panningModel = 'equalpower'; pn.distanceModel = 'inverse'; pn.refDistance = num(o.refDistance, 0.1, 1000, d.refDistance); pn.maxDistance = num(o.maxDistance, 1, 10000, d.maxDistance); pn.rolloffFactor = 1;
+      v.gain.connect(pn); pn.connect(master); v.panner = pn; tail = pn; const pos = partPos(part); if (pos) setPanner(pn, pos);
+      if (!raf) raf = requestAnimationFrame(tick);
+    } else v.gain.connect(master);
+    try {
+      if (v.kind === 'media') {
+        const el = new Audio(); el.crossOrigin = 'anonymous'; el.preload = 'auto'; el.src = url(d.mid, d.sid); el.loop = loop; el.playbackRate = speed;
+        v.el = el; v.node = ctx.createMediaElementSource(el); v.node.connect(v.gain); el.onended = () => { if (!v.loop) endVoice(v); };
+        await el.play();
+      } else {
+        const buf = await loadBuffer(d.mid, d.sid); if (voices.get(id) !== v) return v;
+        startBuf(v, buf, 0);
+      }
+    } catch (err) { endVoice(v); try { appendOutput('[warn] No se pudo reproducir «' + key + '»: ' + (err && err.message || err), 'warn'); } catch {} return null; }
+    return v;
+  }
+  function startBuf(v, buf, offset) {
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = v.loop; src.playbackRate.value = v.speed; src.connect(v.gain);
+    v.src = src; v.buf = buf; v.startedAt = ctx.currentTime - offset / v.speed; v.paused = false;
+    src.onended = () => { if (v.src === src && !v.paused && !v.loop) endVoice(v); };
+    src.start(0, offset % buf.duration);
+  }
+  function stopVoice(v) { try { if (v.src) { v.src.onended = null; v.src.stop(); } if (v.el) { v.el.onended = null; v.el.pause(); v.el.src = ''; } } catch {} endVoice(v); }
+  const matching = name => [...voices.values()].filter(v => v.name === String(name) || v.id === String(name) || v.id === 'k:' + String(name));
+  function pauseVoice(v) {
+    if (v.paused) return; v.paused = true;
+    if (v.el) v.el.pause(); else if (v.src) { v.offset = (ctx.currentTime - v.startedAt) * v.speed; try { v.src.onended = null; v.src.stop(); } catch {} }
+  }
+  function resumeVoice(v) { if (!v.paused) return; if (v.el) { v.paused = false; v.el.play().catch(() => {}); } else if (v.buf) startBuf(v, v.buf, v.offset || 0); }
+  function command(c) {
+    if (!c || typeof c !== 'object') return;
+    const name = String(c.name || '');
+    if (c.op === 'play') play(name, c);
+    else if (c.op === 'stop') matching(name).forEach(stopVoice);
+    else if (c.op === 'pause') matching(name).forEach(pauseVoice);
+    else if (c.op === 'resume') matching(name).forEach(resumeVoice);
+    else if (c.op === 'volume') matching(name).forEach(v => { v.gain.gain.value = Math.max(0, Math.min(10, Number(c.value) || 0)); });
+    else if (c.op === 'speed') matching(name).forEach(v => { v.speed = Math.max(0.1, Math.min(4, Number(c.value) || 1)); if (v.el) v.el.playbackRate = v.speed; else if (v.src) v.src.playbackRate.value = v.speed; });
+    else if (c.op === 'stopAll') stopAll();
+  }
+  function stopAll() { [...voices.values()].forEach(stopVoice); }
+  return {
+    play, command, stopAll, resolve,
+    setMap(id) { mapId = id; },
+    setMaster(v) { masterVol = Math.max(0, Math.min(2, Number(v) || 0)); if (master) master.gain.value = masterVol; },
+    // Vista previa en el editor (usa el audio ya subido, sin necesidad de guardar el objeto Sound)
+    preview(mid, sid, o = {}) { const meta = ((getMaps()[mid] || {}).sounds || {})[sid]; if (!meta) { showToast('Todavía no hay audio'); return; } mapId = mid; return play('__preview', o, { direct: { mid, sid, meta, volume: o.volume ?? 1, loop: !!o.loop, speed: o.speed ?? 1, part: '', maxDistance: 120, refDistance: 8 } }); },
+    stopPreview() { matching('__preview').forEach(stopVoice); },
+    // Al empezar la partida: se frena todo lo anterior y suenan los Sound con "Reproducir al iniciar".
+    beginGame(id) {
+      stopAll(); mapId = id; const m = mapObj(); if (!m) return;
+      (m.scripts || []).filter(s => s.type === 'Sound' && s.playOnStart && s.soundId).forEach(s => play(s.name));
+    },
+  };
+})();
+
+// ── Editor: objeto Sound (propiedades, importar audio, vista previa) ──
+function stSoundMeta(sid) { const m = getMaps()[stMapId]; return m && m.sounds && m.sounds[sid] || null; }
+function fmtBytes(n) { n = Number(n) || 0; return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+function stSoundUpdate(id, key, value) {
+  const s = stScripts.find(x => x.id === id && x.type === 'Sound'); if (!s) return; recordStudioHistory();
+  if (key === 'name') s.name = String(value).slice(0, 60) || 'Sound';
+  else if (['looped', 'playOnStart'].includes(key)) s[key] = !!value;
+  else if (key === 'part') s.part = String(value).slice(0, 80);
+  else if (key === 'soundId') s.soundId = String(value);
+  else { const lim = { volume: [0, 10, 1], speed: [0.1, 4, 1], maxDistance: [1, 10000, 120], refDistance: [0.1, 1000, 8] }[key]; if (lim) s[key] = Math.max(lim[0], Math.min(lim[1], Number(value))); if (!Number.isFinite(s[key])) s[key] = lim[2]; }
+  if (['name', 'soundId'].includes(key)) { refreshExplorer(); openSoundProps(id); }
+}
+function openSoundProps(id) {
+  const s = stScripts.find(x => x.id === id && x.type === 'Sound'); if (!s) return;
+  const m = getMaps()[stMapId] || {}, assets = m.sounds || {}, meta = assets[s.soundId], A = esc(id);
+  const num = (k, label, min, max, step) => '<div class="prop-row"><div class="prop-lbl">' + label + '</div><input class="prop-inp" type="number" min="' + min + '" max="' + max + '" step="' + step + '" value="' + (s[k] ?? '') + '" onchange="stSoundUpdate(\'' + A + '\',\'' + k + '\',this.value)"></div>';
+  const tgl = (k, label) => '<div class="prop-row"><div class="tgl-row" onclick="stSoundUpdate(\'' + A + '\',\'' + k + '\',!' + (s[k] ? 'true' : 'false') + ');this.querySelector(\'.tgl\').classList.toggle(\'on\')"><div class="tgl ' + (s[k] ? 'on' : '') + '"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">' + label + '</span></div></div>';
+  const opts = Object.keys(assets).map(k => '<option value="' + esc(k) + '"' + (k === s.soundId ? ' selected' : '') + '>' + esc(assets[k].name) + ' (' + fmtBytes(assets[k].size) + ')</option>').join('');
+  document.getElementById('props-body').innerHTML =
+    '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--yellow);background:var(--bg3);border-bottom:1px solid var(--border)">SOUND</div>' +
+    '<div class="prop-row"><div class="prop-lbl">Nombre (se usa en scripts: game.sound.play("nombre"))</div><input class="prop-inp" maxlength="60" value="' + esc(s.name) + '" onchange="stSoundUpdate(\'' + A + '\',\'name\',this.value)"></div>' +
+    '<div class="prop-row"><div class="prop-lbl">Audio</div><div style="font-size:11px;color:var(--text2);margin-bottom:6px">' + (meta ? '🔊 ' + esc(meta.name) + ' · ' + fmtBytes(meta.size) + ' · ' + esc(meta.ext) : 'Sin audio todavía') + '</div>' +
+      '<label class="btn" style="display:block;text-align:center;padding:7px;font-size:11px;cursor:pointer">⬆ Importar audio<input type="file" accept="audio/*,.mp3,.ogg,.oga,.wav,.flac,.m4a,.aac,.webm,.aif,.aiff" multiple style="display:none" onchange="stuImportSound(event,\'' + A + '\')"></label>' +
+      (opts ? '<select class="prop-inp" style="margin-top:6px" onchange="stSoundUpdate(\'' + A + '\',\'soundId\',this.value)"><option value="">— elegir de la biblioteca —</option>' + opts + '</select>' : '') + '<div id="snd-up-status" style="font-size:10px;color:var(--text3);margin-top:4px"></div></div>' +
+    '<div class="prop-row" style="display:flex;gap:6px"><button class="btn" style="flex:1;padding:6px;font-size:11px" onclick="CrixAudio.preview(stMapId,\'' + esc(s.soundId || '') + '\',{volume:' + (s.volume ?? 1) + ',speed:' + (s.speed ?? 1) + ',loop:' + (s.looped ? 'true' : 'false') + '})">▶ Probar</button><button class="btn" style="flex:1;padding:6px;font-size:11px;background:var(--bg3);color:var(--text)" onclick="CrixAudio.stopPreview()">⏹ Parar</button></div>' +
+    num('volume', 'Volumen (0 – 10)', 0, 10, 0.1) + num('speed', 'Velocidad / tono (0.1 – 4)', 0.1, 4, 0.05) + tgl('looped', 'En bucle (Looped)') + tgl('playOnStart', 'Reproducir al iniciar el juego') +
+    '<div class="prop-row"><div class="prop-lbl">Pieza emisora (vacío = sonido normal; con nombre de pieza = sonido 3D que sale de ella)</div><input class="prop-inp" maxlength="80" value="' + esc(s.part || '') + '" onchange="stSoundUpdate(\'' + A + '\',\'part\',this.value)"></div>' +
+    num('refDistance', 'Distancia a volumen pleno (studs)', 0.1, 1000, 1) + num('maxDistance', 'Distancia máxima (studs)', 1, 10000, 10) +
+    '<div style="padding:10px 12px;font-size:10px;color:var(--text3);line-height:1.6">Formatos: MP3, OGG, WAV, FLAC, M4A, AAC, WEBM, AIFF. Los audios largos se reproducen en streaming. Se guarda con 💾 Guardar.</div>';
+}
+function stSoundId(file) { let h = 5381; const t = file.name + file.size + file.lastModified; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return 'sn_' + (h >>> 0).toString(36) + Date.now().toString(36).slice(-4); }
+function putSoundFile(mapId, sid, file, name, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', '/api/maps/' + encodeURIComponent(mapId) + '/sounds/' + encodeURIComponent(sid) + '?name=' + encodeURIComponent(name));
+    xhr.setRequestHeader('Authorization', 'Bearer ' + DB.get('token')); xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(Math.round(e.loaded / e.total * 100)); };
+    xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch {} (xhr.status >= 200 && xhr.status < 300 && j.ok) ? resolve(j) : reject(new Error(j.err || ('Error ' + xhr.status))); };
+    xhr.onerror = () => reject(new Error('Sin conexión con el servidor')); xhr.send(file);
+  });
+}
+async function stuImportSound(e, scriptId) {
+  const files = [...(e.target.files || [])]; e.target.value = ''; if (!files.length || !stMapId) return;
+  if (!ME || !DB.get('token')) { showToast('Iniciá sesión para importar audio'); return; }
+  const status = t => { const el = document.getElementById('snd-up-status'); if (el) el.textContent = t; };
+  try {
+    // El juego tiene que existir en el servidor antes de subirle archivos.
+    stuSave(); const maps = getMaps(); await apiRequest('/api/maps', { method: 'POST', body: maps[stMapId] });
+    let last = null;
+    for (const [i, file] of files.entries()) {
+      const name = file.name.replace(/\.[^.]+$/, '').slice(0, 60) || 'Sonido', sid = stSoundId(file);
+      const r = await putSoundFile(stMapId, sid, file, name, p => status('Subiendo ' + (i + 1) + '/' + files.length + ' · ' + p + ' %'));
+      const cur = getMaps(); if (cur[stMapId]) { cur[stMapId].sounds = r.sounds; DB.set('maps', cur); } last = sid;
+    }
+    // Un solo audio → se asigna al Sound abierto. Varios → se crea un objeto Sound por cada uno.
+    const cur = getMaps(), assets = (cur[stMapId] || {}).sounds || {};
+    if (scriptId && stScripts.some(x => x.id === scriptId) && files.length === 1) stScripts.find(x => x.id === scriptId).soundId = last;
+    else files.forEach((f, i) => { const sid = Object.keys(assets).find(k => assets[k].name === (f.name.replace(/\.[^.]+$/, '').slice(0, 60))); if (sid && !stScripts.some(x => x.type === 'Sound' && x.soundId === sid)) stScripts.push({ id: 'snd_' + Date.now() + '_' + i, name: assets[sid].name, type: 'Sound', soundId: sid, volume: 1, speed: 1, looped: false, playOnStart: false, part: '', maxDistance: 120, refDistance: 8, code: '', language: 'javascript', parent: 'SoundService' }); });
+    stuSave(); refreshExplorer(); if (scriptId) openSoundProps(scriptId); showToast('🔊 Audio importado');
+  } catch (err) { status(''); showToast('No se pudo importar: ' + err.message); }
+}
+function stuAddSound(folderId) {
+  recordStudioHistory(); const id = 'snd_' + Date.now(), n = stScripts.filter(x => x.type === 'Sound').length + 1;
+  stScripts.push({ id, name: 'Sound' + n, type: 'Sound', soundId: '', volume: 1, speed: 1, looped: false, playOnStart: false, part: '', maxDistance: 120, refDistance: 8, code: '', language: 'javascript', parent: folderId || 'SoundService' });
+  refreshExplorer(); openSoundProps(id);
+}
 </script>
 </body>
 </html>

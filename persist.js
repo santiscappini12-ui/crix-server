@@ -29,6 +29,7 @@ const DATA_FILE = path.resolve(env.CRIX_DATA_FILE || path.join(__dirname, 'crix_
 const DATA_BASE = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, path.extname(DATA_FILE)));
 const VIDEO_DIR = DATA_BASE + '_videos';
 const TEX_DIR = DATA_BASE + '_textures';
+const SOUND_DIR = DATA_BASE + '_sounds';
 
 const DB_KEY = 'db/crix_data.json.gz';
 const BACKUP_PREFIX = 'db/backup-';
@@ -83,6 +84,11 @@ function s3Driver() {
     async put(key, body, contentType) {
       await client.send(new S3.PutObjectCommand({ Bucket: bucket, Key: K(key), Body: body, ContentLength: body.length, ContentType: contentType || 'application/octet-stream' }));
     },
+    // Sube desde el disco como stream (sin cargar el archivo entero en memoria: sirve para videos/audios enormes).
+    async putStream(key, file, contentType) {
+      const size = (await fsp.stat(file)).size;
+      await client.send(new S3.PutObjectCommand({ Bucket: bucket, Key: K(key), Body: fs.createReadStream(file), ContentLength: size, ContentType: contentType || 'application/octet-stream' }));
+    },
     async del(key) { await client.send(new S3.DeleteObjectCommand({ Bucket: bucket, Key: K(key) })); },
     async list(pfx) {
       const out = []; let token;
@@ -108,6 +114,7 @@ function dirDriver(root) {   // pruebas locales: una carpeta hace de bucket
     async get(key) { try { return await fsp.readFile(P(key)); } catch (e) { if (isNotFound(e)) return null; throw e; } },
     async getToFile(key, dest) { try { await fsp.copyFile(P(key), dest); return true; } catch (e) { if (isNotFound(e)) return false; throw e; } },
     async put(key, body) { await fsp.mkdir(path.dirname(P(key)), { recursive: true }); await fsp.writeFile(P(key), body); },
+    async putStream(key, file) { await fsp.mkdir(path.dirname(P(key)), { recursive: true }); await fsp.copyFile(file, P(key)); },
     async del(key) { await fsp.rm(P(key), { force: true }); },
     async list(pfx) {
       return walk(root).map(f => path.relative(root, f).split(path.sep).join('/')).filter(k => k.startsWith(pfx)).map(k => ({ key: k, size: fs.statSync(path.join(root, k)).size }));
@@ -131,7 +138,7 @@ function track(p) { inflight.add(p); p.finally(() => inflight.delete(p)); return
 function putFile(key, localPath) {
   if (!driver) return Promise.resolve(true);
   return track((async () => {
-    try { await retry(async () => driver.put(key, await fsp.readFile(localPath)), 3, 1000); retryQueue.delete(key); return true; }
+    try { await retry(async () => driver.putStream ? driver.putStream(key, localPath) : driver.put(key, await fsp.readFile(localPath)), 3, 1000); retryQueue.delete(key); return true; }
     catch (e) { console.error(`[PERSIST] No se pudo subir ${key}: ${e.message} (se reintentará)`); retryQueue.set(key, localPath); return false; }
   })());
 }
@@ -146,6 +153,16 @@ function delPrefix(prefix) {
     try { for (const o of await retry(() => driver.list(prefix), 3, 800)) { retryQueue.delete(o.key); await retry(() => driver.del(o.key), 3, 800); } }
     catch (e) { console.warn(`[PERSIST] No se pudo borrar ${prefix}*: ${e.message}`); }
   })());
+}
+async function fetchSound(mapId, sid) {   // igual que fetchTexture, para audios
+  if (!driver) return null;
+  try {
+    const found = await retry(() => driver.list(`sounds/${mapId}/${sid}.`), 3, 800);
+    if (!found.length) return null;
+    const dest = path.resolve(SOUND_DIR, found[0].key.slice('sounds/'.length));
+    if (!dest.startsWith(SOUND_DIR + path.sep)) return null;
+    return (await ensureLocal(found[0].key, dest)) ? dest : null;
+  } catch (e) { console.warn(`[PERSIST] No se pudo buscar el sonido ${sid}: ${e.message}`); return null; }
 }
 async function fetchTexture(mapId, tid) {   // baja una textura del bucket si no está en el disco (la extensión se descubre listando)
   if (!driver) return null;
@@ -257,10 +274,12 @@ async function restore() {
   // Migración / reparación: sube lo que exista en disco y falte en el bucket (en segundo plano).
   (async () => {
     const remoteVid = await retry(() => driver.list('videos/'), 3, 1000);
-    const have = new Set([...remoteTex, ...remoteVid].map(o => o.key));
+    const remoteSnd = await retry(() => driver.list('sounds/'), 3, 1000);
+    const have = new Set([...remoteTex, ...remoteVid, ...remoteSnd].map(o => o.key));
     const local = [
       ...walkLocal(VIDEO_DIR).map(f => ({ key: 'videos/' + f.split(path.sep).join('/'), file: path.join(VIDEO_DIR, f) })),
       ...walkLocal(TEX_DIR).map(f => ({ key: 'textures/' + f.split(path.sep).join('/'), file: path.join(TEX_DIR, f) })),
+      ...walkLocal(SOUND_DIR).map(f => ({ key: 'sounds/' + f.split(path.sep).join('/'), file: path.join(SOUND_DIR, f) })),
     ].filter(x => !have.has(x.key) && !x.file.endsWith('.part'));
     if (local.length) console.log(`[PERSIST] Subiendo ${local.length} archivo(s) locales que faltaban en el bucket`);
     await pool(local, 3, x => putFile(x.key, x.file));
@@ -270,8 +289,8 @@ async function restore() {
 }
 
 module.exports = {
-  DATA_FILE, VIDEO_DIR, TEX_DIR,
+  DATA_FILE, VIDEO_DIR, TEX_DIR, SOUND_DIR,
   get enabled() { return !!driver; },
   get restored() { return restored; },
-  restore, saveDb, putFile, delKey, delPrefix, ensureLocal, fetchTexture, flush,
+  restore, saveDb, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
 };

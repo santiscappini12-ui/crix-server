@@ -22,7 +22,17 @@ const io     = new Server(server, {
   pingTimeout: 45000, pingInterval: 15000,
   maxHttpBufferSize: 8e6,
 });
-app.use(express.json({ limit: '50mb' }));
+// ── Límites de medios ──
+// Prácticamente sin tope por defecto: se pueden ajustar con variables de entorno (en MB) sin tocar el código.
+// El costo real en Backblaze B2 es solo el espacio guardado (los primeros 10 GB son gratis, después ~US$6 por TB al mes).
+const envMB = (name, def) => { const v = Number(process.env[name]); return Math.round((Number.isFinite(v) && v > 0 ? v : def) * 1024 * 1024); };
+const LIM = {
+  json:  envMB('CRIX_MAX_JSON_MB', 256),       // cuerpo JSON (texturas en base64, mapas)
+  tex:   envMB('CRIX_MAX_TEXTURE_MB', 64),     // una textura / imagen
+  video: envMB('CRIX_MAX_VIDEO_MB', 2048),     // un video (se sube por streaming, no ocupa memoria)
+  sound: envMB('CRIX_MAX_SOUND_MB', 256),      // un audio (música larga incluida)
+};
+app.use(express.json({ limit: LIM.json }));
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = persist.DATA_FILE;
@@ -279,6 +289,13 @@ function handleScriptRunnerMessage(message) {
   if(message.type==='playerCommand'){
     const target=roomPlayers(room).find(player=>String(player.userId)===String(message.userId));
     if(target)io.to(target.socketId).emit('server_player_cmd',{op:String(message.op||''),...(message.payload&&typeof message.payload==='object'?message.payload:{})});
+    return;
+  }
+  if(message.type==='soundCommand'){
+    const channel=gameChannel(room.mapId,room.instanceId),raw=String(message.target??'*');
+    if(raw==='*'||raw==='all'){io.to(channel).emit('sound_cmd',message.cmd);return;}
+    const target=roomPlayers(room).find(player=>String(player.userId)===raw||String(player.socketId)===raw);
+    if(target)io.to(target.socketId).emit('sound_cmd',message.cmd);
     return;
   }
   if(message.type==='avatarCommand'){
@@ -554,8 +571,19 @@ const publicPlayer = p => ({ id:p.userId, socketId:p.socketId, username:p.userna
 // ── Almacenamiento de videos: archivos en disco (no base64 dentro del JSON de la base) ──
 const VIDEO_DIR = persist.VIDEO_DIR;
 const VIDEO_EXT = { 'video/mp4':'mp4', 'video/webm':'webm', 'video/ogg':'ogv' };
-const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
+const MAX_VIDEO_BYTES = LIM.video;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+// Guarda un stream (la petición HTTP) en disco sin cargarlo en memoria; corta si pasa del límite.
+function streamToFile(readable, dest, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const ws = fs.createWriteStream(dest); let n = 0, failed = false;
+    const fail = err => { if (failed) return; failed = true; try { readable.unpipe(ws); } catch {} ws.destroy(); try { fs.rmSync(dest, { force:true }); } catch {} reject(err); };
+    readable.on('data', c => { n += c.length; if (n > maxBytes) { const e = new Error('El archivo supera el máximo de ' + Math.round(maxBytes / 1048576) + ' MB'); e.code = 'TOO_BIG'; fail(e); } });
+    readable.on('error', fail); readable.on('aborted', () => fail(new Error('Subida cancelada')));
+    ws.on('error', fail); ws.on('finish', () => { if (!failed) resolve(n); });
+    readable.pipe(ws);
+  });
+}
 // Detecta el formato REAL por los primeros bytes (no confía en lo que diga el cliente).
 function sniffVideo(buf) {
   if (!buf || buf.length < 12) return null;
@@ -568,7 +596,7 @@ function sniffVideo(buf) {
 function videoFilePath(video) { return video && video.file ? path.join(VIDEO_DIR, path.basename(video.file)) : null; }
 function storeVideoBuffer(video, buffer) {
   if (!VIDEO_ID_RE.test(String(video.id))) throw new Error('Identificador de video inválido');
-  if (buffer.length > MAX_VIDEO_BYTES) throw new Error('El video supera el máximo de 60 MB');
+  if (buffer.length > MAX_VIDEO_BYTES) throw new Error('El video supera el máximo de ' + Math.round(MAX_VIDEO_BYTES / 1048576) + ' MB');
   const mime = sniffVideo(buffer);
   if (!mime) throw new Error('Formato no soportado. Usá MP4, WebM u OGG.');
   fs.mkdirSync(VIDEO_DIR, { recursive:true });
@@ -1139,7 +1167,7 @@ app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
 // ── Texturas de los juegos: archivos en disco (el mapa solo guarda la lista de ids) ──
 const TEX_DIR = persist.TEX_DIR;
 const TEX_ID_RE = /^tx_[a-z0-9]{3,40}$/, MAP_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const MAX_TEX_BYTES = 450 * 1024;   // sin límite de cantidad de texturas por juego
+const MAX_TEX_BYTES = LIM.tex;   // sin límite de cantidad de texturas por juego
 function sniffImage(buf) {   // formato REAL por los primeros bytes
   if (!buf || buf.length < 12) return null;
   if (buf[0] === 0x89 && buf.toString('latin1', 1, 4) === 'PNG') return { mime:'image/png', ext:'png' };
@@ -1157,12 +1185,12 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
   if (!canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
   const incoming = req.body && req.body.textures;
   if (!incoming || typeof incoming !== 'object') return res.status(400).json({ ok:false, err:'Faltan texturas' });
-  const entries = Object.entries(incoming).slice(0, 8), ids = new Set(map.textureIds || []), staged = [];
+  const entries = Object.entries(incoming).slice(0, 16), ids = new Set(map.textureIds || []), staged = [];
   for (const [tid, value] of entries) {
     if (!TEX_ID_RE.test(tid)) return res.status(400).json({ ok:false, err:'Identificador de textura inválido' });
     const buf = dataUrlToBuffer(value);
     if (!buf) return res.status(400).json({ ok:false, err:'Imagen inválida' });
-    if (buf.length > MAX_TEX_BYTES) return res.status(413).json({ ok:false, err:'La textura supera 450 KB' });
+    if (buf.length > MAX_TEX_BYTES) return res.status(413).json({ ok:false, err:'La textura supera ' + Math.round(MAX_TEX_BYTES / 1048576) + ' MB' });
     const kind = sniffImage(buf);
     if (!kind) return res.status(400).json({ ok:false, err:'Formato de imagen no soportado (PNG, JPG, WEBP o GIF)' });
     staged.push({ tid, buf, kind });
@@ -1187,6 +1215,72 @@ app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 
+// ── Sonidos de los juegos: archivos en disco + copia en el bucket (igual que las texturas) ──
+const SOUND_DIR = persist.SOUND_DIR;
+const SND_ID_RE = /^sn_[a-z0-9]{3,40}$/;
+const SND_MIME = { mp3:'audio/mpeg', ogg:'audio/ogg', wav:'audio/wav', flac:'audio/flac', m4a:'audio/mp4', aac:'audio/aac', webm:'audio/webm', aiff:'audio/aiff' };
+function sniffAudio(b) {   // formato REAL por los primeros bytes
+  if (!b || b.length < 12) return null;
+  const a4 = b.toString('latin1', 0, 4);
+  if (a4 === 'OggS') return 'ogg';
+  if (a4 === 'fLaC') return 'flac';
+  if (a4 === 'RIFF' && b.toString('latin1', 8, 12) === 'WAVE') return 'wav';
+  if (a4 === 'FORM' && ['AIFF','AIFC'].includes(b.toString('latin1', 8, 12))) return 'aiff';
+  if (b.toString('latin1', 0, 3) === 'ID3') return 'mp3';
+  if (b[0] === 0x1A && b[1] === 0x45 && b[2] === 0xDF && b[3] === 0xA3) return 'webm';
+  if (b.toString('latin1', 4, 8) === 'ftyp') return 'm4a';
+  if (b[0] === 0xFF && (b[1] & 0xF6) === 0xF0) return 'aac';          // AAC ADTS
+  if (b[0] === 0xFF && (b[1] & 0xE0) === 0xE0) return 'mp3';          // MPEG audio sin etiqueta
+  return null;
+}
+function soundDir(mapId) { return path.join(SOUND_DIR, mapId); }
+function soundFile(mapId, sid) { try { const f = fs.readdirSync(soundDir(mapId)).find(x => x.startsWith(sid + '.') && !x.endsWith('.part')); return f ? path.join(soundDir(mapId), f) : null; } catch { return null; } }
+// Subida binaria (sin base64): PUT /api/maps/:id/sounds/:sid?name=Explosión
+app.put('/api/maps/:id/sounds/:sid', requireAuth, async (req, res) => {
+  let tmp = null;
+  try {
+    const map = DB.maps[req.params.id];
+    if (!map || !MAP_ID_RE.test(req.params.id)) return res.status(404).json({ ok:false, err:'Guardá el juego antes de subir sonidos' });
+    if (!canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
+    if (!SND_ID_RE.test(req.params.sid)) return res.status(400).json({ ok:false, err:'Identificador de sonido inválido' });
+    if (Number(req.headers['content-length']) > LIM.sound) return res.status(413).json({ ok:false, err:'El audio supera ' + Math.round(LIM.sound / 1048576) + ' MB' });
+    fs.mkdirSync(soundDir(req.params.id), { recursive:true });
+    tmp = path.join(soundDir(req.params.id), `${req.params.sid}.${Date.now()}.part`);
+    const size = await streamToFile(req, tmp, LIM.sound);
+    if (!size) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Archivo vacío' }); }
+    const head = Buffer.alloc(16); const fd = fs.openSync(tmp, 'r'); fs.readSync(fd, head, 0, 16, 0); fs.closeSync(fd);
+    const ext = sniffAudio(head);
+    if (!ext) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Formato de audio no soportado (MP3, OGG, WAV, FLAC, M4A, AAC, WEBM o AIFF)' }); }
+    const name = `${req.params.sid}.${ext}`, old = soundFile(req.params.id, req.params.sid);
+    if (old && path.basename(old) !== name) { try { fs.unlinkSync(old); } catch {} persist.delKey(`sounds/${req.params.id}/${path.basename(old)}`); }
+    fs.renameSync(tmp, path.join(soundDir(req.params.id), name)); tmp = null;
+    await persist.putFile(`sounds/${req.params.id}/${name}`, path.join(soundDir(req.params.id), name));
+    map.sounds = map.sounds || {};
+    map.sounds[req.params.sid] = { name: String(req.query.name || 'Sonido').slice(0, 60), ext, mime: SND_MIME[ext], size };
+    saveDB();
+    res.json({ ok:true, sound: map.sounds[req.params.sid], sounds: map.sounds });
+  } catch (e) {
+    if (tmp) { try { fs.rmSync(tmp, { force:true }); } catch {} }
+    if (!res.headersSent) res.status(e.code === 'TOO_BIG' ? 413 : 500).json({ ok:false, err:e.message });
+  }
+});
+app.get('/api/maps/:id/sounds/:sid', async (req, res) => {
+  const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
+  if (!map || !MAP_ID_RE.test(req.params.id) || !SND_ID_RE.test(req.params.sid) || !canReadMap(map, user)) return res.status(404).end();
+  const file = soundFile(req.params.id, req.params.sid) || await persist.fetchSound(req.params.id, req.params.sid); if (!file) return res.status(404).end();
+  res.set({ 'Content-Type': SND_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
+  res.sendFile(file, { acceptRanges:true, dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
+});
+app.delete('/api/maps/:id/sounds/:sid', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map || !MAP_ID_RE.test(req.params.id) || !SND_ID_RE.test(req.params.sid)) return res.status(404).json({ ok:false });
+  if (!canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
+  const f = soundFile(req.params.id, req.params.sid);
+  if (f) { try { fs.unlinkSync(f); } catch {} persist.delKey(`sounds/${req.params.id}/${path.basename(f)}`); }
+  if (map.sounds) delete map.sounds[req.params.sid];
+  saveDB(); res.json({ ok:true, sounds: map.sounds || {} });
+});
+
 // ── SAVE mapa ──
 app.post('/api/maps', (req, res) => {
   try {
@@ -1200,7 +1294,7 @@ app.post('/api/maps', (req, res) => {
     const isOwner = !old || old.authorId === user.id || !!user.isAdmin;
     // Quien colabora no cambia la visibilidad ni el equipo; el equipo siempre lo decide el servidor.
     const body = isOwner ? m : { ...m, privacy:old.privacy, assignedPlayers:old.assignedPlayers };
-    const next = { ...body, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], collaborators: old?.collaborators || [] };
+    const next = { ...body, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [] };
     // En una sesión de equipo activa, las partes/scripts/luces ya llegan por cambios en vivo: un guardado completo no las pisa.
     if (old && teamInSession(m.id, user.id)) for (const k of TEAM_PROTECTED) if (old[k] !== undefined) next[k] = old[k];
     DB.maps[m.id] = next;
@@ -1223,7 +1317,7 @@ app.delete('/api/maps/:id', (req, res) => {
   delete DB.maps[req.params.id];
   if (DB.appData) delete DB.appData[req.params.id];
   if (DB.appScores) delete DB.appScores[req.params.id];
-  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${req.params.id}/`); }
+  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${req.params.id}/`); try { fs.rmSync(soundDir(req.params.id), { recursive:true, force:true }); } catch {} persist.delPrefix(`sounds/${req.params.id}/`); }
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
   res.json({ ok:true });
@@ -1458,7 +1552,7 @@ app.post('/api/videos', async (req, res) => {
       return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
     const old = idx >= 0 ? DB.videos[idx] : null;
     const privacy = ['public','private'].includes(v.privacy) ? v.privacy : 'public';
-    const thumb = typeof v.thumb === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(v.thumb) && v.thumb.length <= 200000 ? v.thumb : (old?.thumb || null);
+    const thumb = typeof v.thumb === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(v.thumb) && v.thumb.length <= 2000000 ? v.thumb : (old?.thumb || null);
     const saved = {
       ...(old || {}), id:String(v.id), title:String(v.title).slice(0,120), desc:String(v.desc || '').slice(0,2000), cat:String(v.cat || 'otros').slice(0,30),
       authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb,
@@ -1479,21 +1573,36 @@ app.post('/api/videos', async (req, res) => {
 });
 
 // Subida binaria del archivo (sin base64: más rápido y sin inflar 33 %).
-app.put('/api/videos/:id/file', express.raw({ type: () => true, limit: MAX_VIDEO_BYTES + 1024 }), async (req, res) => {
+app.put('/api/videos/:id/file', async (req, res) => {
+  let tmp = null;
   try {
     const user = readSession(req);
     if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
     const video = (DB.videos || []).find(x => x.id === req.params.id);
     if (!video) return res.status(404).json({ ok:false, err:'Primero creá el video' });
     if (video.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
-    if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ ok:false, err:'Archivo vacío' });
-    const wasReady = !!video.ready;
-    let upload; try { upload = storeVideoBuffer(video, req.body); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
-    await upload;
+    if (!VIDEO_ID_RE.test(String(video.id))) return res.status(400).json({ ok:false, err:'Identificador de video inválido' });
+    const declared = Number(req.headers['content-length']);
+    if (declared > MAX_VIDEO_BYTES) return res.status(413).json({ ok:false, err:'El video supera el máximo de ' + Math.round(MAX_VIDEO_BYTES / 1048576) + ' MB' });
+    fs.mkdirSync(VIDEO_DIR, { recursive:true });
+    tmp = path.join(VIDEO_DIR, `${video.id}.${Date.now()}.part`);
+    const size = await streamToFile(req, tmp, MAX_VIDEO_BYTES);
+    if (!size) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Archivo vacío' }); }
+    const head = Buffer.alloc(16); const fd = fs.openSync(tmp, 'r'); fs.readSync(fd, head, 0, 16, 0); fs.closeSync(fd);
+    const mime = sniffVideo(head);
+    if (!mime) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Formato no soportado. Usá MP4, WebM u OGG.' }); }
+    const wasReady = !!video.ready, oldPath = videoFilePath(video), file = `${video.id}.${VIDEO_EXT[mime]}`;
+    fs.renameSync(tmp, path.join(VIDEO_DIR, file)); tmp = null;
+    if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} persist.delKey('videos/' + path.basename(oldPath)); }
+    video.file = file; video.mime = mime; video.size = size; video.ready = true; delete video.data;
+    await persist.putFile('videos/' + file, path.join(VIDEO_DIR, file));
     saveDB();
     if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
     res.json({ ok:true, size:video.size, mime:video.mime });
-  } catch (e) { res.status(500).json({ ok:false, err:e.message }); }
+  } catch (e) {
+    if (tmp) { try { fs.rmSync(tmp, { force:true }); } catch {} }
+    if (!res.headersSent) res.status(e.code === 'TOO_BIG' ? 413 : 500).json({ ok:false, err:e.message });
+  }
 });
 
 app.post('/api/videos/:id/like', (req, res) => {

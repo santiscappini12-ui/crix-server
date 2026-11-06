@@ -285,6 +285,21 @@ const ISOLATE_EXTRAS = String.raw`
       return __av(t, { op:'pose', bones:out });
     };
 
+
+    // ── Sonido: lo reproducen los clientes. target omitido o '*' = todos; o un jugador (objeto/userId). Volumen 0-10, velocidad 0.1-4. ──
+    // game.sound.play('Explosión', { volume:0.8, loop:false, speed:1, part:'Caja', id:'mi-instancia' })  →  .stop('Explosión') · .pause · .resume · .setVolume · .stopAll()
+    const __snd = (t, cmd) => __soundCmd(t === undefined || t === null || t === '*' ? '*' : __avT(t), JSON.stringify(cmd));
+    game.sound = {
+      play: (name, opts, target) => __snd(target, Object.assign({ op:'play', name:String(name) }, opts || {})),
+      stop: (name, target) => __snd(target, { op:'stop', name:String(name) }),
+      pause: (name, target) => __snd(target, { op:'pause', name:String(name) }),
+      resume: (name, target) => __snd(target, { op:'resume', name:String(name) }),
+      setVolume: (name, volume, target) => __snd(target, { op:'volume', name:String(name), value:Number(volume) }),
+      setSpeed: (name, speed, target) => __snd(target, { op:'speed', name:String(name), value:Number(speed) }),
+      stopAll: target => __snd(target, { op:'stopAll' })
+    };
+    game.playSound = game.sound.play; game.stopSound = game.sound.stop;
+
     // ── Eventos remotos (LocalScript ↔ Script de servidor) ──
     const __remote = new Map();
     game.onClientEvent = (name, fn) => { if (typeof fn !== 'function') throw new TypeError('onClientEvent necesita una función'); const key = String(name); if (!__remote.has(key)) __remote.set(key, []); __remote.get(key).push(fn); };
@@ -313,6 +328,7 @@ function bootstrapSource(modules) {
     const __playerCmd = __crixPlayerCmd;
     const __remoteOut = __crixRemoteOut;
     const __avatarCmd = __crixAvatarCmd;
+    const __soundCmd = __crixSoundCmd;
     const __getVelocity = __crixGetVelocity;
     ${CRIXSCRIPT_PRELUDE}
     const __handlers = { touched:new Map(), touchEnded:new Map(), impact:new Map() };
@@ -422,7 +438,7 @@ function bootstrapSource(modules) {
         error(script.name+': '+(err && err.message || err));
       }
     }
-    delete globalThis.__crixRaycast; delete globalThis.__crixPlayerCmd; delete globalThis.__crixRemoteOut; delete globalThis.__crixAvatarCmd; delete globalThis.__crixGetVelocity;
+    delete globalThis.__crixRaycast; delete globalThis.__crixPlayerCmd; delete globalThis.__crixRemoteOut; delete globalThis.__crixAvatarCmd; delete globalThis.__crixSoundCmd; delete globalThis.__crixGetVelocity;
     delete globalThis.__crixEmit; delete globalThis.__crixGetPlayers; delete globalThis.__crixGetParts; delete globalThis.__crixLog; delete globalThis.__crixGetPart; delete globalThis.__crixWatch;
   `;
 }
@@ -501,6 +517,19 @@ function createRoom(message) {
     let cmd=null;try{cmd=JSON.parse(String(cmdJson));}catch(_){}
     if(!cmd||typeof cmd!=='object'||!CrixAvatar.sanitizeCommand(cmd))throw new Error('Orden de avatar inválida: '+String(cmd&&cmd.op));
     send({type:'avatarCommand',roomId:room.id,target:String(target).slice(0,120),cmd});
+  },{sync:true}));
+  jail.setSync('__crixSoundCmd',new ivm.Callback((target,cmdJson)=>{
+    if(String(cmdJson).length>2048)throw new Error('La orden de sonido supera 2 KB');
+    const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
+    if(room.commandTimes.length>=MAX_COMMANDS_PER_SECOND)throw new Error('Límite de cambios del mundo alcanzado');room.commandTimes.push(now);
+    let c=null;try{c=JSON.parse(String(cmdJson));}catch(_){}
+    if(!c||typeof c!=='object'||!['play','stop','pause','resume','volume','speed','stopAll'].includes(c.op))throw new Error('Orden de sonido inválida');
+    const num=(v,lo,hi,def)=>{v=Number(v);return Number.isFinite(v)?Math.max(lo,Math.min(hi,v)):def;};
+    const cmd={op:c.op,name:String(c.name||'').slice(0,80)};
+    if(c.op==='play'){cmd.volume=num(c.volume,0,10,1);cmd.speed=num(c.speed,0.1,4,1);cmd.loop=!!c.loop;cmd.part=c.part?String(c.part).slice(0,80):'';cmd.id=c.id?String(c.id).slice(0,40):'';cmd.maxDistance=num(c.maxDistance,1,10000,120);cmd.refDistance=num(c.refDistance,0.1,1000,8);}
+    if(c.op==='volume')cmd.value=num(c.value,0,10,1);
+    if(c.op==='speed')cmd.value=num(c.value,0.1,4,1);
+    send({type:'soundCommand',roomId:room.id,target:String(target).slice(0,120),cmd});
   },{sync:true}));
   jail.setSync('__crixLog',new ivm.Callback((cls,text)=>output(room,room.currentScriptName || 'Servidor',text,cls),{sync:true}));
   context.evalSync(bootstrapSource(modules),{timeout:1000});
