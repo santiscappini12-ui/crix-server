@@ -16,13 +16,13 @@ const { compileCrixScript, CRIXSCRIPT_PRELUDE } = require('./crixscript');
 const worldPhysics = require('./world-physics');
 
 const rooms = new Map();
-const MAX_ROOMS = 20;
+const MAX_ROOMS = Infinity;
 const CrixAvatar = require('./crix-avatar.js');
-const MAX_SCRIPTS_PER_ROOM = 8;
-const MAX_SOURCE_CHARS = 32 * 1024;
-const MAX_PARTS = 500;
-const MAX_COMMANDS_PER_SECOND = 300;
-const MAX_RAYS_PER_TICK = 200;
+const MAX_SCRIPTS_PER_ROOM = Infinity;
+const MAX_SOURCE_CHARS = Infinity;
+const MAX_PARTS = Infinity;
+const MAX_COMMANDS_PER_SECOND = Infinity;
+const MAX_RAYS_PER_TICK = Infinity;
 const PLAYER_OPS = new Set(['teleport','launch','speed','jump','damage','heal','health','kill','message','coins','setCoins','checkpoint']);
 const MAX_TICK_BUDGET_MS = 35;
 const MAX_SCRIPT_CALL_MS = 25;
@@ -452,8 +452,8 @@ function createRoom(message) {
     .slice(0, MAX_SCRIPTS_PER_ROOM);
   const modules = (Array.isArray(message.scripts) ? message.scripts : [])
     .filter(script => script && script.type === 'ModuleScript' && typeof script.code === 'string')
-    .slice(0,40).map(script => ({ id:String(script.id || script.name), name:String(script.name || 'ModuleScript'), code:(script.language === 'crixscript' ? compileCrixScript(script.code) : script.code).slice(0,MAX_SOURCE_CHARS) }));
-  const isolate = new ivm.Isolate({ memoryLimit:16 });
+    .map(script => ({ id:String(script.id || script.name), name:String(script.name || 'ModuleScript'), code:(script.language === 'crixscript' ? compileCrixScript(script.code) : script.code).slice(0,MAX_SOURCE_CHARS) }));
+  const isolate = new ivm.Isolate({ memoryLimit:Math.max(16, Number(process.env.CRIX_SCRIPT_MEMORY_MB) || 512) });
   const context = isolate.createContextSync();
   const room = {
     id:String(message.roomId), mapId:String(message.mapId), instanceId:String(message.instanceId),
@@ -504,14 +504,14 @@ function createRoom(message) {
   },{sync:true}));
   jail.setSync('__crixRemoteOut',new ivm.Callback((userId,name,dataJson)=>{
     name=String(name);if(!/^[\w.:-]{1,40}$/.test(name))throw new Error('Nombre de evento inválido');
-    if(String(dataJson).length>4096)throw new Error('Los datos del evento superan 4 KB');
+    if(String(dataJson).length>1e9)throw new Error('Los datos del evento superan 4 KB');
     const now=Date.now();room.remoteTimes=(room.remoteTimes||[]).filter(time=>now-time<1000);
     if(room.remoteTimes.length>=300)throw new Error('Límite de eventos remotos por segundo alcanzado');room.remoteTimes.push(now);
     let data=null;try{data=JSON.parse(String(dataJson));}catch(_){}
     send({type:'remoteOut',roomId:room.id,userId:String(userId).slice(0,100),name,data});
   },{sync:true}));
   jail.setSync('__crixAvatarCmd',new ivm.Callback((target,cmdJson)=>{
-    if(String(cmdJson).length>8192)throw new Error('La orden de avatar supera 8 KB');
+    if(String(cmdJson).length>1e9)throw new Error('La orden de avatar supera 8 KB');
     const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
     if(room.commandTimes.length>=MAX_COMMANDS_PER_SECOND)throw new Error('Límite de cambios del mundo alcanzado');room.commandTimes.push(now);
     let cmd=null;try{cmd=JSON.parse(String(cmdJson));}catch(_){}
@@ -519,7 +519,7 @@ function createRoom(message) {
     send({type:'avatarCommand',roomId:room.id,target:String(target).slice(0,120),cmd});
   },{sync:true}));
   jail.setSync('__crixSoundCmd',new ivm.Callback((target,cmdJson)=>{
-    if(String(cmdJson).length>2048)throw new Error('La orden de sonido supera 2 KB');
+    if(String(cmdJson).length>1e9)throw new Error('La orden de sonido supera 2 KB');
     const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
     if(room.commandTimes.length>=MAX_COMMANDS_PER_SECOND)throw new Error('Límite de cambios del mundo alcanzado');room.commandTimes.push(now);
     let c=null;try{c=JSON.parse(String(cmdJson));}catch(_){}

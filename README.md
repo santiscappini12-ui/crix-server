@@ -86,6 +86,18 @@ La plataforma es **global**: cuentas, perfiles, juegos, videos y publicaciones l
 
 En esta versión las instancias son salas separadas coordinadas por el proceso Node.js de Crix. No significa que todos jueguen en una sola sala. Para repartir salas entre varias máquinas físicas a gran escala, la plataforma todavía necesita un coordinador compartido y almacenamiento global con soporte para varios procesos; el repositorio no configura esa infraestructura por sí solo.
 
+## Varias instancias del servidor (sincronización)
+
+Si el alojamiento corre **más de una instancia** (escalado, o el solape entre el proceso viejo y el nuevo en un deploy), todas comparten la base a través del bucket (`CRIX_S3_*`). Cada registro (juego, usuario, sesión, video, publicación) lleva una marca `_u` de última modificación y los borrados dejan una lápida en `tomb`. Cada instancia baja la base remota cada 4 s (`CRIX_SYNC_MS` lo cambia) y antes de cada subida, y la **fusiona registro por registro** (gana el más reciente), así que un juego subido en una instancia aparece en todas y ninguna pisa el trabajo de las otras. Después avisa por Socket.IO a los clientes conectados a esa instancia (`map_new`, `map_updated`, `map_deleted`, …). Los mensajes del chat y las suscripciones push se unen sin perder ninguno.
+
+Sin bucket configurado hay un solo disco por instancia y no hay nada que compartir: ahí conviene correr **una sola** instancia.
+
+Limitaciones: las salas de juego, la presencia (quién está jugando dónde), las llamadas y los avisos de chat en vivo siguen siendo por instancia (un jugador solo ve a quienes están en su misma instancia). Para repartir salas entre máquinas hace falta un adaptador de Socket.IO compartido (por ejemplo Redis) o enrutamiento por sala.
+
+## Límites
+
+Se quitaron los topes de **cantidad y tamaño** de scripts (cantidad, caracteres, módulos), piezas (por instancia, en el editor y en la IA), texturas, sonidos, videos, importación OBJ, imágenes de GUI, colaboradores por proyecto, jugadores por servidor, posts, estado y rankings de las apps. Se mantienen solo protecciones que evitan que un script o un cliente cuelgue el servidor: tiempo máximo por llamada y por tick de un script, frecuencia de mensajes y de cuentas/inicios de sesión, y la validación de formatos. La memoria de cada script de servidor es de 512 MB por defecto (`CRIX_SCRIPT_MEMORY_MB`).
+
 ## Publicación y privacidad
 
 - Los juegos y mapas son públicos por defecto y se pueden limitar a amigos, usuarios asignados o solo al creador. Todo lo público aparece en el catálogo global de Crix para cualquier cuenta, sin importar el país ni la instancia de juego.
@@ -139,7 +151,7 @@ Crix.ready.then(async () => {
 
 Todas las funciones que hablan con el servidor devuelven una promesa con `{ ok, ... }` (o `{ ok:false, err }`). Si la app se abre sin sesión, `Crix.online` es `false`, la sala es solo para esa persona y `Crix.state` funciona localmente. Un ejemplo completo está en `examples/crix-multiplayer-demo.html`.
 
-Límites (para que una app no pueda saturar el servidor): 90 mensajes/s por persona, estado compartido de hasta 64 claves y 128 KB por sala, 20 rankings por app y 5000 entradas por ranking, guardados de hasta 64 KB por persona. El estado de la sala se borra cuando se va la última persona. El servidor solo reenvía entre personas de la misma instancia y nunca expone el token de sesión al iframe. Eventos Socket.IO: `app_hello`, `app_send`, `app_state_set`, `app_data_get/set`, `app_score_submit`, `app_score_top`.
+Sin topes de tamaño ni de cantidad (mensajes, claves de estado, rankings, entradas por ranking y guardados). Solo se conservan los límites de frecuencia contra inundación: 90 mensajes/s por persona. El estado de la sala se borra cuando se va la última persona. El servidor solo reenvía entre personas de la misma instancia y nunca expone el token de sesión al iframe. Eventos Socket.IO: `app_hello`, `app_send`, `app_state_set`, `app_data_get/set`, `app_score_submit`, `app_score_top`.
 
 ## Llamadas de voz y video
 

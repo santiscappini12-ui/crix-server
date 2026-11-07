@@ -82,7 +82,13 @@ function s3Driver() {
       return true;
     },
     async put(key, body, contentType) {
-      await client.send(new S3.PutObjectCommand({ Bucket: bucket, Key: K(key), Body: body, ContentLength: body.length, ContentType: contentType || 'application/octet-stream' }));
+      const r = await client.send(new S3.PutObjectCommand({ Bucket: bucket, Key: K(key), Body: body, ContentLength: body.length, ContentType: contentType || 'application/octet-stream' }));
+      return r.ETag || null;
+    },
+    // Identificador de versión del objeto (null si no existe): sirve para saber si otra instancia lo cambió.
+    async etag(key) {
+      try { const r = await client.send(new S3.HeadObjectCommand({ Bucket: bucket, Key: K(key) })); return r.ETag || null; }
+      catch (e) { if (isNotFound(e)) return null; throw e; }
     },
     // Sube desde el disco como stream (sin cargar el archivo entero en memoria: sirve para videos/audios enormes).
     async putStream(key, file, contentType) {
@@ -113,7 +119,8 @@ function dirDriver(root) {   // pruebas locales: una carpeta hace de bucket
     name: `carpeta ${root}`,
     async get(key) { try { return await fsp.readFile(P(key)); } catch (e) { if (isNotFound(e)) return null; throw e; } },
     async getToFile(key, dest) { try { await fsp.copyFile(P(key), dest); return true; } catch (e) { if (isNotFound(e)) return false; throw e; } },
-    async put(key, body) { await fsp.mkdir(path.dirname(P(key)), { recursive: true }); await fsp.writeFile(P(key), body); },
+    async put(key, body) { await fsp.mkdir(path.dirname(P(key)), { recursive: true }); await fsp.writeFile(P(key), body); return require('crypto').createHash('md5').update(body).digest('hex'); },
+    async etag(key) { try { return require('crypto').createHash('md5').update(await fsp.readFile(P(key))).digest('hex'); } catch (e) { if (isNotFound(e)) return null; throw e; } },
     async putStream(key, file) { await fsp.mkdir(path.dirname(P(key)), { recursive: true }); await fsp.copyFile(file, P(key)); },
     async del(key) { await fsp.rm(P(key), { force: true }); },
     async list(pfx) {
@@ -198,6 +205,31 @@ function ensureLocal(key, localPath) {   // descarga bajo demanda si el archivo 
 
 // ── Base de datos ──
 let pendingDb = null, dbUploading = false, dbTimer = null, lastDbUpload = 0, dbFailures = 0;
+// ── Varias instancias: la base remota se baja y se fusiona (ver db-sync.js) ──
+let syncApi = null, lastEtag = null, pulling = null, syncWarnAt = 0;
+function setSync(api) { syncApi = api; }
+// Baja la base remota si otra instancia la cambió y la fusiona con la local. true = la local cambió.
+function pullRemote() {
+  if (!driver || !restored || !syncApi) return Promise.resolve(false);
+  if (pulling) return pulling;
+  pulling = (async () => {
+    const tag = await driver.etag(DB_KEY);
+    if (!tag || tag === lastEtag) return false;
+    const gz = await driver.get(DB_KEY);
+    if (!gz) return false;
+    const remote = JSON.parse((await gunzip(gz)).toString('utf8'));
+    lastEtag = tag;   // si mientras tanto alguien subió otra versión, el próximo sondeo la ve igual
+    return !!syncApi.merge(remote);
+  })().catch(e => { if (Date.now() - syncWarnAt > 60000) { syncWarnAt = Date.now(); console.warn('[PERSIST] No se pudo sincronizar con el bucket:', e.message); } return false; })
+    .finally(() => { pulling = null; });
+  return pulling;
+}
+function startSync() {
+  if (!driver || !syncApi) return;
+  const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 4000);
+  setInterval(() => { pullRemote(); }, every).unref();
+  console.log(`[PERSIST] Sincronización entre instancias activa (cada ${every / 1000} s)`);
+}
 function saveDb(json) {
   if (!driver || !restored) return;
   pendingDb = json; kickDb();
@@ -210,10 +242,13 @@ function kickDb() {
 async function uploadDb() {
   dbTimer = null;
   if (pendingDb === null || dbUploading) return;
-  const json = pendingDb; pendingDb = null; dbUploading = true;
+  let json = pendingDb; pendingDb = null; dbUploading = true;
   try {
+    // Antes de subir, traer lo que otras instancias hayan guardado: así no se pisa su trabajo.
+    // Si hubo cambios, la fusión ya generó una base nueva en `pendingDb` (vía saveDb).
+    if (syncApi && await pullRemote() && pendingDb !== null) { json = pendingDb; pendingDb = null; }
     const gz = await gzip(Buffer.from(json, 'utf8'));
-    await driver.put(DB_KEY, gz, 'application/gzip');
+    lastEtag = await driver.put(DB_KEY, gz, 'application/gzip') || lastEtag;
     lastDbUpload = Date.now(); dbFailures = 0;
     await dailyBackup(gz).catch(e => console.warn('[PERSIST] Respaldo diario falló:', e.message));
   } catch (e) {
@@ -254,6 +289,7 @@ async function restore() {
 
   // Si algo falla acá se lanza el error: es preferible no arrancar antes que arrancar vacío y pisar la copia remota.
   const gz = await retry(() => driver.get(DB_KEY), 5, 1000);
+  try { lastEtag = await driver.etag(DB_KEY); } catch { lastEtag = null; }
   if (gz) {
     const json = (await gunzip(gz)).toString('utf8');
     const remoteV = Number(JSON.parse(json)._v) || 0;
@@ -292,5 +328,5 @@ module.exports = {
   DATA_FILE, VIDEO_DIR, TEX_DIR, SOUND_DIR,
   get enabled() { return !!driver; },
   get restored() { return restored; },
-  restore, saveDb, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
+  restore, saveDb, setSync, startSync, pullRemote, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
 };

@@ -20,19 +20,21 @@ const server = http.createServer(app);
 const io     = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
   pingTimeout: 45000, pingInterval: 15000,
-  maxHttpBufferSize: 8e6,
+  maxHttpBufferSize: 1e9,
 });
 // ── Límites de medios ──
 // Prácticamente sin tope por defecto: se pueden ajustar con variables de entorno (en MB) sin tocar el código.
 // El costo real en Backblaze B2 es solo el espacio guardado (los primeros 10 GB son gratis, después ~US$6 por TB al mes).
 const envMB = (name, def) => { const v = Number(process.env[name]); return Math.round((Number.isFinite(v) && v > 0 ? v : def) * 1024 * 1024); };
 const LIM = {
-  json:  envMB('CRIX_MAX_JSON_MB', 256),       // cuerpo JSON (texturas en base64, mapas)
-  tex:   envMB('CRIX_MAX_TEXTURE_MB', 64),     // una textura / imagen
-  video: envMB('CRIX_MAX_VIDEO_MB', 2048),     // un video (se sube por streaming, no ocupa memoria)
-  sound: envMB('CRIX_MAX_SOUND_MB', 256),      // un audio (música larga incluida)
+  json:  envMB('CRIX_MAX_JSON_MB', 8192),       // cuerpo JSON (texturas en base64, mapas)
+  tex:   envMB('CRIX_MAX_TEXTURE_MB', 8192),     // una textura / imagen
+  video: envMB('CRIX_MAX_VIDEO_MB', 1048576),     // un video (se sube por streaming, no ocupa memoria)
+  sound: envMB('CRIX_MAX_SOUND_MB', 1048576),      // un audio (música larga incluida)
 };
 app.use(express.json({ limit: LIM.json }));
+// Los listados de la API nunca se cachean (ni en el navegador ni en un proxy): cada cliente ve lo último que hay.
+app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = persist.DATA_FILE;
@@ -42,6 +44,7 @@ const DATA_FILE = persist.DATA_FILE;
 // a un disco persistente montado por el proveedor de alojamiento.
 // ══════════════════════════════════════════════
 let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, push: {}, _v: 0 };
+let dbSync = null;   // fusión entre instancias (db-sync.js); se crea justo después de loadDB()
 
 function loadDB() {
   try {
@@ -88,6 +91,7 @@ function loadDB() {
 let lastDbSig = null;
 function saveDB() {
   try {
+    if (dbSync) dbSync.reconcile();   // estampa `_u` en lo que cambió y deja lápidas de lo que se borró
     // Solo se escribe (y se sube al almacenamiento externo) si el contenido cambió.
     const prevV = DB._v || 0;
     DB._v = 0;
@@ -105,6 +109,31 @@ function saveDB() {
 }
 
 loadDB();
+
+// ── Varias instancias comparten la base a través del bucket: se fusionan los cambios de las demás ──
+function broadcastRemote(events) {
+  for (const [col, kind, id, rec] of events) {
+    if (col === 'maps') {
+      if (kind === 'new') { if ((rec.privacy || 'public') === 'public') io.emit('map_new', { mapId:id, name:rec.name, authorName:rec.authorName }); else io.emit('map_updated', { mapId:id }); }
+      else if (kind === 'updated') io.emit('map_updated', { mapId:id });
+      else if (kind === 'deleted') io.emit('map_deleted', { mapId:id });
+    } else if (col === 'videos') {
+      if (kind === 'new' && rec.ready !== false && (rec.privacy || 'public') === 'public') io.emit('video_new', { id, title:rec.title, authorId:rec.authorId, authorName:rec.authorName, cat:rec.cat, thumb:rec.thumb, created:rec.created, privacy:rec.privacy });
+      else if (kind === 'deleted') io.emit('video_deleted', { id });
+    } else if (col === 'posts') {
+      if (kind === 'new') io.emit('new_post', { id, authorId:rec.authorId, authorName:rec.authorName, text:(rec.text || '').substring(0, 100) });
+      else if (kind === 'deleted') io.emit('post_deleted', { id });
+    } else if (col === 'users') {
+      if (kind === 'new') io.emit('user_new', { userId:id, username:rec.username, color:rec.color });
+      else io.emit('user_updated', { userId:id });
+    }
+  }
+}
+dbSync = require('./db-sync')({ getDB: () => DB, onRemoteChange: broadcastRemote });
+dbSync.init();
+persist.setSync({ merge(remote) { const changed = dbSync.merge(remote); if (changed) saveDB(); return changed; } });
+persist.startSync();
+
 // Notificaciones push (mensajes, llamadas y solicitudes con la app cerrada)
 const push = require('./push')({ getDB: () => DB, saveDB });
 push.init();
@@ -180,7 +209,7 @@ function clearCall(userId, notify) {
   return c;
 }
 
-function maxPlayersFor(map) { const n = Number(map?.maxPlayers); return Number.isFinite(n) ? Math.max(1, Math.min(200, Math.floor(n))) : 50; }
+function maxPlayersFor(map) { const n = Number(map?.maxPlayers); return Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 50; }
 function roomKey(mapId, instanceId) { return JSON.stringify([mapId, instanceId]); }
 function gameChannel(mapId, instanceId) { return `game:${encodeURIComponent(mapId)}:${instanceId}`; }
 function getRoom(mapId, instanceId) {
@@ -196,25 +225,25 @@ function log(t,d) { console.log(`[${new Date().toLocaleTimeString()}] ${t}:`, d)
 
 function normalizeRoomPart(id, source = {}) {
   const pos=source.position||{}, size=source.size||{};
-  const number=(value,fallback=0,min=-10000,max=10000)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;};
+  const number=(value,fallback=0,min=-1e9,max=1e9)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;};
   const types=['Block','Sphere','Cylinder','Wedge','TrussPart','Spawn','ImportedMesh'];
   const materials=['SmoothPlastic','Plastic','Brick','Wood','WoodPlanks','Metal','DiamondPlate','Neon','Glass','Ice','Grass','Sand','Concrete','Rock','Marble','Cobblestone','Fabric'];
   const type=types.includes(source.type)?source.type:'Block';
   const part={
     id:String(id).slice(0,120), name:String(source.name||'Part').slice(0,80), type,
     x:number(source.x??pos.x??pos.X),y:number(source.y??pos.y??pos.Y),z:number(source.z??pos.z??pos.Z),
-    sx:number(source.sx??size.x??size.X,4,0.1,1000),sy:number(source.sy??size.y??size.Y,4,0.1,1000),sz:number(source.sz??size.z??size.Z,4,0.1,1000),
+    sx:number(source.sx??size.x??size.X,4,0.001,1e9),sy:number(source.sy??size.y??size.Y,4,0.001,1e9),sz:number(source.sz??size.z??size.Z,4,0.001,1e9),
     rx:number(source.rx),ry:number(source.ry),rz:number(source.rz),
     color:/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?String(source.color):'#5b8def',
     material:materials.includes(source.material)?source.material:'SmoothPlastic',
     anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:number(source.transparent,0,0,0.95),
     behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',
-    behaviorValue:number(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),
-    textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:number(source.texScale,4,0.25,64),texTint:source.texTint===true,
+    behaviorValue:number(source.behaviorValue,0,-1e9,1e9),target:String(source.target||'').slice(0,80),
+    textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:number(source.texScale,4,0.001,1e6),texTint:source.texTint===true,
   };
   for(const [key,lo,hi,fallback] of [['friction',0,1,0.15],['bounce',0,1,0.05],['drag',0,1,0.003],['gravityScale',-5,5,1]])if(source[key]!==undefined&&source[key]!==null)part[key]=number(source[key],fallback,lo,hi);
-  if(Array.isArray(source.tags))part.tags=source.tags.slice(0,8).map(tag=>String(tag).slice(0,40));
-  if(type==='ImportedMesh'&&typeof source.meshData==='string'&&source.meshData.length<=2*1024*1024)part.meshData=source.meshData;
+  if(Array.isArray(source.tags))part.tags=source.tags.slice(0,1000).map(tag=>String(tag).slice(0,40));
+  if(type==='ImportedMesh'&&typeof source.meshData==='string')part.meshData=source.meshData;
   return part;
 }
 
@@ -485,7 +514,7 @@ function canReadMap(map, user) {
 // map.collaborators = ids de cuentas que pueden editar el proyecto (lo administra solo el creador o un admin).
 // Mientras alguien edita en vivo (sesión de equipo), el servidor es la fuente de verdad: aplica cada cambio (parte, script,
 // iluminación…) sobre el mapa y lo reenvía al resto; un guardado completo (POST /api/maps) no pisa esos campos.
-const MAX_COLLABORATORS = 20;
+const MAX_COLLABORATORS = Infinity;
 const TEAM_PROTECTED = ['parts', 'scripts', 'lighting', 'settings', 'guis'];
 const teamSessions = {};   // mapId → { members: Map(socketId → {userId,username,color,sel}), rev }
 function canEditMap(map, user) {
@@ -1187,7 +1216,7 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
   if (!canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
   const incoming = req.body && req.body.textures;
   if (!incoming || typeof incoming !== 'object') return res.status(400).json({ ok:false, err:'Faltan texturas' });
-  const entries = Object.entries(incoming).slice(0, 16), ids = new Set(map.textureIds || []), staged = [];
+  const entries = Object.entries(incoming), ids = new Set(map.textureIds || []), staged = [];
   for (const [tid, value] of entries) {
     if (!TEX_ID_RE.test(tid)) return res.status(400).json({ ok:false, err:'Identificador de textura inválido' });
     const buf = dataUrlToBuffer(value);
@@ -1674,7 +1703,6 @@ app.post('/api/posts', (req, res) => {
       return res.status(403).json({ ok:false, err:'No podés editar esta publicación' });
     const savedPost = { ...(previous || {}), ...p, authorId:previous?.authorId || user.id, authorName:previous?.authorName || user.username, privacy:'public' };
     if (index >= 0) DB.posts[index] = savedPost; else DB.posts.unshift(savedPost);
-    if (DB.posts.length > 500) DB.posts = DB.posts.slice(0, 500);
     saveDB();
     io.emit('new_post', { id: savedPost.id, authorId: savedPost.authorId, authorName: savedPost.authorName, text: (savedPost.text||'').substring(0,100) });
     res.json({ ok: true });
@@ -1895,16 +1923,16 @@ io.on('connection', socket => {
     const ack = ackFn(cb), user = socket.data.user, mapId = socket.data.teamMapId;
     const sess = mapId && teamSessions[mapId], map = mapId && DB.maps[mapId];
     if (!sess || !sess.members.has(socket.id) || !map || !canEditMap(map, user)) return ack({ ok:false, err:'No estás en una sesión de equipo' });
-    if (!rateOk(socket, 'team', 30) || !Array.isArray(ops) || !ops.length || ops.length > 300) return ack({ ok:false });
-    const applied = []; let budget = 4e6;
+    if (!rateOk(socket, 'team', 30) || !Array.isArray(ops) || !ops.length) return ack({ ok:false });
+    const applied = []; let budget = Infinity;
     for (const op of ops) {
       if (!op || typeof op !== 'object') continue;
       if (op.t === 'p' || op.t === 's') {
-        const d = op.d, size = jsonSize(d, op.t === 'p' ? 1.5e6 : 5e5);
+        const d = op.d, size = jsonSize(d, Infinity);
         if (!d || typeof d !== 'object' || Array.isArray(d) || d.id === undefined || String(d.id).length > 120 || size < 0 || (budget -= size) < 0) continue;
         const key = op.t === 'p' ? 'parts' : 'scripts', list = Array.isArray(map[key]) ? map[key] : (map[key] = []);
         const i = list.findIndex(x => x && String(x.id) === String(d.id));
-        if (i >= 0) list[i] = d; else if (list.length < 20000) list.push(d); else continue;
+        if (i >= 0) list[i] = d; else list.push(d);
         applied.push({ t:op.t, d });
       } else if (op.t === 'pd' || op.t === 'sd') {
         const id = String(op.id ?? '').slice(0, 120), key = op.t === 'pd' ? 'parts' : 'scripts';
@@ -1923,7 +1951,7 @@ io.on('connection', socket => {
         const size = jsonSize(op.d, 1e6);
         if (!okType || size < 0 || (budget -= size) < 0) continue;
         map[op.k] = op.d;
-        if (op.k === 'settings') { const n = Number(op.d.maxPlayers); if (Number.isFinite(n)) map.maxPlayers = Math.max(1, Math.min(200, Math.floor(n))); }
+        if (op.k === 'settings') { const n = Number(op.d.maxPlayers); if (Number.isFinite(n)) map.maxPlayers = Math.max(1, Math.floor(n)); }
         applied.push({ t:'x', k:op.k, d:op.d });
       }
     }
@@ -1955,7 +1983,7 @@ io.on('connection', socket => {
   socket.on('app_send', ({ type, data, to } = {}, cb) => {
     const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
     if (typeof type !== 'string' || !APP_KEY_RE.test(type)) return ack({ ok:false, err:'Tipo de mensaje inválido' });
-    if (data !== undefined && jsonSize(data, 8192) < 0) return ack({ ok:false, err:'Mensaje demasiado grande (máx. 8 KB)' });
+    if (data !== undefined && jsonSize(data, Infinity) < 0) return ack({ ok:false, err:'Mensaje demasiado grande (máx. 8 KB)' });
     if (!rateOk(socket, 'appsend', 90)) return ack({ ok:false, err:'Demasiados mensajes por segundo' });
     const p = ctx.room.players[socket.id], msg = { from:publicPlayer(p), type, data: data === undefined ? null : data };
     if (typeof to === 'string' && to) {
@@ -1972,11 +2000,9 @@ io.on('connection', socket => {
     const st = ctx.room.appState || (ctx.room.appState = {});
     if (value === null || value === undefined) delete st[key];
     else {
-      if (jsonSize(value, 16384) < 0) return ack({ ok:false, err:'Valor demasiado grande (máx. 16 KB)' });
-      if (!(key in st) && Object.keys(st).length >= 64) return ack({ ok:false, err:'Hay demasiadas claves (máx. 64)' });
-      st[key] = value;
-      if (jsonSize(st, 131072) < 0) { delete st[key]; return ack({ ok:false, err:'El estado de la sala está lleno (máx. 128 KB)' }); }
-    }
+      if (jsonSize(value, Infinity) < 0) return ack({ ok:false, err:'Valor demasiado grande (máx. 16 KB)' });
+            st[key] = value;
+          }
     io.to(gameChannel(ctx.meta.mapId, ctx.meta.instanceId)).emit('app_state', { key, value: value === undefined ? null : value, by:socket.data.user?.id || socket.id });
     ack({ ok:true });
   });
@@ -1994,7 +2020,7 @@ io.on('connection', socket => {
     const bucket = DB.appData[ctx.meta.mapId] || (DB.appData[ctx.meta.mapId] = {});
     if (data === null || data === undefined) delete bucket[user.id];
     else {
-      if (jsonSize(data, 65536) < 0) return ack({ ok:false, err:'El guardado supera los 64 KB' });
+      if (jsonSize(data, Infinity) < 0) return ack({ ok:false, err:'El guardado supera los 64 KB' });
       if (!bucket[user.id] && Object.keys(bucket).length >= 5000) return ack({ ok:false, err:'Esta app llegó al límite de guardados' });
       bucket[user.id] = { data, updated:Date.now() };
     }
@@ -2009,11 +2035,9 @@ io.on('connection', socket => {
     const value = Math.max(-1e12, Math.min(1e12, Number(score)));
     DB.appScores = DB.appScores || {};
     const boards = DB.appScores[ctx.meta.mapId] || (DB.appScores[ctx.meta.mapId] = {});
-    if (!boards[board] && Object.keys(boards).length >= 20) return ack({ ok:false, err:'Hay demasiados rankings en esta app (máx. 20)' });
-    const b = boards[board] || (boards[board] = { mode: mode === 'min' ? 'min' : 'max', entries:{} });
+        const b = boards[board] || (boards[board] = { mode: mode === 'min' ? 'min' : 'max', entries:{} });
     const cur = b.entries[user.id];
-    if (!cur && Object.keys(b.entries).length >= 5000) return ack({ ok:false, err:'El ranking está lleno' });
-    const better = !cur || (b.mode === 'min' ? value < cur.score : value > cur.score);
+        const better = !cur || (b.mode === 'min' ? value < cur.score : value > cur.score);
     if (better) b.entries[user.id] = { score:value, username:user.username, at:Date.now() };
     else if (cur.username !== user.username) cur.username = user.username;
     scheduleSave(); ack({ ok:true, improved:better, best:b.entries[user.id].score });

@@ -2189,7 +2189,6 @@ function saveAppSource() {
   if (!app || !teamCanEdit(app)) { showToast('No podés editar esta app'); return; }
   const source = document.getElementById('app-source').value;
   if (!source.trim()) { showToast('La app necesita código HTML'); return; }
-  if (source.length > 1000000) { showToast('El código debe ser menor a 1 MB'); return; }
   app.kind = 'app'; app.isHtmlGame = true; app.htmlContent = source;
   app.name = document.getElementById('app-name').value.trim().slice(0,80) || 'Mi App';
   app.privacy = document.getElementById('app-privacy').value === 'private' ? 'private' : 'public';
@@ -2672,7 +2671,7 @@ function makeHumanoidRig(d) {
   root.traverse(child => { child.userData.studioRoot = root; if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } }); return root;
 }
 function addPartMesh(d) { if(d.anchored===undefined)d.anchored=true; if(d.canCollide===undefined)d.canCollide=true; const mesh=d.isNPC?makeHumanoidRig(d):makeMesh(d); stScene.add(mesh); const entry = {data:d, mesh}; stParts.push(entry); return entry; }
-async function importObjModel(event) { const input=event.target,file=input.files&&input.files[0];input.value='';if(!file)return;if(file.size>2*1024*1024){showToast('El OBJ no puede superar 2 MB');return;}try{const text=await file.text(),vertices=[],positions=[];for(const raw of text.split(/\r?\n/)){const line=raw.trim();if(line.startsWith('v ')){const values=line.slice(2).trim().split(/\s+/).slice(0,3).map(Number);if(values.length===3&&values.every(Number.isFinite))vertices.push(values);}else if(line.startsWith('f ')){const face=line.slice(2).trim().split(/\s+/).map(token=>{const rawIndex=parseInt(token.split('/')[0],10);return rawIndex<0?vertices.length+rawIndex:rawIndex-1;});if(face.length<3||face.some(index=>index<0||index>=vertices.length))continue;for(let i=1;i<face.length-1;i++)for(const index of [face[0],face[i],face[i+1]])positions.push(...vertices[index]);if(positions.length>180000)throw new Error('El modelo supera el límite de 60.000 vértices');}}if(positions.length<9)throw new Error('El OBJ no contiene caras triangulables');const mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];for(let i=0;i<positions.length;i+=3)for(let axis=0;axis<3;axis++){mins[axis]=Math.min(mins[axis],positions[i+axis]);maxs[axis]=Math.max(maxs[axis],positions[i+axis]);}const center=mins.map((value,axis)=>(value+maxs[axis])/2),extent=Math.max(...maxs.map((value,axis)=>value-mins[axis]));if(!extent)throw new Error('El modelo no tiene tamaño');const normalized=new Float32Array(positions.length);for(let i=0;i<positions.length;i++)normalized[i]=(positions[i]-center[i%3])*4/extent;const bytes=new Uint8Array(normalized.buffer);let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));const data={id:'model'+Date.now(),type:'ImportedMesh',name:file.name.replace(/\.obj$/i,'').slice(0,80)||'Modelo OBJ',x:stCamTarget.x,y:stCamTarget.y,z:stCamTarget.z,sx:4,sy:4,sz:4,rx:0,ry:0,rz:0,color:'#d7deed',material:'SmoothPlastic',anchored:true,canCollide:true,transparent:0,meshData:btoa(binary)};recordStudioHistory();const entry=addPartMesh(data);refreshExplorer();selectPart(entry);updateStStatus();showToast('🧩 Modelo OBJ importado. La geometría se guardará con el proyecto.');}catch(err){showToast(err.message||'No se pudo importar el OBJ');} }
+async function importObjModel(event) { const input=event.target,file=input.files&&input.files[0];input.value='';if(!file)return;try{const text=await file.text(),vertices=[],positions=[];for(const raw of text.split(/\r?\n/)){const line=raw.trim();if(line.startsWith('v ')){const values=line.slice(2).trim().split(/\s+/).slice(0,3).map(Number);if(values.length===3&&values.every(Number.isFinite))vertices.push(values);}else if(line.startsWith('f ')){const face=line.slice(2).trim().split(/\s+/).map(token=>{const rawIndex=parseInt(token.split('/')[0],10);return rawIndex<0?vertices.length+rawIndex:rawIndex-1;});if(face.length<3||face.some(index=>index<0||index>=vertices.length))continue;for(let i=1;i<face.length-1;i++)for(const index of [face[0],face[i],face[i+1]])positions.push(...vertices[index]);}}if(positions.length<9)throw new Error('El OBJ no contiene caras triangulables');const mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];for(let i=0;i<positions.length;i+=3)for(let axis=0;axis<3;axis++){mins[axis]=Math.min(mins[axis],positions[i+axis]);maxs[axis]=Math.max(maxs[axis],positions[i+axis]);}const center=mins.map((value,axis)=>(value+maxs[axis])/2),extent=Math.max(...maxs.map((value,axis)=>value-mins[axis]));if(!extent)throw new Error('El modelo no tiene tamaño');const normalized=new Float32Array(positions.length);for(let i=0;i<positions.length;i++)normalized[i]=(positions[i]-center[i%3])*4/extent;const bytes=new Uint8Array(normalized.buffer);let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));const data={id:'model'+Date.now(),type:'ImportedMesh',name:file.name.replace(/\.obj$/i,'').slice(0,80)||'Modelo OBJ',x:stCamTarget.x,y:stCamTarget.y,z:stCamTarget.z,sx:4,sy:4,sz:4,rx:0,ry:0,rz:0,color:'#d7deed',material:'SmoothPlastic',anchored:true,canCollide:true,transparent:0,meshData:btoa(binary)};recordStudioHistory();const entry=addPartMesh(data);refreshExplorer();selectPart(entry);updateStStatus();showToast('🧩 Modelo OBJ importado. La geometría se guardará con el proyecto.');}catch(err){showToast(err.message||'No se pudo importar el OBJ');} }
 function stuAdd(type) {
   const scriptTypes = ['Script','LocalScript','ModuleScript'];
   if (scriptTypes.includes(type)) {
@@ -3262,7 +3261,7 @@ function runScript(scriptOverride, partsOverride) {
   run.worker.postMessage({type:'init',config:bundle.config});
   run.watchdog=setTimeout(()=>{if(run.active){appendOutput('[error] El script superó el límite de ejecución (3 s)','err');finish();}},3000);
 }
-const SCRIPT_TICK_MS=50, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=80, SCRIPT_MAX_PARTS=2000;
+const SCRIPT_TICK_MS=50, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=Infinity, SCRIPT_MAX_PARTS=Infinity;
 let runtimeScripts=new Map(), runtimeObjects=new Map(), runtimeWorkspaceBase=[], runtimeTickHandle=null, runtimePhysicsHandle=null, currentGameSession=0, netServerScriptsActive=false, networkRuntimePartIds=new Set();
 function normalizeGamePart(id,source={}) { const pos=source.position||{},size=source.size||{},num=(v,d,min=-10000,max=10000)=>{let n=Number(v);if(!Number.isFinite(n))n=d;return Math.max(min,Math.min(max,n));},type=['Block','Sphere','Cylinder','Wedge','TrussPart','ImportedMesh'].includes(source.type)?source.type:'Block',color=/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?source.color:'#5b8def',materials=Object.keys(MATERIAL_DEFS);
   return {id:String(id),name:String(source.name||'Part').slice(0,80),type,x:num(source.x??pos.x??pos.X,0),y:num(source.y??pos.y??pos.Y,0),z:num(source.z??pos.z??pos.Z,0),sx:num(source.sx??size.x??size.X,4,0.1,1000),sy:num(source.sy??size.y??size.Y,4,0.1,1000),sz:num(source.sz??size.z??size.Z,4,0.1,1000),rx:num(source.rx,0,-1000,1000),ry:num(source.ry,0,-1000,1000),rz:num(source.rz,0,-1000,1000),color,material:materials.includes(source.material)?source.material:'SmoothPlastic',anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:num(source.transparent,0,0,0.95),behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',behaviorValue:num(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:num(source.texScale,4,0.25,64),texTint:source.texTint===true,meshData:source.type==='ImportedMesh'?source.meshData:undefined};
@@ -5096,12 +5095,14 @@ function stepEditorPhysics(){
 
 // ═══ Contenido y presencia GLOBALES en tiempo real ═══
 // Todo lo que sube cualquier persona llega a todos los conectados (cualquier servidor/instancia).
-var _liveTimers = {}, _liveLast = {};
+var _liveTimers = {}, _liveLast = {}, _livePending = {};
+setInterval(() => { if (_livePending.maps && !_screenActive('s-game') && !document.getElementById('code-overlay')?.classList.contains('open')) { _livePending.maps = false; refreshLive('maps'); } }, 2000);
 function _screenActive(id) { return !!document.getElementById(id)?.classList.contains('active'); }
 function liveRefresh(kind) { clearTimeout(_liveTimers[kind]); _liveTimers[kind] = setTimeout(() => refreshLive(kind), kind==='maps' ? 1500 : 350); }
 async function refreshLive(kind) {
   if (!ME || !DB.get('token')) return;
-  if (kind==='maps' && (_screenActive('s-game') || document.getElementById('code-overlay')?.classList.contains('open'))) return;
+  // Dentro de un juego o del editor de código no se toca el catálogo, pero el aviso NO se pierde: queda pendiente y se aplica al salir.
+  if (kind==='maps' && (_screenActive('s-game') || document.getElementById('code-overlay')?.classList.contains('open'))) { _livePending.maps = true; return; }
   try {
     if (kind === 'videos') {
       const r = await apiRequest('/api/videos'), local = Object.fromEntries(getVideos().map(v => [v.id, v]));
@@ -5326,9 +5327,9 @@ function openGameSettings() {
   document.getElementById('props-body').innerHTML =
     '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--yellow);background:var(--bg3);border-bottom:1px solid var(--border)">CONFIGURACIÓN DEL JUEGO</div>'+
     num('speed','Velocidad al caminar (%)',20,400,10)+num('jump','Fuerza de salto (%)',20,400,10)+num('gravity','Gravedad (%)',10,400,10)+
-    tgl('health','Sistema de vida')+num('maxHealth','Vida máxima',1,10000,10)+tgl('hud','Mostrar vida y monedas')+
+    tgl('health','Sistema de vida')+num('maxHealth','Vida máxima',1,1000000000,10)+tgl('hud','Mostrar vida y monedas')+
     '<div class="prop-row"><div class="prop-lbl">Mensaje de bienvenida</div><input class="prop-inp" maxlength="120" value="'+esc(s.welcome||'')+'" onchange="stSettings.welcome=this.value"></div>'+
-    num('maxPlayers','Jugadores máximos por servidor',1,200,1)+
+    num('maxPlayers','Jugadores máximos por servidor',1,100000,1)+
     '<div style="padding:10px 12px;font-size:10px;color:var(--text3);line-height:1.6">Se guarda con 💾 Guardar. Seleccioná una pieza para darle un <b>comportamiento</b> (lava, trampolín, checkpoint, monedas, meta…).</div>';
 }
 
@@ -5551,7 +5552,7 @@ function guiEdPickImage(ev) {
   reader.onload = () => { const img = new Image(); img.onload = () => {
     const max = 2048, k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    const data = c.toDataURL('image/png'); if (data.length > 24000000) { showToast('La imagen es demasiado pesada'); return; }
+    const data = c.toDataURL('image/png'); 
     e.image = data; guiEdRenderStage(); guiEdRenderProps();
   }; img.src = reader.result; };
   reader.readAsDataURL(file);
@@ -6982,7 +6983,6 @@ function downscaleImageFile(file, max) {
 async function stuImportTexture(e) {
   const file = e.target.files && e.target.files[0]; e.target.value = ''; if (!file || !selPart) return;
   if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { showToast('Usá una imagen PNG, JPG, WEBP o GIF'); return; }
-  if (file.size > 64 * 1024 * 1024) { showToast('La imagen pesa más de 64 MB'); return; }
   try {
     const { url } = await downscaleImageFile(file, 4096);
     const id = stuAddTextureFromDataUrl(url, file.name.replace(/\.[^.]+$/, '')); if (!id) return;
@@ -7114,7 +7114,7 @@ const AI_CHIPS = ['Agregá una torre de 10 pisos con escalera', 'Hacé un script
 const AI_PART_TYPES = ['Block','Sphere','Cylinder','Wedge','TrussPart','Spawn'];
 const AI_BEHAVIORS = ['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'];
 const AI_GUI_ACTIONS = ['none','toggleGui','showGui','hideGui','teleport','respawn','message','exit'];
-const AI_MAX_PARTS = 2000;
+const AI_MAX_PARTS = Infinity;
 
 function aiEl(id) { return document.getElementById(id); }
 function aiNum(v, d, lo, hi) { v = Number(v); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; }
@@ -7325,7 +7325,6 @@ function aiSetScript(attrs, code) {
   let s = stScripts.find(x => String(x.name).toLowerCase() === name.toLowerCase()), created = false;
   if (s) { s.code = code; if (kind && kind !== s.type) { s.type = kind; s.parent = kind === 'LocalScript' ? 'StarterPlayerScripts' : 'ServerScriptService'; } }
   else {
-    if (stScripts.length >= 80) throw new Error('límite de 80 scripts');
     const k = kind || 'Script';
     s = { id: 'scr_' + aiId(), name, type: k, code, language: 'javascript', event: 'onStart', parent: k === 'LocalScript' ? 'StarterPlayerScripts' : 'ServerScriptService' }; stScripts.push(s); created = true;
   }
