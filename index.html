@@ -1713,20 +1713,50 @@ function setUsers(u) {
   });
 }
 function getMaps()   { return DB.get('maps')   || {}; }
+// Juegos propios que todavía no llegaron al servidor: se reintentan y nunca se pierden en una resincronización.
+const PENDING_MAPS = new Set();
+function mapUploadAllowed() { return !!(ME && DB.get('token')); }
+async function pushMapToServer(id, tries) {
+  tries = tries || 4;
+  for (let n = 1; n <= tries; n++) {
+    const map = getMaps()[id];
+    if (!map || !teamCanEdit(map)) { PENDING_MAPS.delete(id); return { ok:false, err:'sin permiso' }; }
+    try {
+      await apiRequest('/api/maps', { method:'POST', body:map });
+      PENDING_MAPS.delete(id);
+      return { ok:true };
+    } catch (err) {
+      if (err && (err.status === 401 || err.status === 403)) { PENDING_MAPS.add(id); return { ok:false, err:err.message, fatal:true }; }
+      if (n === tries) { PENDING_MAPS.add(id); return { ok:false, err:(err && err.message) || 'sin conexión' }; }
+      await new Promise(r => setTimeout(r, 1500 * n));
+    }
+  }
+}
+function retryPendingMaps() {
+  if (!mapUploadAllowed()) return;
+  [...PENDING_MAPS].forEach(id => pushMapToServer(id, 2));
+}
+setInterval(retryPendingMaps, 20000);
+window.addEventListener('online', retryPendingMaps);
 function setMaps(m)  {
   const previous = DB.get('maps') || {};
   DB.set('maps', m); BC.postMessage({ type: 'map_update' });
-  if (!CLOUD_READY || !ME || !DB.get('token')) return;
+  if (!mapUploadAllowed()) return;
   Object.entries(m).forEach(([id, map]) => {
-    if (teamCanEdit(map) && JSON.stringify(previous[id]) !== JSON.stringify(map))
-      apiRequest('/api/maps', { method:'POST', body:map }).catch(err => {
-        console.warn('[MAPS] No se pudo guardar en el servidor:', err);
-        try { showToast('⚠️ "' + (map.name || id) + '" NO se guardó en el servidor (' + ((err && err.message) || 'sin conexión') + '). El juego publicado seguirá con la versión anterior, scripts incluidos.'); } catch (_) {}
+    if (teamCanEdit(map) && JSON.stringify(previous[id]) !== JSON.stringify(map)) {
+      PENDING_MAPS.add(id);
+      pushMapToServer(id).then(r => {
+        if (r.ok) return;
+        console.warn('[MAPS] No se pudo guardar en el servidor:', r.err);
+        try { showToast('\u26a0\ufe0f "' + (map.name || id) + '" NO se subi\u00f3 al servidor (' + r.err + '). Se reintentar\u00e1 solo; no cierres la pesta\u00f1a.'); } catch (_) {}
       });
+    }
   });
   Object.entries(previous).forEach(([id, map]) => {
-    if (map?.authorId === ME.id && !m[id])
+    if (map?.authorId === ME.id && !m[id]) {
+      PENDING_MAPS.delete(id);
       apiRequest('/api/maps/' + encodeURIComponent(id), { method:'DELETE' }).catch(() => {});
+    }
   });
 }
 function getConvs() {
@@ -1938,7 +1968,7 @@ async function syncCloudData() {
     const ownVideos = localVideos.filter(video => video.authorId === ME.id);
     const ownPosts = localPosts.filter(post => post.authorId === ME.id);
     await Promise.all([
-      ...ownMaps.map(map => apiRequest('/api/maps', { method:'POST', body:map }).catch(() => null)),
+      ...ownMaps.map(map => pushMapToServer(map.id, 3)),
       ...ownVideos.map(video => apiRequest('/api/videos', { method:'POST', body:video }).catch(() => null)),
       ...ownPosts.map(post => apiRequest('/api/posts', { method:'POST', body:post }).catch(() => null)),
       apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:ME }).catch(() => null)
@@ -1949,6 +1979,7 @@ async function syncCloudData() {
     const users = { ...(usersResult.users || {}) };
     const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
     const maps = { ...(mapsResult.maps || {}) };
+    Object.values(localMaps).forEach(lm => { if (lm && lm.authorId === ME.id && !maps[lm.id] && PENDING_MAPS.has(lm.id)) { maps[lm.id] = lm; PENDING_MAPS.add(lm.id); } });
     const vidsById = Object.fromEntries(localVideos.map(video => [video.id, video]));
     const videos = (videosResult.videos || []).map(video => ({ ...video, data: video.data === '[data]' ? (vidsById[video.id]?.data || null) : video.data }));
     const postsById = Object.fromEntries(localPosts.map(post => [post.id, post]));
@@ -1971,7 +2002,7 @@ async function refreshCloudContent() {
     const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
     const videosById = Object.fromEntries(localVideos.map(video => [video.id, video]));
     const videos = (videosResult.videos || []).map(video => ({ ...video, data:video.data === '[data]' ? (videosById[video.id]?.data || null) : video.data }));
-    DB.set('users', users); DB.set('maps', mapsResult.maps || {}); DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
+    DB.set('users', users); { const srvMaps = { ...(mapsResult.maps || {}) }, locMaps = getMaps(); PENDING_MAPS.forEach(id => { if (!srvMaps[id] && locMaps[id]) srvMaps[id] = locMaps[id]; }); DB.set('maps', srvMaps); } DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
     ME = ownProfile;
     checkNotifs();
     if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
@@ -2814,7 +2845,7 @@ function stuTest() { stuSave(); if(stMapId){stPlaytesting=true;const back=docume
 let pubThumbData = null;
 function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; openModal('mo-publish'); }
 function previewThumb(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { pubThumbData = ev.target.result; document.getElementById('pub-thumb-name').textContent = f.name; const canvas = document.getElementById('pub-thumb-preview'); const img = new Image(); img.onload = () => { canvas.style.display='block'; canvas.getContext('2d').drawImage(img,0,0,canvas.width=canvas.clientWidth,canvas.height=canvas.clientWidth*9/16); }; img.src = pubThumbData; }; r.readAsDataURL(f); }
-function confirmPublish() {
+async function confirmPublish() {
   const name = document.getElementById('pub-name').value.trim();
   const desc = document.getElementById('pub-desc').value.trim();
   const genre = document.getElementById('pub-genre').value;
@@ -2827,7 +2858,12 @@ function confirmPublish() {
   m.assignedPlayers = privacy === 'assigned' ? assignedRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
   m.authorId = ME.id; m.authorName = ME.username;
   if (pubThumbData) m.thumb = pubThumbData;
-  setMaps(maps); closeModal('mo-publish'); showToast('🚀 ¡Publicado!');
+  setMaps(maps); closeModal('mo-publish');
+  if (!mapUploadAllowed()) { showToast('⚠️ Iniciá sesión para que el juego se publique para todos'); return; }
+  showToast('⏳ Subiendo al servidor…');
+  const r = await pushMapToServer(stMapId, 4);
+  if (r.ok) { showToast(privacy === 'public' ? '🚀 ¡Publicado para todos!' : '✅ Guardado en el servidor (' + privacy + ')'); try { refreshCloudContent(); } catch (_) {} }
+  else showToast('⚠️ No se pudo publicar: ' + r.err + '. Se reintenta solo.');
 }
 const NPC_LIB = [{id:'dummy',name:'Dummy',icon:'🪆',type:'Humanoid',color:'#cc6644',hp:100},{id:'zombie',name:'Zombie',icon:'🧟',type:'Enemy',color:'#3d6e3d',hp:50},{id:'robot',name:'Robot',icon:'🤖',type:'NPC',color:'#4466aa',hp:200},{id:'merchant',name:'Comerciante',icon:'🧙',type:'Friendly',color:'#cc9933',hp:100},{id:'guard',name:'Guardia',icon:'💂',type:'Friendly',color:'#334488',hp:150},{id:'cat',name:'Gato',icon:'🐱',type:'Passive',color:'#aaaaaa',hp:30}];
 function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
@@ -5114,6 +5150,7 @@ async function refreshLive(kind) {
     } else if (kind === 'maps') {
       const r = await apiRequest('/api/maps'), merged = { ...(r.maps||{}) }, mine = getMaps();
       if (stMapId && mine[stMapId] && !merged[stMapId]) merged[stMapId] = mine[stMapId];
+      PENDING_MAPS.forEach(id => { if (!merged[id] && mine[id]) merged[id] = mine[id]; });
       DB.set('maps', merged);
       if (_screenActive('s-home')) renderHome();
       if (_screenActive('s-discover')) renderDiscover();
