@@ -1947,7 +1947,9 @@ async function restoreSession() {
     document.getElementById('s-auth').classList.add('active');
   }
 }
+let _syncBusy = false, _syncRetry = 0, _pushedFor = null;
 async function syncCloudData() {
+  if (_syncBusy) return; _syncBusy = true;
   CLOUD_READY = false;
   const localMaps = getMaps();
   const localVideos = getVideos();
@@ -1956,15 +1958,24 @@ async function syncCloudData() {
     const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id);
     const ownVideos = localVideos.filter(video => video.authorId === ME.id);
     const ownPosts = localPosts.filter(post => post.authorId === ME.id);
-    await Promise.all([
-      ...ownMaps.map(map => apiRequest('/api/maps', { method:'POST', body:map }).catch(() => { UNSYNCED_MAPS.add(map.id); return null; })),
-      ...ownVideos.map(video => apiRequest('/api/videos', { method:'POST', body:video }).catch(() => null)),
-      ...ownPosts.map(post => apiRequest('/api/posts', { method:'POST', body:post }).catch(() => null)),
-      apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:ME }).catch(() => null)
+    // El envío inicial se hace una sola vez por sesión (los reintentos solo vuelven a descargar).
+    if (_pushedFor !== ME.id) {
+      await Promise.all([
+        ...ownMaps.map(map => apiRequest('/api/maps', { method:'POST', body:map }).catch(() => { UNSYNCED_MAPS.add(map.id); return null; })),
+        ...ownVideos.map(video => apiRequest('/api/videos', { method:'POST', body:video }).catch(() => null)),
+        ...ownPosts.map(post => apiRequest('/api/posts', { method:'POST', body:post }).catch(() => null)),
+        apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:ME }).catch(() => null)
+      ]);
+      _pushedFor = ME.id;
+    }
+    // Usuarios, mapas y sesión son imprescindibles; videos y foros son opcionales: si fallan no bloquean el catálogo.
+    const settle = p => p.then(v => ({ ok:true, v }), e => ({ ok:false, e }));
+    const [uRes, mRes, vRes, pRes, sRes] = await Promise.all([
+      settle(apiRequest('/api/users')), settle(apiRequest('/api/maps')), settle(apiRequest('/api/videos')), settle(apiRequest('/api/posts')), settle(apiRequest('/api/session'))
     ]);
-    const [usersResult, mapsResult, videosResult, postsResult, sessionResult] = await Promise.all([
-      apiRequest('/api/users'), apiRequest('/api/maps'), apiRequest('/api/videos'), apiRequest('/api/posts'), apiRequest('/api/session')
-    ]);
+    if (!uRes.ok || !mRes.ok || !sRes.ok) throw (uRes.e || mRes.e || sRes.e);
+    const usersResult = uRes.v, mapsResult = mRes.v, sessionResult = sRes.v;
+    const videosResult = vRes.ok ? vRes.v : { videos: localVideos }, postsResult = pRes.ok ? pRes.v : { posts: localPosts };
     const users = { ...(usersResult.users || {}) };
     const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
     const maps = keepUnsyncedMaps({ ...(mapsResult.maps || {}) });
@@ -1974,10 +1985,14 @@ async function syncCloudData() {
     const posts = (postsResult.posts || []).map(post => postsById[post.id] || post);
     DB.set('users', users); DB.set('maps', maps); DB.set('crix_videos', videos); DB.set('crix_posts', posts);
     ME = users[ownProfile.id];
-    CLOUD_READY = true;
+    CLOUD_READY = true; _syncRetry = 0;
     checkNotifs();
     if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
-  } catch (err) { console.warn('[CLOUD] No se pudieron sincronizar los datos:', err.message); }
+  } catch (err) {
+    console.warn('[CLOUD] No se pudieron sincronizar los datos:', err.message);
+    // Antes quedaba trabado para siempre con el catálogo viejo: ahora se reintenta solo.
+    if (ME && DB.get('token')) { const wait = Math.min(30000, 4000 * ++_syncRetry); setTimeout(() => { if (!CLOUD_READY && ME && DB.get('token')) syncCloudData(); }, wait); }
+  } finally { _syncBusy = false; }
 }
 async function refreshCloudContent() {
   if (!CLOUD_READY || !ME) return;
@@ -5161,10 +5176,15 @@ function renderOnlineNow() {
   people.sort((a,b) => (b.currentGameId?1:0)-(a.currentGameId?1:0) || String(a.username).localeCompare(String(b.username)));
   el.innerHTML = people.length ? people.slice(0,18).map(renderUserCard).join('') : '<div style="color:var(--text3);font-size:12px;padding:6px 0">Nadie más está en línea ahora. ¡Invitá a tus amigos!</div>';
 }
+// Red de seguridad: el catálogo no depende solo del socket. Se refresca al volver a la pestaña, al recuperar internet y cada 90 s.
+function _catalogNudge() { if (document.visibilityState === 'visible' && ME && DB.get('token')) { if (CLOUD_READY) liveRefresh('maps'); else syncCloudData(); } }
+setInterval(_catalogNudge, 90000);
+document.addEventListener('visibilitychange', _catalogNudge);
+window.addEventListener('online', _catalogNudge);
 function setupGlobalLiveEvents() {
   if (!socket || socket._liveReady) return; socket._liveReady = true;
   const mine = id => ME && id === ME.id;
-  socket.on('connect', () => { if (ME && CLOUD_READY) refreshCloudContent(); });
+  socket.on('connect', () => { if (ME) { if (CLOUD_READY) refreshCloudContent(); else syncCloudData(); } });
   socket.on('video_new', v => { if (!mine(v.authorId) && v.authorName !== ME?.username) showToast('🎬 ' + v.authorName + ' subió un video: ' + (v.title||'')); liveRefresh('videos'); });
   socket.on('video_deleted', () => liveRefresh('videos'));
   socket.on('new_post', post => { if (!mine(post.authorId)) showToast('📝 ' + post.authorName + ' publicó en Foros'); liveRefresh('posts'); });
