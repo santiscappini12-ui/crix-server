@@ -1714,7 +1714,14 @@ function setUsers(u) {
 }
 function getMaps()   { return DB.get('maps')   || {}; }
 // Juegos propios que todavía no llegaron al servidor: se reintentan y nunca se pierden en una resincronización.
-const PENDING_MAPS = new Set();
+const PENDING_MAPS = (() => {
+  const set = new Set((() => { try { const v = DB.get('pendingMaps'); return Array.isArray(v) ? v : []; } catch (_) { return []; } })());
+  const save = () => { try { DB.set('pendingMaps', [...set]); } catch (_) {} };
+  const add = set.add.bind(set), del = set.delete.bind(set);
+  set.add = id => { const had = set.has(id); add(id); if (!had) save(); return set; };
+  set.delete = id => { const r = del(id); if (r) save(); return r; };
+  return set;
+})();
 function mapUploadAllowed() { return !!(ME && DB.get('token')); }
 async function pushMapToServer(id, tries) {
   tries = tries || 4;
@@ -1964,7 +1971,10 @@ async function syncCloudData() {
   const localVideos = getVideos();
   const localPosts = getPosts();
   try {
-    const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id);
+    // Solo se suben juegos propios que el servidor NO tiene o cuya subida quedó pendiente.
+    // Antes se subían TODAS las copias locales en cada arranque y una copia vieja pisaba la versión nueva del servidor.
+    const serverNow = await apiRequest('/api/maps').then(r => r.maps || {}).catch(() => null);
+    const ownMaps = serverNow === null ? [] : Object.values(localMaps).filter(map => map.authorId === ME.id && (PENDING_MAPS.has(map.id) || !serverNow[map.id]));
     const ownVideos = localVideos.filter(video => video.authorId === ME.id);
     const ownPosts = localPosts.filter(post => post.authorId === ME.id);
     await Promise.all([
