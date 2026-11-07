@@ -1719,7 +1719,10 @@ function setMaps(m)  {
   if (!CLOUD_READY || !ME || !DB.get('token')) return;
   Object.entries(m).forEach(([id, map]) => {
     if (teamCanEdit(map) && JSON.stringify(previous[id]) !== JSON.stringify(map))
-      apiRequest('/api/maps', { method:'POST', body:map }).catch(() => {});
+      apiRequest('/api/maps', { method:'POST', body:map }).catch(err => {
+        console.warn('[MAPS] No se pudo guardar en el servidor:', err);
+        try { showToast('⚠️ "' + (map.name || id) + '" NO se guardó en el servidor (' + ((err && err.message) || 'sin conexión') + '). El juego publicado seguirá con la versión anterior, scripts incluidos.'); } catch (_) {}
+      });
   });
   Object.entries(previous).forEach(([id, map]) => {
     if (map?.authorId === ME.id && !m[id])
@@ -2807,7 +2810,7 @@ function toggleFolder(el) { el.classList.toggle('open'); }
 function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'◥',TrussPart:'⊞',Spawn:'⚑',NPC:'🤖',ImportedMesh:'🧩',Sound:'🔊'}[t]||'📦'; }
 function updateStStatus() { document.getElementById('stu-status').textContent = `${stParts.length} partes · ${stScripts.length} scripts · #${stMapId||'?'}`; }
 function delScript(id) { if(!stScripts.some(s=>s.id===id))return;recordStudioHistory();stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
-function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); maps[stMapId].textureNames = {...stTexNames}; setMaps(maps); showToast('💾 Guardado'); if (Object.keys(stTexData).length) setTimeout(stPushTextures, 900); }
+function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); maps[stMapId].textureNames = {...stTexNames}; setMaps(maps); showToast((CLOUD_READY && ME && DB.get('token')) ? '💾 Guardado' : '💾 Guardado solo en este navegador: inicia sesión para que el juego publicado use estos cambios y scripts'); if (Object.keys(stTexData).length) setTimeout(stPushTextures, 900); }
 function stuTest() { stuSave(); if(stMapId){stPlaytesting=true;const back=document.getElementById('g-back-btn');if(back)back.textContent='⏹ Volver a Crix Hub';playMap(stMapId);} }
 let pubThumbData = null;
 function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; openModal('mo-publish'); }
@@ -3644,9 +3647,21 @@ function netConnect() {
     if(scriptRuntime==='error')addGMsg('⚠️ No se pudo iniciar el script de servidor.','sys');
     updateNetPill('🟢',`${players.length+1} jugadores`);
   });
-  socket.on('script_runtime_status',({status,message,scriptCount})=>{
+  socket.on('script_runtime_status',({status,message,scriptCount,scriptChars})=>{
     if(status==='error')addGMsg('⚠️ Script de servidor: '+(message||'error'),'sys');
     else if(status==='ready'&&scriptCount)addGMsg(`🖥️ ${scriptCount} script(s) ejecutándose en el servidor`,'sys');
+    // Quien edita el juego: si el servidor no tiene SUS scripts (guardado fallido o sin sesión), se lo decimos en vez de callar.
+    if(status==='ready'&&netServerScriptsActive&&netCurrentMapId){
+      try{
+        const map=getMaps()[netCurrentMapId];
+        if(map&&teamCanEdit(map)){
+          const local=(map.scripts||[]).filter(s=>s&&s.type==='Script');
+          const chars=local.reduce((sum,s)=>sum+String(s.code||'').length,0);
+          if(local.length!==(scriptCount||0)||chars!==(scriptChars||0))
+            addGMsg(`⚠️ El servidor tiene ${scriptCount||0} Script(s) distinto(s) de los ${local.length} que tienes en el editor: guarda con 💾 (con sesión iniciada) y vuelve a jugar.`,'sys');
+        }
+      }catch(_){}
+    }
   });
   socket.on('runtime_scene',applyNetworkSceneEvent);
   // Lote de posiciones de piezas con física (un paquete por tick del servidor).

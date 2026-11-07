@@ -543,7 +543,7 @@ function createRoom(message) {
     const code=script.language==='crixscript'?compileCrixScript(script.code):script.code;
     const name=JSON.stringify(String(script.name || 'ServerScript_'+index).slice(0,80));
     try {
-      context.evalSync(`(function(){\n${code}\n;globalThis.__crixScripts.push({name:${name},onStart:typeof onStart==='function'?onStart:null,onUpdate:typeof onUpdate==='function'?onUpdate:null,onStop:typeof onStop==='function'?onStop:null,onPlayerAdded:typeof onPlayerAdded==='function'?onPlayerAdded:null,onPlayerRemoved:typeof onPlayerRemoved==='function'?onPlayerRemoved:null});\n})();`,{timeout:MAX_SCRIPT_CALL_MS});
+      context.evalSync(`(function(){\n${code}\n;globalThis.__crixScripts.push({name:${name},onStart:typeof onStart==='function'?onStart:null,onUpdate:typeof onUpdate==='function'?onUpdate:null,onStop:typeof onStop==='function'?onStop:null,onPlayerAdded:typeof onPlayerAdded==='function'?onPlayerAdded:null,onPlayerRemoved:typeof onPlayerRemoved==='function'?onPlayerRemoved:null});\n})();`,{timeout:SCRIPT_LOAD_TIMEOUT_MS});
       enabled.push(index);
     } catch (error) { output(room,script.name,error.message,'err');context.evalSync(`globalThis.__crixScripts.push({name:${name},disabled:true});`); }
   });
@@ -556,15 +556,30 @@ function createRoom(message) {
   return room;
 }
 
+// Un timeout o un error aislado (CPU del contenedor saturada, arranque en frío) ya no desactiva el script para siempre:
+// solo se apaga tras varios fallos SEGUIDOS. Cualquier llamada correcta reinicia la cuenta.
+const MAX_CONSECUTIVE_CALL_FAILS = 5;
+const START_STOP_BUDGET_MS = 150;
+const SCRIPT_LOAD_TIMEOUT_MS = 500;
+function noteCallFailure(room,index,error) {
+  room.callFails = room.callFails || new Map();
+  const count=(room.callFails.get(index)||0)+1;
+  room.callFails.set(index,count);
+  const name=room.scripts[index]?.name;
+  if (count>=MAX_CONSECUTIVE_CALL_FAILS) { room.disabledScripts.add(index); output(room,name,error.message+' — script desactivado tras '+count+' fallos seguidos','err'); }
+  else if (count===1) output(room,name,error.message+' (se reintentará)','err');
+}
+function noteCallOk(room,index) { if (room.callFails) room.callFails.delete(index); }
+
 function invoke(room,eventName,index,dt) {
   if (room.disabledScripts.has(index) || room.isolate.isDisposed) return;
   room.currentScriptName=room.scripts[index]?.name || 'ServerScript';
   try {
-    const budget=Math.max(1,MAX_SCRIPT_CALL_MS);
+    const budget=eventName==='onStart'||eventName==='onStop' ? START_STOP_BUDGET_MS : Math.max(1,MAX_SCRIPT_CALL_MS);
     room.context.evalSync(`globalThis.__crixInvoke(${JSON.stringify(eventName)},${finite(dt,0,0,1)},${index});`,{timeout:budget});
+    noteCallOk(room,index);
   } catch (error) {
-    room.disabledScripts.add(index);
-    output(room,room.scripts[index]?.name,error.message,'err');
+    noteCallFailure(room,index,error);
   } finally { room.currentScriptName=''; }
 }
 
@@ -599,9 +614,9 @@ function invokeWithTimeout(room,eventName,index,dt,timeout) {
   room.currentScriptName=room.scripts[index]?.name || 'ServerScript';
   try {
     room.context.evalSync(`globalThis.__crixInvoke(${JSON.stringify(eventName)},${finite(dt,0,0,1)},${index});`,{timeout});
+    noteCallOk(room,index);
   } catch (error) {
-    room.disabledScripts.add(index);
-    output(room,room.scripts[index]?.name,error.message,'err');
+    noteCallFailure(room,index,error);
   } finally { room.currentScriptName=''; }
 }
 

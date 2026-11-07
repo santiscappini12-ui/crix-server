@@ -236,24 +236,26 @@ function roomWorldSnapshot(room) {
   return {runtimeParts,worldChanges,removedParts:[...room.removedPartIds],collectedParts:[...(room.collectedIds||[])]};
 }
 
-let scriptRunner=null, scriptRunnerError=null;
+let scriptRunner=null, scriptRunnerError=null, scriptRunnerFailedAt=0;
 function ensureScriptRunner() {
   if(scriptRunner?.connected)return scriptRunner;
-  if(scriptRunnerError)return null;
+  // Un fallo puntual del proceso aislado ya no deja los scripts muertos hasta el próximo deploy: se reintenta a los 15 s.
+  if(scriptRunnerError){if(Date.now()-scriptRunnerFailedAt<15000)return null;scriptRunnerError=null;}
   try{
     const major=Number(process.versions.node.split('.')[0]);
     scriptRunner=fork(path.join(__dirname,'script-runner.js'),[],{execArgv:major>=20?['--no-node-snapshot']:[],stdio:['ignore','inherit','inherit','ipc']});
     scriptRunner.on('message',handleScriptRunnerMessage);
-    scriptRunner.on('error',error=>{scriptRunnerError=error.message;log('SCRIPT_RUNNER',error.message);});
-    scriptRunner.on('exit',(code)=>{scriptRunner=null;if(code!==0){scriptRunnerError='El proceso aislado de scripts terminó ('+code+'). Reiniciá Crix para volver a intentar.';log('SCRIPT_RUNNER',scriptRunnerError);for(const room of Object.values(rooms)){if(room.scriptStarted){room.scriptStarted=false;room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError});}}}});
+    scriptRunner.on('error',error=>{scriptRunnerError=error.message;scriptRunnerFailedAt=Date.now();log('SCRIPT_RUNNER',error.message);});
+    scriptRunner.on('exit',(code)=>{scriptRunner=null;if(code!==0){scriptRunnerError='El proceso aislado de scripts terminó ('+code+'). Se reintentará solo en unos segundos.';scriptRunnerFailedAt=Date.now();log('SCRIPT_RUNNER',scriptRunnerError);for(const room of Object.values(rooms)){if(room.scriptStarted){room.scriptStarted=false;room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError});}}}});
     return scriptRunner;
-  }catch(error){scriptRunnerError=error.message;log('SCRIPT_RUNNER',error.message);return null;}
+  }catch(error){scriptRunnerError=error.message;scriptRunnerFailedAt=Date.now();log('SCRIPT_RUNNER',error.message);return null;}
 }
 
 function startRoomServerScripts(room,map) {
   if(room.scriptStarted)return;
   const scripts=(Array.isArray(map?.scripts)?map.scripts:[]).filter(script=>script?.type==='Script');
-  if(!scripts.length){room.scriptStarted=true;room.scriptStatus='ready';return;}
+  room.scriptChars=scripts.reduce((sum,script)=>sum+String(script.code||'').length,0);
+  if(!scripts.length){room.scriptStarted=true;room.scriptStatus='ready';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'ready',scriptCount:0,scriptChars:0});return;}
   const runner=ensureScriptRunner();
   if(!runner){room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError||'No se pudo iniciar el entorno de scripts.'});return;}
   room.scriptStarted=true;room.scriptStatus='starting';
@@ -268,12 +270,12 @@ function sendRoomPlayersToRunner(room) {
 
 function handleScriptRunnerMessage(message) {
   if(!message||typeof message!=='object')return;
-  if(message.type==='fatal'){scriptRunnerError=String(message.message||'Falló el entorno aislado de scripts.');log('SCRIPT_RUNNER',scriptRunnerError);return;}
+  if(message.type==='fatal'){scriptRunnerError=String(message.message||'Falló el entorno aislado de scripts.');scriptRunnerFailedAt=Date.now();log('SCRIPT_RUNNER',scriptRunnerError);return;}
   const room=Object.values(rooms).find(item=>roomKey(item.mapId,item.instanceId)===String(message.roomId||''));
   if(!room)return;
   if(message.type==='started'){
     room.scriptStatus='ready';
-    io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'ready',scriptCount:message.scriptCount||0});
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'ready',scriptCount:message.scriptCount||0,scriptChars:room.scriptChars||0});
     return;
   }
   if(message.type==='roomError'){
