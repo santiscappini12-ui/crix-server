@@ -35,7 +35,7 @@ const LIM = {
 app.use(express.json({ limit: LIM.json }));
 // Los listados de la API nunca se cachean (ni en el navegador ni en un proxy): cada cliente ve lo último que hay.
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // para el health check del hosting y para mantenerlo despierto
+app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Compresión gzip (asíncrona) de las respuestas JSON grandes: el catálogo de mapas pesa muchos MB sin comprimir.
 const zlib = require('zlib');
 app.use('/api', (req, res, next) => {
@@ -43,10 +43,10 @@ app.use('/api', (req, res, next) => {
   res.json = obj => {
     if (res.headersSent || !/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return orig(obj);
     let raw; try { raw = Buffer.from(JSON.stringify(obj), 'utf8'); } catch (e) { return orig(obj); }
-    if (raw.length < 4096) { res.set('Content-Type', 'application/json; charset=utf-8'); return res.end(raw); }
+    if (raw.length < 4096) return orig(obj);
     zlib.gzip(raw, { level: 5 }, (err, gz) => {
       if (res.headersSent) return;
-      if (err) { res.set('Content-Type', 'application/json; charset=utf-8'); return res.end(raw); }
+      if (err) return orig(obj);
       res.set({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' });
       res.end(gz);
     });
@@ -108,8 +108,6 @@ function loadDB() {
 }
 
 let lastDbSig = null;
-let DB_REV = 0, _savedRev = -1, _idleTicks = 0;   // DB_REV sube con cada cambio: invalida las cachés de respuestas
-function saveDBNow() { saveDB(); }
 function saveDB() {
   try {
     if (dbSync) dbSync.reconcile();   // estampa `_u` en lo que cambió y deja lápidas de lo que se borró
@@ -118,7 +116,7 @@ function saveDB() {
     DB._v = 0;
     const sig = crypto.createHash('sha1').update(JSON.stringify(DB)).digest('hex');
     if (sig === lastDbSig) { DB._v = prevV; return; }
-    DB._v = prevV + 1; DB_REV++;
+    DB._v = prevV + 1;
     const json = JSON.stringify(DB);
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     const tempFile = `${DATA_FILE}.${process.pid}.tmp`;
@@ -1180,28 +1178,13 @@ app.post('/api/join-user/:id', requireAuth, (req, res) => {
 });
 
 // ── GET mapas ──
-const mapsCache = new Map();   // id de usuario ('_' = anónimo) → { rev, raw, gz }
 app.get('/api/maps', (req, res) => {
-  const uObj = readSession(req), key = uObj ? uObj.id : '_';
-  const send = hit => {
-    const gzOk = /\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && hit.gz;
-    const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Vary': 'Accept-Encoding' };
-    if (gzOk) headers['Content-Encoding'] = 'gzip';
-    res.set(headers); res.end(gzOk ? hit.gz : hit.raw);
-  };
-  const cached = mapsCache.get(key);
-  if (cached && cached.rev === DB_REV) return send(cached);
-  const rev = DB_REV, out = {};
+  const uObj = readSession(req);
+  const out  = {};
   for (const [id, m] of Object.entries(DB.maps)) {
     if (canReadMap(m, uObj)) out[id]=m;
   }
-  const raw = Buffer.from(JSON.stringify({ ok:true, maps: out }), 'utf8');
-  zlib.gzip(raw, { level: 5 }, (err, gz) => {
-    const hit = { rev, raw, gz: err ? null : gz };
-    if (mapsCache.size >= 20) mapsCache.delete(mapsCache.keys().next().value);
-    mapsCache.set(key, hit);
-    if (!res.headersSent) send(hit);
-  });
+  res.json({ ok:true, maps: out });
 });
 
 // ── PARTIDAS ACTIVAS (cada instancia es una sala separada) ──
@@ -2388,7 +2371,7 @@ let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) return; shuttingDown = true;
   console.log(`[${signal}] Guardando datos antes de salir…`);
-  try { saveDBNow(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
+  try { saveDB(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
   process.exit(0);
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
