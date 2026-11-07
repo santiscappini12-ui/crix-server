@@ -1713,57 +1713,39 @@ function setUsers(u) {
   });
 }
 function getMaps()   { return DB.get('maps')   || {}; }
-// Juegos propios que todavía no llegaron al servidor: se reintentan y nunca se pierden en una resincronización.
-const PENDING_MAPS = (() => {
-  const set = new Set((() => { try { const v = DB.get('pendingMaps'); return Array.isArray(v) ? v : []; } catch (_) { return []; } })());
-  const save = () => { try { DB.set('pendingMaps', [...set]); } catch (_) {} };
-  const add = set.add.bind(set), del = set.delete.bind(set);
-  set.add = id => { const had = set.has(id); add(id); if (!had) save(); return set; };
-  set.delete = id => { const r = del(id); if (r) save(); return r; };
-  return set;
-})();
-function mapUploadAllowed() { return !!(ME && DB.get('token')); }
-async function pushMapToServer(id, tries) {
-  tries = tries || 4;
-  for (let n = 1; n <= tries; n++) {
-    const map = getMaps()[id];
-    if (!map || !teamCanEdit(map)) { PENDING_MAPS.delete(id); return { ok:false, err:'sin permiso' }; }
-    try {
-      await apiRequest('/api/maps', { method:'POST', body:map });
-      PENDING_MAPS.delete(id);
-      return { ok:true };
-    } catch (err) {
-      if (err && (err.status === 401 || err.status === 403)) { PENDING_MAPS.add(id); return { ok:false, err:err.message, fatal:true }; }
-      if (n === tries) { PENDING_MAPS.add(id); return { ok:false, err:(err && err.message) || 'sin conexión' }; }
-      await new Promise(r => setTimeout(r, 1500 * n));
+// Juegos propios cuya última subida al servidor no se completó (no se pierden al refrescar y se reintentan).
+const UNSYNCED_MAPS = new Set(), MAP_UPLOADS = {};
+async function uploadMapWithRetry(id) {
+  for (let n = 1; n <= 3; n++) {
+    const map = getMaps()[id];   // siempre la versión más reciente
+    if (!map || !teamCanEdit(map)) { UNSYNCED_MAPS.delete(id); return { ok:true, skipped:true }; }
+    try { await apiRequest('/api/maps', { method:'POST', body:map }); UNSYNCED_MAPS.delete(id); return { ok:true }; }
+    catch (err) {
+      if (n === 3 || (err && (err.status === 401 || err.status === 403))) { UNSYNCED_MAPS.add(id); return { ok:false, err:(err && err.message) || 'sin conexión' }; }
+      await new Promise(r => setTimeout(r, 2000 * n));
     }
   }
 }
-function retryPendingMaps() {
-  if (!mapUploadAllowed()) return;
-  [...PENDING_MAPS].forEach(id => pushMapToServer(id, 2));
-}
-setInterval(retryPendingMaps, 20000);
-window.addEventListener('online', retryPendingMaps);
+function queueMapUpload(id) { return (MAP_UPLOADS[id] = (MAP_UPLOADS[id] || Promise.resolve()).then(() => uploadMapWithRetry(id))); }
+function keepUnsyncedMaps(target) { UNSYNCED_MAPS.forEach(id => { const mine = getMaps()[id]; if (mine && !target[id]) target[id] = mine; }); return target; }
+setInterval(() => { if (ME && DB.get('token')) UNSYNCED_MAPS.forEach(id => queueMapUpload(id)); }, 30000);
 function setMaps(m)  {
   const previous = DB.get('maps') || {};
   DB.set('maps', m); BC.postMessage({ type: 'map_update' });
-  if (!mapUploadAllowed()) return;
+  if (!ME || !DB.get('token')) return;
   Object.entries(m).forEach(([id, map]) => {
     if (teamCanEdit(map) && JSON.stringify(previous[id]) !== JSON.stringify(map)) {
-      PENDING_MAPS.add(id);
-      pushMapToServer(id).then(r => {
+      UNSYNCED_MAPS.add(id);
+      queueMapUpload(id).then(r => {
         if (r.ok) return;
         console.warn('[MAPS] No se pudo guardar en el servidor:', r.err);
-        try { showToast('\u26a0\ufe0f "' + (map.name || id) + '" NO se subi\u00f3 al servidor (' + r.err + '). Se reintentar\u00e1 solo; no cierres la pesta\u00f1a.'); } catch (_) {}
+        try { showToast('⚠️ "' + (map.name || id) + '" NO se guardó en el servidor (' + r.err + '). Se reintentará solo.'); } catch (_) {}
       });
     }
   });
   Object.entries(previous).forEach(([id, map]) => {
-    if (map?.authorId === ME.id && !m[id]) {
-      PENDING_MAPS.delete(id);
+    if (map?.authorId === ME.id && !m[id])
       apiRequest('/api/maps/' + encodeURIComponent(id), { method:'DELETE' }).catch(() => {});
-    }
   });
 }
 function getConvs() {
@@ -1971,14 +1953,11 @@ async function syncCloudData() {
   const localVideos = getVideos();
   const localPosts = getPosts();
   try {
-    // Solo se suben juegos propios que el servidor NO tiene o cuya subida quedó pendiente.
-    // Antes se subían TODAS las copias locales en cada arranque y una copia vieja pisaba la versión nueva del servidor.
-    const serverNow = await apiRequest('/api/maps').then(r => r.maps || {}).catch(() => null);
-    const ownMaps = serverNow === null ? [] : Object.values(localMaps).filter(map => map.authorId === ME.id && (PENDING_MAPS.has(map.id) || !serverNow[map.id]));
+    const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id);
     const ownVideos = localVideos.filter(video => video.authorId === ME.id);
     const ownPosts = localPosts.filter(post => post.authorId === ME.id);
     await Promise.all([
-      ...ownMaps.map(map => pushMapToServer(map.id, 3)),
+      ...ownMaps.map(map => apiRequest('/api/maps', { method:'POST', body:map }).catch(() => { UNSYNCED_MAPS.add(map.id); return null; })),
       ...ownVideos.map(video => apiRequest('/api/videos', { method:'POST', body:video }).catch(() => null)),
       ...ownPosts.map(post => apiRequest('/api/posts', { method:'POST', body:post }).catch(() => null)),
       apiRequest('/api/user/' + encodeURIComponent(ME.id), { method:'POST', body:ME }).catch(() => null)
@@ -1988,8 +1967,7 @@ async function syncCloudData() {
     ]);
     const users = { ...(usersResult.users || {}) };
     const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
-    const maps = { ...(mapsResult.maps || {}) };
-    Object.values(localMaps).forEach(lm => { if (lm && lm.authorId === ME.id && !maps[lm.id] && PENDING_MAPS.has(lm.id)) { maps[lm.id] = lm; PENDING_MAPS.add(lm.id); } });
+    const maps = keepUnsyncedMaps({ ...(mapsResult.maps || {}) });
     const vidsById = Object.fromEntries(localVideos.map(video => [video.id, video]));
     const videos = (videosResult.videos || []).map(video => ({ ...video, data: video.data === '[data]' ? (vidsById[video.id]?.data || null) : video.data }));
     const postsById = Object.fromEntries(localPosts.map(post => [post.id, post]));
@@ -2012,7 +1990,7 @@ async function refreshCloudContent() {
     const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
     const videosById = Object.fromEntries(localVideos.map(video => [video.id, video]));
     const videos = (videosResult.videos || []).map(video => ({ ...video, data:video.data === '[data]' ? (videosById[video.id]?.data || null) : video.data }));
-    DB.set('users', users); { const srvMaps = { ...(mapsResult.maps || {}) }, locMaps = getMaps(); PENDING_MAPS.forEach(id => { if (!srvMaps[id] && locMaps[id]) srvMaps[id] = locMaps[id]; }); DB.set('maps', srvMaps); } DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
+    DB.set('users', users); DB.set('maps', keepUnsyncedMaps({ ...(mapsResult.maps || {}) })); DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
     ME = ownProfile;
     checkNotifs();
     if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
@@ -2869,11 +2847,11 @@ async function confirmPublish() {
   m.authorId = ME.id; m.authorName = ME.username;
   if (pubThumbData) m.thumb = pubThumbData;
   setMaps(maps); closeModal('mo-publish');
-  if (!mapUploadAllowed()) { showToast('⚠️ Iniciá sesión para que el juego se publique para todos'); return; }
+  if (!ME || !DB.get('token')) { showToast('⚠️ Iniciá sesión para que el juego se publique para todos'); return; }
   showToast('⏳ Subiendo al servidor…');
-  const r = await pushMapToServer(stMapId, 4);
-  if (r.ok) { showToast(privacy === 'public' ? '🚀 ¡Publicado para todos!' : '✅ Guardado en el servidor (' + privacy + ')'); try { refreshCloudContent(); } catch (_) {} }
-  else showToast('⚠️ No se pudo publicar: ' + r.err + '. Se reintenta solo.');
+  const r = await (MAP_UPLOADS[stMapId] || queueMapUpload(stMapId));
+  if (r && r.ok) showToast(privacy === 'public' ? '🚀 ¡Publicado para todos!' : '✅ Guardado en el servidor');
+  else showToast('⚠️ No se pudo publicar: ' + ((r && r.err) || 'sin conexión') + '. Se reintenta solo.');
 }
 const NPC_LIB = [{id:'dummy',name:'Dummy',icon:'🪆',type:'Humanoid',color:'#cc6644',hp:100},{id:'zombie',name:'Zombie',icon:'🧟',type:'Enemy',color:'#3d6e3d',hp:50},{id:'robot',name:'Robot',icon:'🤖',type:'NPC',color:'#4466aa',hp:200},{id:'merchant',name:'Comerciante',icon:'🧙',type:'Friendly',color:'#cc9933',hp:100},{id:'guard',name:'Guardia',icon:'💂',type:'Friendly',color:'#334488',hp:150},{id:'cat',name:'Gato',icon:'🐱',type:'Passive',color:'#aaaaaa',hp:30}];
 function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
@@ -2906,7 +2884,7 @@ function updateLineNums() { const lines = document.getElementById('code-ta').val
 function codeKeydown(e) { if (e.key === 'Tab') { e.preventDefault(); const ta = document.getElementById('code-ta'); const s = ta.selectionStart; ta.value = ta.value.substring(0,s) + '  ' + ta.value.substring(ta.selectionEnd); ta.selectionStart = ta.selectionEnd = s + 2; updateLineNums(); } }
 function __compileCrix(source) {
   const src = String(source || '');
-  const toks = [];
+  let toks = [];
   let i = 0, line = 1;
   const isIdStart = c => /[A-Za-z_$]/.test(c), isId = c => /[\w$]/.test(c), isDigit = c => /[0-9]/.test(c);
   while (i < src.length) {
@@ -2996,16 +2974,18 @@ function __compileCrix(source) {
 
   const BLOCK_START = new Set(['if', 'while', 'for', 'function', 'repeat']);
   let tmp = 0;
-  const out = [];
-  const stack = []; // tipos de bloque abiertos: 'brace' | 'until'
+  let out = [];
+  let stack = []; // tipos de bloque abiertos: 'brace' | 'until'
 
   function compileTokens(list) {
     // Traducción recursiva de un fragmento (expresiones). Reutiliza el mismo algoritmo en una instancia aislada.
-    const saved = { toks: toks.slice(), out: out.slice(), stack: stack.slice() };
-    toks.length = 0; toks.push(...list); out.length = 0; stack.length = 0;
-    run();
+    // Se intercambian referencias en vez de copiar todo el script en cada sub-expresión (antes era cuadrático y
+    // congelaba el editor al pegar un script grande).
+    const saved = { toks, out, stack };
+    toks = list; out = []; stack = [];
+    try { run(); } catch (err) { toks = saved.toks; out = saved.out; stack = saved.stack; throw err; }
     const result = out.join('');
-    toks.length = 0; toks.push(...saved.toks); out.length = 0; out.push(...saved.out); stack.length = 0; stack.push(...saved.stack);
+    toks = saved.toks; out = saved.out; stack = saved.stack;
     return result.trim();
   }
 
@@ -5160,7 +5140,7 @@ async function refreshLive(kind) {
     } else if (kind === 'maps') {
       const r = await apiRequest('/api/maps'), merged = { ...(r.maps||{}) }, mine = getMaps();
       if (stMapId && mine[stMapId] && !merged[stMapId]) merged[stMapId] = mine[stMapId];
-      PENDING_MAPS.forEach(id => { if (!merged[id] && mine[id]) merged[id] = mine[id]; });
+      keepUnsyncedMaps(merged);
       DB.set('maps', merged);
       if (_screenActive('s-home')) renderHome();
       if (_screenActive('s-discover')) renderDiscover();
