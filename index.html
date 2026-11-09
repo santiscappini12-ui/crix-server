@@ -1677,10 +1677,39 @@ return module.exports;})();
 </script>
 <script>
 'use strict';
+// Almacenamiento local tolerante a cuota llena. localStorage da ~5 MB y el catálogo de juegos/videos pesa más:
+// antes setItem lanzaba QuotaExceededError, setMaps se cortaba ANTES de subir el juego al servidor y la sincronización
+// fallaba en bucle (por eso cada uno veía solo lo suyo). Ahora, si no entra, el valor queda en memoria (la sesión sigue
+// funcionando y las subidas al servidor continúan) y en disco se guarda una versión reducida.
 const DB = {
-  get(k) { try { return JSON.parse(localStorage.getItem('crix4_' + k)); } catch { return null; } },
-  set(k, v) { localStorage.setItem('crix4_' + k, JSON.stringify(v)); },
-  del(k) { localStorage.removeItem('crix4_' + k); }
+  _mem: {},   // clave → JSON, solo para lo que no entró en localStorage
+  get(k) {
+    const key = 'crix4_' + k;
+    let raw = null;
+    if (Object.prototype.hasOwnProperty.call(this._mem, key)) raw = this._mem[key];
+    else { try { raw = localStorage.getItem(key); } catch { raw = null; } }
+    try { return JSON.parse(raw); } catch { return null; }
+  },
+  set(k, v) {
+    const key = 'crix4_' + k;
+    const raw = JSON.stringify(v);
+    try { localStorage.setItem(key, raw); delete this._mem[key]; return true; }
+    catch (e) {
+      this._mem[key] = raw;
+      let slim = null;
+      try {
+        if (k === 'maps' && v && typeof v === 'object') {   // en disco solo los juegos propios (los demás se bajan del servidor)
+          let me = null; try { me = ME && ME.id; } catch {}
+          slim = {}; for (const [id, m] of Object.entries(v)) if (m && me && m.authorId === me) slim[id] = m;
+        }
+      } catch {}
+      try { if (slim) localStorage.setItem(key, JSON.stringify(slim)); else localStorage.removeItem(key); }
+      catch { try { localStorage.removeItem(key); } catch {} }
+      console.warn('[DB] localStorage lleno: "' + k + '" se mantiene en memoria');
+      return false;
+    }
+  },
+  del(k) { const key = 'crix4_' + k; delete this._mem[key]; try { localStorage.removeItem(key); } catch {} }
 };
 const BC = (() => { try { return new BroadcastChannel('crix4'); } catch { return { postMessage: () => {}, addEventListener: () => {} }; } })();
 BC.addEventListener('message', e => {
