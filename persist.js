@@ -226,7 +226,8 @@ function pullRemote() {
 }
 function startSync() {
   if (!driver || !syncApi) return;
-  const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 4000);
+  // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 5 min (~288/día).
+  const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 300000);
   setInterval(() => { pullRemote(); }, every).unref();
   console.log(`[PERSIST] Sincronización entre instancias activa (cada ${every / 1000} s)`);
 }
