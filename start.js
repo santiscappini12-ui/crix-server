@@ -42,8 +42,8 @@ async function boot() {
     } catch (err) {
       lastError = err.message;
       console.error(`[PERSIST] No se pudieron restaurar los datos (intento ${attempt}):`, err.message);
-      console.error('[PERSIST] No arranco con base vacía para no reemplazar la copia del bucket. Reintento en 15 s. Revisá las variables CRIX_S3_*.');
-      await sleep(15000);
+      console.error('[PERSIST] No arranco con base vacía para no reemplazar la copia del bucket. Reintento con espera creciente (hasta 10 min). Revisá las variables CRIX_S3_*.');
+      await sleep(Math.min(15000 * 2 ** (attempt - 1), 600000));
     }
   }
 
