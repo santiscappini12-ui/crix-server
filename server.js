@@ -1217,6 +1217,8 @@ app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
 // ── Texturas de los juegos: archivos en disco (el mapa solo guarda la lista de ids) ──
 const TEX_DIR = persist.TEX_DIR;
 const TEX_ID_RE = /^tx_[a-z0-9]{3,40}$/, MAP_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+// Si un juego cambió de id (ver migrate-id), sus texturas y sonidos siguen guardados bajo el id anterior.
+function assetId(id) { const a = DB.maps[id] && DB.maps[id].assetsId; return (a && MAP_ID_RE.test(a)) ? a : id; }
 const MAX_TEX_BYTES = LIM.tex;   // sin límite de cantidad de texturas por juego
 function sniffImage(buf) {   // formato REAL por los primeros bytes
   if (!buf || buf.length < 12) return null;
@@ -1245,13 +1247,13 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
     if (!kind) return res.status(400).json({ ok:false, err:'Formato de imagen no soportado (PNG, JPG, WEBP o GIF)' });
     staged.push({ tid, buf, kind });
   }
-  fs.mkdirSync(texDir(req.params.id), { recursive:true });
+  fs.mkdirSync(texDir(assetId(req.params.id)), { recursive:true });
   const uploads = [];
   for (const { tid, buf, kind } of staged) {
     const name = `${tid}.${kind.ext}`;
-    try { const old = texFile(req.params.id, tid); if (old) { fs.unlinkSync(old); if (path.basename(old) !== name) persist.delKey(`textures/${req.params.id}/${path.basename(old)}`); } } catch {}
-    fs.writeFileSync(path.join(texDir(req.params.id), name), buf); ids.add(tid);
-    uploads.push(persist.putFile(`textures/${req.params.id}/${name}`, path.join(texDir(req.params.id), name)));
+    try { const old = texFile(assetId(req.params.id), tid); if (old) { fs.unlinkSync(old); if (path.basename(old) !== name) persist.delKey(`textures/${assetId(req.params.id)}/${path.basename(old)}`); } } catch {}
+    fs.writeFileSync(path.join(texDir(assetId(req.params.id)), name), buf); ids.add(tid);
+    uploads.push(persist.putFile(`textures/${assetId(req.params.id)}/${name}`, path.join(texDir(assetId(req.params.id)), name)));
   }
   await Promise.all(uploads);
   map.textureIds = [...ids]; saveDB();
@@ -1260,7 +1262,7 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
 app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
-  const file = texFile(req.params.id, req.params.tid) || await persist.fetchTexture(req.params.id, req.params.tid); if (!file) return res.status(404).end();
+  const file = texFile(assetId(req.params.id), req.params.tid) || await persist.fetchTexture(assetId(req.params.id), req.params.tid); if (!file) return res.status(404).end();
   res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
@@ -1294,17 +1296,17 @@ app.put('/api/maps/:id/sounds/:sid', requireAuth, async (req, res) => {
     if (!canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
     if (!SND_ID_RE.test(req.params.sid)) return res.status(400).json({ ok:false, err:'Identificador de sonido inválido' });
     if (Number(req.headers['content-length']) > LIM.sound) return res.status(413).json({ ok:false, err:'El audio supera ' + Math.round(LIM.sound / 1048576) + ' MB' });
-    fs.mkdirSync(soundDir(req.params.id), { recursive:true });
-    tmp = path.join(soundDir(req.params.id), `${req.params.sid}.${Date.now()}.part`);
+    fs.mkdirSync(soundDir(assetId(req.params.id)), { recursive:true });
+    tmp = path.join(soundDir(assetId(req.params.id)), `${req.params.sid}.${Date.now()}.part`);
     const size = await streamToFile(req, tmp, LIM.sound);
     if (!size) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Archivo vacío' }); }
     const head = Buffer.alloc(16); const fd = fs.openSync(tmp, 'r'); fs.readSync(fd, head, 0, 16, 0); fs.closeSync(fd);
     const ext = sniffAudio(head);
     if (!ext) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Formato de audio no soportado (MP3, OGG, WAV, FLAC, M4A, AAC, WEBM o AIFF)' }); }
-    const name = `${req.params.sid}.${ext}`, old = soundFile(req.params.id, req.params.sid);
-    if (old && path.basename(old) !== name) { try { fs.unlinkSync(old); } catch {} persist.delKey(`sounds/${req.params.id}/${path.basename(old)}`); }
-    fs.renameSync(tmp, path.join(soundDir(req.params.id), name)); tmp = null;
-    await persist.putFile(`sounds/${req.params.id}/${name}`, path.join(soundDir(req.params.id), name));
+    const name = `${req.params.sid}.${ext}`, old = soundFile(assetId(req.params.id), req.params.sid);
+    if (old && path.basename(old) !== name) { try { fs.unlinkSync(old); } catch {} persist.delKey(`sounds/${assetId(req.params.id)}/${path.basename(old)}`); }
+    fs.renameSync(tmp, path.join(soundDir(assetId(req.params.id)), name)); tmp = null;
+    await persist.putFile(`sounds/${assetId(req.params.id)}/${name}`, path.join(soundDir(assetId(req.params.id)), name));
     map.sounds = map.sounds || {};
     map.sounds[req.params.sid] = { name: String(req.query.name || 'Sonido').slice(0, 60), ext, mime: SND_MIME[ext], size };
     saveDB();
@@ -1317,7 +1319,7 @@ app.put('/api/maps/:id/sounds/:sid', requireAuth, async (req, res) => {
 app.get('/api/maps/:id/sounds/:sid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !SND_ID_RE.test(req.params.sid) || !canReadMap(map, user)) return res.status(404).end();
-  const file = soundFile(req.params.id, req.params.sid) || await persist.fetchSound(req.params.id, req.params.sid); if (!file) return res.status(404).end();
+  const file = soundFile(assetId(req.params.id), req.params.sid) || await persist.fetchSound(assetId(req.params.id), req.params.sid); if (!file) return res.status(404).end();
   res.set({ 'Content-Type': SND_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { acceptRanges:true, dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
@@ -1325,8 +1327,8 @@ app.delete('/api/maps/:id/sounds/:sid', requireAuth, (req, res) => {
   const map = DB.maps[req.params.id];
   if (!map || !MAP_ID_RE.test(req.params.id) || !SND_ID_RE.test(req.params.sid)) return res.status(404).json({ ok:false });
   if (!canEditMap(map, req.user)) return res.status(403).json({ ok:false, err:'No podés editar este juego' });
-  const f = soundFile(req.params.id, req.params.sid);
-  if (f) { try { fs.unlinkSync(f); } catch {} persist.delKey(`sounds/${req.params.id}/${path.basename(f)}`); }
+  const f = soundFile(assetId(req.params.id), req.params.sid);
+  if (f) { try { fs.unlinkSync(f); } catch {} persist.delKey(`sounds/${assetId(req.params.id)}/${path.basename(f)}`); }
   if (map.sounds) delete map.sounds[req.params.sid];
   saveDB(); res.json({ ok:true, sounds: map.sounds || {} });
 });
@@ -1344,7 +1346,7 @@ app.post('/api/maps', (req, res) => {
     const isOwner = !old || old.authorId === user.id || !!user.isAdmin;
     // Quien colabora no cambia la visibilidad ni el equipo; el equipo siempre lo decide el servidor.
     const body = isOwner ? m : { ...m, privacy:old.privacy, assignedPlayers:old.assignedPlayers };
-    const next = { ...body, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [] };
+    const next = { ...body, assetsId: old?.assetsId, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [] };
     // En una sesión de equipo activa, las partes/scripts/luces ya llegan por cambios en vivo: un guardado completo no las pisa.
     if (old && teamInSession(m.id, user.id)) for (const k of TEAM_PROTECTED) if (old[k] !== undefined) next[k] = old[k];
     DB.maps[m.id] = next;
@@ -1356,6 +1358,22 @@ app.post('/api/maps', (req, res) => {
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
 
+// ── Migrar el id de un juego propio (los ids viejos eran un contador por navegador y se repetían entre cuentas) ──
+app.post('/api/maps/:id/migrate-id', requireAuth, (req, res) => {
+  const oldId = req.params.id, old = DB.maps[oldId];
+  if (!old) return res.status(404).json({ ok:false, err:'No existe en el servidor' });
+  if (old.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés migrar este juego' });
+  const newId = String((req.body && req.body.newId) || '');
+  if (!MAP_ID_RE.test(newId) || newId === oldId || DB.maps[newId]) return res.status(400).json({ ok:false, err:'Id nuevo inválido o en uso' });
+  DB.maps[newId] = { ...old, id:newId, assetsId: old.assetsId || oldId };   // texturas y sonidos se quedan donde están
+  delete DB.maps[oldId];
+  for (const k of ['appData', 'appScores']) if (DB[k] && DB[k][oldId]) { DB[k][newId] = DB[k][oldId]; delete DB[k][oldId]; }
+  saveDB();
+  io.emit('map_deleted', { mapId: oldId });
+  io.emit('map_updated', { mapId: newId });
+  res.json({ ok:true, id:newId });
+});
+
 // ── DELETE mapa ──
 app.delete('/api/maps/:id', (req, res) => {
   const user = readSession(req);
@@ -1364,10 +1382,11 @@ app.delete('/api/maps/:id', (req, res) => {
   if (!existing) return res.json({ ok:true });
   if (existing.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
+  const aid = assetId(req.params.id);
   delete DB.maps[req.params.id];
   if (DB.appData) delete DB.appData[req.params.id];
   if (DB.appScores) delete DB.appScores[req.params.id];
-  if (MAP_ID_RE.test(req.params.id)) { try { fs.rmSync(texDir(req.params.id), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${req.params.id}/`); try { fs.rmSync(soundDir(req.params.id), { recursive:true, force:true }); } catch {} persist.delPrefix(`sounds/${req.params.id}/`); }
+  if (MAP_ID_RE.test(aid)) { try { fs.rmSync(texDir(aid), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${aid}/`); try { fs.rmSync(soundDir(aid), { recursive:true, force:true }); } catch {} persist.delPrefix(`sounds/${aid}/`); }
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
   res.json({ ok:true });
