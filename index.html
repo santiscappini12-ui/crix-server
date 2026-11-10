@@ -1748,15 +1748,34 @@ async function uploadMapWithRetry(id) {
   for (let n = 1; n <= 3; n++) {
     const map = getMaps()[id];   // siempre la versión más reciente
     if (!map || !teamCanEdit(map)) { UNSYNCED_MAPS.delete(id); return { ok:true, skipped:true }; }
-    try { await apiRequest('/api/maps', { method:'POST', body:map }); UNSYNCED_MAPS.delete(id); return { ok:true }; }
+    try { await apiRequest('/api/maps', { method:'POST', body:map }); UNSYNCED_MAPS.delete(id); return { ok:true, id }; }
     catch (err) {
+      if (err && err.status === 403 && ME && map.authorId === ME.id) { const nid = reIdMap(id); if (nid) { id = nid; continue; } }
       if (n === 3 || (err && (err.status === 401 || err.status === 403))) { UNSYNCED_MAPS.add(id); return { ok:false, err:(err && err.message) || 'sin conexión' }; }
       await new Promise(r => setTimeout(r, 2000 * n));
     }
   }
 }
 function queueMapUpload(id) { return (MAP_UPLOADS[id] = (MAP_UPLOADS[id] || Promise.resolve()).then(() => uploadMapWithRetry(id))); }
-function keepUnsyncedMaps(target) { UNSYNCED_MAPS.forEach(id => { const mine = getMaps()[id]; if (mine && !target[id]) target[id] = mine; }); return target; }
+function reIdMap(oldId, forcedId) {
+  const maps = getMaps(), m = maps[oldId]; if (!m) return null;
+  const id = forcedId || newMapId(); delete maps[oldId]; maps[id] = { ...m, id }; DB.set('maps', maps);
+  if (ME && Array.isArray(ME.games)) { ME.games = ME.games.map(g => g === oldId ? id : g); saveMe(); }
+  if (typeof stMapId !== 'undefined' && stMapId === oldId) stMapId = id;
+  UNSYNCED_MAPS.delete(oldId); UNSYNCED_MAPS.add(id);
+  return id;
+}
+function keepUnsyncedMaps(target) {
+  [...UNSYNCED_MAPS].forEach(id => {
+    const mine = getMaps()[id]; if (!mine) return;
+    if (!target[id]) { target[id] = mine; return; }
+    // El id ya lo usa el juego de otra persona: se renombra el mío para no perderlo ni mezclarlo.
+    if (ME && mine.authorId === ME.id && target[id].authorId && target[id].authorId !== ME.id) {
+      const nid = reIdMap(id); if (nid) target[nid] = getMaps()[nid];
+    }
+  });
+  return target;
+}
 setInterval(() => { if (ME && DB.get('token')) UNSYNCED_MAPS.forEach(id => queueMapUpload(id)); }, 30000);
 function setMaps(m)  {
   const previous = DB.get('maps') || {};
@@ -1891,6 +1910,9 @@ async function decryptChatMessage(convIdValue,message) {
   const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:chatB64ToBytes(wrapped.iv),additionalData:associated},key,chatB64ToBytes(wrapped.ciphertext));
   return JSON.parse(new TextDecoder().decode(plain));
 }
+// Los juegos tienen id GLOBAL en el servidor: un contador por navegador (1001, 1002…) se repetía entre cuentas
+// y el juego de otra persona pisaba el tuyo (▶ Probar abría un juego ajeno). Ahora el id es único.
+function newMapId() { return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function nextId(type) { const k = 'ctr_' + type; let n = DB.get(k) || 1000; n++; DB.set(k, n); return String(n); }
 const AV_COLORS = ['#5b8def','#8b5cf6','#ec4899','#22d3a6','#f59e0b','#ef4444','#f97316','#38bdf8','#a78bfa'];
 function randColor() { return AV_COLORS[Math.floor(Math.random() * AV_COLORS.length)]; }
@@ -1977,9 +1999,26 @@ async function restoreSession() {
   }
 }
 let _syncBusy = false, _syncRetry = 0, _pushedFor = null;
+// Juegos creados con el contador viejo (1001, 1002…): se les asigna un id único. El servidor mueve todo
+// (datos, texturas, sonidos); si el id lo usa el juego de otra persona o nunca se subió, se sube como nuevo.
+async function migrateLegacyMapIds() {
+  if (!ME || !DB.get('token')) return;
+  const legacy = Object.values(getMaps()).filter(m => m && m.authorId === ME.id && /^\d+$/.test(String(m.id)));
+  for (const m of legacy) {
+    const oldId = String(m.id), nid = newMapId();
+    try {
+      await apiRequest('/api/maps/' + encodeURIComponent(oldId) + '/migrate-id', { method:'POST', body:{ newId: nid } });
+      reIdMap(oldId, nid);
+    } catch (err) {
+      if (err && (err.status === 403 || err.status === 404)) reIdMap(oldId, nid);   // se sube como juego nuevo
+      // sin conexión u otro error: se reintenta en la próxima sincronización
+    }
+  }
+}
 async function syncCloudData() {
   if (_syncBusy) return; _syncBusy = true;
   CLOUD_READY = false;
+  try { await migrateLegacyMapIds(); } catch (e) { console.warn('[CLOUD] migración de ids:', e.message); }
   const localMaps = getMaps();
   const localVideos = getVideos();
   const localPosts = getPosts();
@@ -2178,7 +2217,7 @@ function handleUpload(e) {
   const reader = new FileReader();
   reader.onload = ev => {
     const maps = getMaps();
-    const id = nextId('map');
+    const id = newMapId();
     const isImg = file.type.startsWith('image/');
     const isHtml = file.name.toLowerCase().endsWith('.html') || file.type === 'text/html';
     let mapData = {
@@ -2213,7 +2252,7 @@ function handleUpload(e) {
   e.target.value = '';
 }
 function createNewGame() {
-  const id = nextId('map');
+  const id = newMapId();
   const maps = getMaps();
   const name = 'Mi Juego ' + (Object.values(maps).filter(m => m.authorId === ME.id).length + 1);
   const m = {
@@ -2229,7 +2268,7 @@ function createNewGame() {
   showToast('✅ Nuevo juego creado: ' + name);
 }
 function createNewApp() {
-  const id = nextId('map');
+  const id = newMapId();
   const maps = getMaps();
   const name = 'Mi App ' + (Object.values(maps).filter(item => item.authorId === ME.id && item.kind === 'app').length + 1);
   const htmlContent = '<!doctype html>\n<html lang="es">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + esc(name) + '</title>\n<style>body{font:16px system-ui;margin:0;padding:32px;background:#101522;color:#eef}main{max-width:720px;margin:auto}button{padding:10px 16px;border:0;border-radius:8px;background:#5b8def;color:white}</style>\n</head>\n<body><main><h1>Mi primera app Crix</h1><p>Editá este HTML para empezar.</p><button onclick="document.querySelector(\'p\').textContent=\'¡Funciona!\'">Probar</button></main></body>\n</html>';
@@ -2719,7 +2758,7 @@ function studioShortcuts(e) { if(!document.getElementById('s-studio')?.classList
   if(e.key==='Escape'&&selPart){deselect();return;}
   if(selPart&&!ctrl&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown'].includes(e.key)){e.preventDefault();const m=e.shiftKey?4:1;({ArrowLeft:()=>stuNudge(-m,0,0),ArrowRight:()=>stuNudge(m,0,0),ArrowUp:()=>stuNudge(0,0,-m),ArrowDown:()=>stuNudge(0,0,m),PageUp:()=>stuNudge(0,m,0),PageDown:()=>stuNudge(0,-m,0)})[e.key]();return;}
   if(e.key.toLowerCase()==='f'&&selPart){stCamTarget.copy(selPart.mesh.position);stCamDist=Math.max(8,Math.min(stCamDist,20));} }
-function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = nextId('map'); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', privacy:'public', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; if(stHistoryMapId!==stMapId){stHistoryMapId=stMapId;stUndoStack=[];stRedoStack=[];updateHubHistoryButtons();} const title=document.getElementById('hub-project-name'); if(title)title.value=m.name||'Proyecto sin nombre'; stScripts = m.scripts || []; stSettings = {...(m.settings||{})}; stGuis = JSON.parse(JSON.stringify(m.guis||[])); stTexNames = {...(m.textureNames||{})}; registerMapTextures(m);
+function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).find(m => m.authorId === ME.id); stMapId = mine ? mine.id : null; } if (!stMapId) { const id = newMapId(); const maps = getMaps(); const m = { id, name:'Mi Primer Mapa', desc:'', genre:'adventure', privacy:'public', authorId:ME.id, authorName:ME.username, plays:0, likes:0, created:new Date().toISOString(), parts:[...defaultParts()], scripts:[], thumb:null }; maps[id] = m; setMaps(maps); ME.games = ME.games||[]; ME.games.push(id); saveMe(); stMapId = id; } const maps = getMaps(); const m = maps[stMapId]; if(stHistoryMapId!==stMapId){stHistoryMapId=stMapId;stUndoStack=[];stRedoStack=[];updateHubHistoryButtons();} const title=document.getElementById('hub-project-name'); if(title)title.value=m.name||'Proyecto sin nombre'; stScripts = m.scripts || []; stSettings = {...(m.settings||{})}; stGuis = JSON.parse(JSON.stringify(m.guis||[])); stTexNames = {...(m.textureNames||{})}; registerMapTextures(m);
   stLighting = normalizeLighting(m.lighting);
   clearSt(); (m.parts||[]).forEach(d => addPartMesh({...d})); refreshExplorer();
   setTimeout(applyLighting, 100);
