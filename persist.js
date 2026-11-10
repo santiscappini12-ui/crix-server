@@ -34,7 +34,7 @@ const SOUND_DIR = DATA_BASE + '_sounds';
 const DB_KEY = 'db/crix_data.json.gz';
 const BACKUP_PREFIX = 'db/backup-';
 const BACKUPS_TO_KEEP = 7;
-const DB_MIN_INTERVAL = 3000;   // ms mínimos entre subidas de la base
+const DB_MIN_INTERVAL = Math.max(300, Number(env.CRIX_DB_UPLOAD_MS) || 800);   // ms mínimos entre subidas de la base (antes 3000)
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const isNotFound = e => !!e && (e.name === 'NoSuchKey' || e.name === 'NotFound' || e.Code === 'NoSuchKey' || e.code === 'ENOENT' || e.$metadata?.httpStatusCode === 404);
@@ -224,10 +224,19 @@ function pullRemote() {
     .finally(() => { pulling = null; });
   return pulling;
 }
+// Antes de responder una lectura (catálogo, videos, foros, usuarios): si pasaron más de `maxAge` ms desde la
+// última consulta, mira si otra instancia subió algo nuevo. Nunca bloquea más de `cap` ms.
+let lastFreshPull = 0;
+function pullFresh(maxAge = 2000, cap = 2500) {
+  if (!driver || !restored || !syncApi) return Promise.resolve(false);
+  if (!pulling && Date.now() - lastFreshPull < maxAge) return Promise.resolve(false);
+  if (!pulling) lastFreshPull = Date.now();
+  return Promise.race([pullRemote(), sleep(cap).then(() => false)]);
+}
 function startSync() {
   if (!driver || !syncApi) return;
-  // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 5 min (~288/día).
-  const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 300000);
+  // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 15 s; además se consulta antes de cada lectura del catálogo (máx. 1 vez cada 2 s).
+  const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 15000);
   setInterval(() => { pullRemote(); }, every).unref();
   console.log(`[PERSIST] Sincronización entre instancias activa (cada ${every / 1000} s)`);
 }
@@ -329,5 +338,5 @@ module.exports = {
   DATA_FILE, VIDEO_DIR, TEX_DIR, SOUND_DIR,
   get enabled() { return !!driver; },
   get restored() { return restored; },
-  restore, saveDb, setSync, startSync, pullRemote, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
+  restore, saveDb, setSync, startSync, pullRemote, pullFresh, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
 };
