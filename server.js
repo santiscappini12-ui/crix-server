@@ -36,6 +36,15 @@ app.use(express.json({ limit: LIM.json }));
 // Los listados de la API nunca se cachean (ni en el navegador ni en un proxy): cada cliente ve lo último que hay.
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
+// Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
+const INSTANCE_TAG = crypto.randomUUID().slice(0, 8);
+app.use('/api', (req, res, next) => { res.set('X-Crix-Instance', INSTANCE_TAG); next(); });
+// Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
+app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
+  if (req.method === 'GET') { try { await persist.pullFresh(2000, 2500); } catch {} }
+  next();
+});
+app.get('/api/instance', (req, res) => res.json({ ok:true, instance:INSTANCE_TAG, uptime:Math.round(process.uptime()), maps:Object.keys(DB.maps).length, users:Object.keys(DB.users).length, persist:persist.enabled }));
 // Compresión gzip (asíncrona) de las respuestas JSON grandes: el catálogo de mapas pesa muchos MB sin comprimir.
 const zlib = require('zlib');
 app.use('/api', (req, res, next) => {
