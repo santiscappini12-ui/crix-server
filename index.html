@@ -2049,8 +2049,7 @@ async function syncCloudData() {
     const maps = keepUnsyncedMaps({ ...(mapsResult.maps || {}) });
     const vidsById = Object.fromEntries(localVideos.map(video => [video.id, video]));
     const videos = (videosResult.videos || []).map(video => ({ ...video, data: video.data === '[data]' ? (vidsById[video.id]?.data || null) : video.data }));
-    const postsById = Object.fromEntries(localPosts.map(post => [post.id, post]));
-    const posts = (postsResult.posts || []).map(post => postsById[post.id] || post);
+    const posts = postsResult.posts || [];   // el servidor es la fuente de verdad (antes la copia local pisaba likes y respuestas de otros)
     DB.set('users', users); DB.set('maps', maps); DB.set('crix_videos', videos); DB.set('crix_posts', posts);
     ME = users[ownProfile.id];
     CLOUD_READY = true; _syncRetry = 0;
@@ -2076,11 +2075,8 @@ async function refreshCloudContent() {
     DB.set('users', users); DB.set('maps', keepUnsyncedMaps({ ...(mapsResult.maps || {}) })); DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
     ME = ownProfile;
     checkNotifs();
-    if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
-    if (document.getElementById('s-discover')?.classList.contains('active')) renderDiscover();
-    if (document.getElementById('s-videos')?.classList.contains('active')) renderVideos();
-    if (document.getElementById('s-forums')?.classList.contains('active')) renderForums();
-    if (document.getElementById('s-profile')?.classList.contains('active')) renderProfile(viewingUserId || ME.id);
+    if (!_screenActive('s-game')) rerenderLiveScreens('maps');
+    rerenderLiveScreens('videos'); rerenderLiveScreens('posts'); rerenderLiveScreens('users');
   } catch (err) { console.warn('[CLOUD] No se pudo actualizar el contenido:', err.message); }
 }
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
@@ -2402,7 +2398,7 @@ async function browseGameInstances(mapId) {
     openModal('mo-instances');
   } catch (err) { showToast(err.message || 'No se pudieron cargar los servidores.'); }
 }
-function pfTab(tab, el) { ['games','friends','liked'].forEach(t => { const e1 = document.getElementById('pf-'+t+'-tab'); const e2 = document.getElementById('pftab-'+t); if (e1) e1.style.display = 'none'; if (e2) e2.classList.remove('active'); }); const tEl = document.getElementById('pf-'+tab+'-tab'); const hEl = el || document.getElementById('pftab-'+tab); if (tEl) tEl.style.display = 'grid'; if (hEl) hEl.classList.add('active'); const users = getUsers(); const u = users[viewingUserId] || ME; if (tab === 'games') { const mine = Object.values(getMaps()).filter(m => m.authorId === u.id); renderGrid('pf-games-tab', mine, u.id === ME.id ? 'mine' : ''); } else if (tab === 'friends') { const frds = (u.friends||[]).map(fid => users[fid]).filter(Boolean); const el2 = document.getElementById('pf-friends-tab'); if (!frds.length) { el2.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin amigos todavía.</div>'; return; } el2.innerHTML = frds.map(f => `<div class="friend-card" onclick="goTab('profile','${f.id}')"><div class="friend-av" style="background:${profileAvatarSrc(f)?'transparent':(f.color||'#5b8def')}">${avatarInnerHtml(f)}</div><div style="font-size:12px;font-weight:700">${esc(f.username)}</div><div style="font-size:9px;color:var(--text3)">#${f.id}</div><button class="btn btn-g" style="font-size:10px;padding:3px 8px;margin-top:6px" onclick="event.stopPropagation();openConvWith('${f.id}')">💬</button></div>`).join(''); } else if (tab === 'liked') { const liked = Object.values(getMaps()).filter(m => (ME.liked||[]).includes(m.id)); renderGrid('pf-liked-tab', liked, ''); }
+function pfTab(tab, el) { ['games','friends','liked','followers','following'].forEach(t => { const e1 = document.getElementById('pf-'+t+'-tab'); const e2 = document.getElementById('pftab-'+t); if (e1) e1.style.display = 'none'; if (e2) e2.classList.remove('active'); }); const tEl = document.getElementById('pf-'+tab+'-tab'); const hEl = el || document.getElementById('pftab-'+tab); if (tEl) tEl.style.display = 'grid'; if (hEl) hEl.classList.add('active'); const users = getUsers(); const u = users[viewingUserId] || ME; if (tab === 'games') { const mine = Object.values(getMaps()).filter(m => m.authorId === u.id); renderGrid('pf-games-tab', mine, u.id === ME.id ? 'mine' : ''); } else if (tab === 'friends') { const frds = (u.friends||[]).map(fid => users[fid]).filter(Boolean); const el2 = document.getElementById('pf-friends-tab'); if (!frds.length) { el2.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin amigos todavía.</div>'; return; } el2.innerHTML = frds.map(f => `<div class="friend-card" onclick="goTab('profile','${f.id}')"><div class="friend-av" style="background:${profileAvatarSrc(f)?'transparent':(f.color||'#5b8def')}">${avatarInnerHtml(f)}</div><div style="font-size:12px;font-weight:700">${esc(f.username)}</div><div style="font-size:9px;color:var(--text3)">#${f.id}</div><button class="btn btn-g" style="font-size:10px;padding:3px 8px;margin-top:6px" onclick="event.stopPropagation();openConvWith('${f.id}')">💬</button></div>`).join(''); } else if (tab === 'liked') { const liked = Object.values(getMaps()).filter(m => (ME.liked||[]).includes(m.id)); renderGrid('pf-liked-tab', liked, ''); }
   else if (tab === 'followers') {
     const el2=document.getElementById('pf-followers-tab'); if(!el2)return;
     const fwrs=Object.values(getUsers()).filter(x=>(x.following||[]).includes((getUsers()[viewingUserId]||ME).id));
@@ -3827,7 +3823,7 @@ netConnect = function() {
   });
   if (socket) socket.on('online_update', () => {
     clearTimeout(window._crixPresenceRefreshTimer);
-    window._crixPresenceRefreshTimer = setTimeout(() => refreshCloudContent(), 800);
+    window._crixPresenceRefreshTimer = setTimeout(() => liveRefresh('users'), 800);
   });
 };
 function netJoinGame(mapId, instanceId = netCurrentInstanceId) { netCurrentMapId = mapId; netCurrentInstanceId = instanceId; if (!socket || !netConnected || !ME || !instanceId) return; socket.emit('join_game', { mapId, instanceId, userId: ME.id, username: ME.username, color: ME.color || '#5b8def', look: myLook() }); }
@@ -4352,7 +4348,7 @@ async function openVideoPlayer(vid) {
     '</div>' +
     '<div style="font-family:var(--display);font-size:20px;font-weight:800;margin-bottom:8px">' + esc(v.title) + '</div>' +
     '<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-bottom:12px">' +
-    '<span>👁 ' + v.views + ' vistas</span><span>❤️ ' + (v.likes||[]).length + '</span><span>🕒 ' + dateStr(v.created) + '</span>' +
+    '<span id="vp-views">👁 ' + v.views + ' vistas</span><span id="vp-likes">❤️ ' + (v.likes||[]).length + '</span><span>🕒 ' + dateStr(v.created) + '</span>' +
     '</div>' +
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">' +
     '<div style="width:38px;height:38px;border-radius:50%;background:' + ((getUsers()[v.authorId]||{}).color||'#5b8def') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + v.authorName[0].toUpperCase() + '</div>' +
@@ -4390,12 +4386,13 @@ function toggleVideoLike(vid) {
 function renderVideoComments(v) {
   const el = document.getElementById('vp-comments'); if (!el) return;
   const comments = (v.comments || []).slice().reverse();
+  el.dataset.n = String(comments.length);
   el.innerHTML = comments.length ? comments.map(c =>
     '<div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">' +
     '<div style="width:32px;height:32px;border-radius:50%;background:#5b8def;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">' + (c.authorName||'?')[0].toUpperCase() + '</div>' +
     '<div><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
     '<div style="font-size:13px;margin-top:2px">' + esc(c.text) + '</div>' +
-    '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.time||'') + '</div></div></div>'
+    '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : (c.time||'')) + '</div></div></div>'
   ).join('') : '<div style="color:var(--text3);font-size:13px;padding:12px 0">Sin comentarios todavía.</div>';
 }
 async function submitVideoComment() {
@@ -4621,6 +4618,7 @@ function openGamePage(mapId) {
   const maps = getMaps();
   const m = maps[mapId];
   if (!m) { showToast('Juego no encontrado'); return; }
+  window._gpMapId = mapId;
   // Thumb
   const thumbEl = document.getElementById('gp-thumb');
   if (m.thumb) {
@@ -5216,27 +5214,101 @@ async function refreshLive(kind) {
     if (kind === 'videos') {
       const r = await apiRequest('/api/videos'), local = Object.fromEntries(getVideos().map(v => [v.id, v]));
       DB.set('crix_videos', (r.videos||[]).map(v => ({ ...v, data: v.data === '[data]' ? (local[v.id]?.data || null) : v.data })));
-      if (_screenActive('s-videos')) renderVideos();
     } else if (kind === 'posts') {
       const r = await apiRequest('/api/posts'); DB.set('crix_posts', r.posts || []);
-      if (_screenActive('s-forums')) renderForums();
     } else if (kind === 'maps') {
       const r = await apiRequest('/api/maps'), merged = { ...(r.maps||{}) }, mine = getMaps();
       if (stMapId && mine[stMapId] && !merged[stMapId]) merged[stMapId] = mine[stMapId];
       keepUnsyncedMaps(merged);
       DB.set('maps', merged);
+    } else if (kind === 'users') {
+      // Se pide también la sesión: así tu propia cuenta (amigos, solicitudes, foto, bio) se actualiza desde lo que hiciste en OTRO dispositivo.
+      const [r, sess] = await Promise.all([apiRequest('/api/users'), apiRequest('/api/session').catch(() => null)]);
+      const users = { ...(r.users||{}) };
+      if (sess && sess.user) { const own = sessionProfile(sess.user, users); users[own.id] = own; ME = own; }
+      else if (getUsers()[ME.id]) users[ME.id] = { ...users[ME.id], ...getUsers()[ME.id] };
+      DB.set('users', users);
+      if (sess && sess.user) { updateOwnAvatar(); checkNotifs(); }
+    }
+    rerenderLiveScreens(kind);
+  } catch (err) { console.warn('[LIVE]', kind, err.message); }
+}
+// Vuelve a dibujar SOLO lo que está a la vista y que depende de ese tipo de dato, sin pisar lo que la persona está escribiendo
+// ni reiniciar un video que se está reproduciendo.
+function _captureForumDrafts() {
+  const drafts = {};
+  document.querySelectorAll('#post-list textarea[id^="reply-inp-"]').forEach(t => { drafts[t.id.slice(10)] = { v:t.value, open:t.style.display !== 'none', focus:document.activeElement === t }; });
+  return drafts;
+}
+function _restoreForumDrafts(drafts) {
+  for (const [pid, st] of Object.entries(drafts)) {
+    const t = document.getElementById('reply-inp-' + pid), b = document.getElementById('reply-btn-' + pid); if (!t) continue;
+    t.value = st.v;
+    if (st.open) { t.style.display = 'block'; if (b) b.style.display = 'block'; if (st.focus) { t.focus(); try { t.setSelectionRange(st.v.length, st.v.length); } catch (_) {} } }
+  }
+}
+function renderForumsKeepDrafts() { const drafts = _captureForumDrafts(); renderForums(); _restoreForumDrafts(drafts); }
+function refreshProfileTabs() {
+  // Solo se redibuja la pestaña abierta del perfil (renderProfile completo borraba lo escrito en "Buscar y agregar amigo").
+  const active = document.querySelector('#profile-inner .tab.active'); const tab = active && active.id ? active.id.replace('pftab-', '') : 'games';
+  try { pfTab(tab); } catch (_) {}
+}
+function refreshOpenGamePage() {
+  const modal = document.getElementById('mo-game-page'); if (!modal || !modal.classList.contains('open') || !window._gpMapId) return;
+  const id = window._gpMapId, m = getMaps()[id];
+  if (!m) { closeModal('mo-game-page'); showToast('Este juego ya no está disponible'); return; }
+  const closeInst = document.getElementById('mo-instances'); if (closeInst && closeInst.classList.contains('open')) return;
+  openGamePage(id);
+}
+function refreshOpenVideoPlayer() {
+  if (!_screenActive('s-video-player-dynamic') || !_activeVideoId) return;
+  const v = getVideos().find(x => x.id === _activeVideoId);
+  if (!v) { showToast('Este video ya no está disponible'); goTab('videos'); return; }
+  const set = (id, txt) => { const el = document.getElementById(id); if (el && el.textContent !== txt) el.textContent = txt; };
+  set('vp-views', '👁 ' + (v.views || 0) + ' vistas'); set('vp-likes', '❤️ ' + (v.likes || []).length);
+  const btn = document.getElementById('vp-like-btn');
+  if (btn) { const liked = ME && (v.likes || []).includes(ME.id); btn.className = 'btn ' + (liked ? 'btn-red' : 'btn-g'); btn.textContent = '❤️ ' + (v.likes || []).length; }
+  const box = document.getElementById('vp-comments');
+  if (box && box.dataset.n !== String((v.comments || []).length)) { renderVideoComments(v); }   // el <video> no se toca: la reproducción sigue
+}
+function refreshStudioAssets() {
+  // Co-edición: texturas subidas por otra persona del equipo (o desde otro dispositivo) aparecen sin recargar.
+  try { if (stMapId && typeof registerMapTextures === 'function') registerMapTextures(getMaps()[stMapId]); } catch (_) {}
+}
+function rerenderLiveScreens(kind) {
+  try {
+    if (kind === 'maps') {
       if (_screenActive('s-home')) renderHome();
       if (_screenActive('s-discover')) renderDiscover();
       if (_screenActive('s-search')) runSearch();
+      if (_screenActive('s-profile')) refreshProfileTabs();
+      refreshOpenGamePage(); refreshStudioAssets();
+    } else if (kind === 'videos') {
+      if (_screenActive('s-videos')) renderVideos();
+      refreshOpenVideoPlayer();
+    } else if (kind === 'posts') {
+      if (_screenActive('s-forums')) renderForumsKeepDrafts();
     } else if (kind === 'users') {
-      const r = await apiRequest('/api/users'), users = { ...(r.users||{}) };
-      if (getUsers()[ME.id]) users[ME.id] = { ...users[ME.id], ...getUsers()[ME.id] };
-      DB.set('users', users);
       if (_screenActive('s-home')) renderOnlineNow();
+      if (_screenActive('s-discover')) renderDiscover();
+      if (_screenActive('s-search')) runSearch();
       if (_screenActive('s-msg')) loadConvList();
-      if (_screenActive('s-profile')) renderProfile(viewingUserId || ME.id);
+      // El perfil completo solo se redibuja si no se está escribiendo dentro de él.
+      if (_screenActive('s-profile') && !document.getElementById('profile-inner')?.contains(document.activeElement)) renderProfile(viewingUserId || ME.id);
+      renderFriendRequests();
     }
-  } catch (err) { console.warn('[LIVE]', kind, err.message); }
+  } catch (err) { console.warn('[LIVE] render', kind, err.message); }
+}
+async function syncConvFromServer(cid) {
+  if (!ME || !cid) return;
+  if (window._activeConvId === cid) { renderConv(cid, window._activeChatUserId); return; }
+  try {
+    const remote = await apiRequest('/api/convs/' + encodeURIComponent(ME.id) + '/' + encodeURIComponent(cid));
+    const convs = getConvs(), before = (convs[cid] || []).length;
+    const merged = new Map([...(convs[cid] || []), ...(remote.messages || [])].filter(m => m?.e2ee?.v === 1).map(m => [m.id, m]));
+    convs[cid] = Array.from(merged.values()).sort((a, b) => (a.t || 0) - (b.t || 0));
+    if (convs[cid].length !== before) { setConvs(convs); checkNotifs(); if (_screenActive('s-msg')) loadConvList(); }
+  } catch (_) {}
 }
 function renderOnlineNow() {
   const el = document.getElementById('home-online'); if (!el || !ME) return;
@@ -5245,7 +5317,15 @@ function renderOnlineNow() {
   el.innerHTML = people.length ? people.slice(0,18).map(renderUserCard).join('') : '<div style="color:var(--text3);font-size:12px;padding:6px 0">Nadie más está en línea ahora. ¡Invitá a tus amigos!</div>';
 }
 // Red de seguridad: el catálogo no depende solo del socket. Se refresca al volver a la pestaña, al recuperar internet y cada 90 s.
-function _catalogNudge() { if (document.visibilityState === 'visible' && ME && DB.get('token')) { if (CLOUD_READY) liveRefresh('maps'); else syncCloudData(); } }
+var _lastNudge = 0;
+function _catalogNudge() {
+  if (document.visibilityState !== 'visible' || !ME || !DB.get('token')) return;
+  if (!CLOUD_READY) { syncCloudData(); return; }
+  // Videos, foros, usuarios y juegos: si se perdió un aviso del socket (celular en segundo plano, red caída), esto lo recupera.
+  if (Date.now() - _lastNudge < 8000) return; _lastNudge = Date.now();
+  if (_screenActive('s-game')) { _livePending.maps = true; liveRefresh('videos'); liveRefresh('posts'); liveRefresh('users'); }
+  else refreshCloudContent();
+}
 setInterval(_catalogNudge, 90000);
 document.addEventListener('visibilitychange', _catalogNudge);
 window.addEventListener('online', _catalogNudge);
@@ -5255,10 +5335,44 @@ function setupGlobalLiveEvents() {
   socket.on('connect', () => { if (ME) { if (CLOUD_READY) refreshCloudContent(); else syncCloudData(); } });
   socket.on('video_new', v => { if (!mine(v.authorId) && v.authorName !== ME?.username) showToast('🎬 ' + v.authorName + ' subió un video: ' + (v.title||'')); liveRefresh('videos'); });
   socket.on('video_deleted', () => liveRefresh('videos'));
+  // Likes, vistas y comentarios de videos: se aplican al instante en lista, reproductor y perfil sin volver a bajar todo.
+  socket.on('video_updated', ev => {
+    if (!ev || !ev.id) return;
+    if (ev.refetch) { liveRefresh('videos'); return; }
+    const vids = getVideos(), v = vids.find(x => x.id === ev.id);
+    if (!v) { liveRefresh('videos'); return; }
+    if (Array.isArray(ev.likes)) v.likes = ev.likes;
+    if (typeof ev.views === 'number') v.views = Math.max(v.views || 0, ev.views);
+    if (ev.comment) { v.comments = v.comments || []; if (!v.comments.some(c => c.id === ev.comment.id)) v.comments.push(ev.comment); }
+    DB.set('crix_videos', vids);
+    rerenderLiveScreens('videos');
+  });
+  socket.on('post_updated', ev => {
+    if (!ev || !ev.id) return;
+    if (ev.refetch) { liveRefresh('posts'); return; }
+    const posts = getPosts(), p = posts.find(x => x.id === ev.id);
+    if (!p) { liveRefresh('posts'); return; }
+    if (Array.isArray(ev.likes)) p.likes = ev.likes;
+    if (ev.reply) { p.replies = p.replies || []; if (!p.replies.some(r => r.id === ev.reply.id)) p.replies.push(ev.reply); }
+    DB.set('crix_posts', posts);
+    rerenderLiveScreens('posts');
+  });
+  // Mensajes que entraron por otra instancia del servidor.
+  socket.on('conv_updated', ({ convId } = {}) => { if (convId) syncConvFromServer(convId); });
   socket.on('new_post', post => { if (!mine(post.authorId)) showToast('📝 ' + post.authorName + ' publicó en Foros'); liveRefresh('posts'); });
   socket.on('post_deleted', () => liveRefresh('posts'));
   socket.on('map_new', m => { if (m.authorName !== ME?.username) showToast('🎮 Nuevo juego: ' + (m.name||'') + ' por ' + m.authorName); liveRefresh('maps'); });
   socket.on('map_updated', () => liveRefresh('maps'));
+  // Likes y jugadas: se aplican al instante, sin bajar de nuevo el catálogo entero.
+  socket.on('map_stats', ({ mapId, likes, plays } = {}) => {
+    const maps = getMaps(), m = maps[mapId];
+    if (!m) { liveRefresh('maps'); return; }
+    if (typeof likes === 'number') m.likes = likes;
+    if (typeof plays === 'number') m.plays = Math.max(m.plays || 0, plays);
+    DB.set('maps', maps);
+    clearTimeout(window._mapStatsTimer);
+    window._mapStatsTimer = setTimeout(() => rerenderLiveScreens('maps'), 250);
+  });
   socket.on('map_deleted', () => liveRefresh('maps'));
   socket.on('user_new', u => { showToast('👋 ' + u.username + ' se unió a Crix'); liveRefresh('users'); });
   socket.on('user_updated', () => liveRefresh('users'));

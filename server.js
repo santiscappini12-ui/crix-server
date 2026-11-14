@@ -138,6 +138,20 @@ function saveDB() {
 
 loadDB();
 
+// ══════════════════════════════════════════════
+// TIEMPO REAL: avisos por Socket.IO
+// ══════════════════════════════════════════════
+// Cada cuenta tiene su sala `user:<id>`: TODOS sus dispositivos/pestañas conectados reciben los avisos
+// (antes solo el último socket conectado, y por eso algo se veía en el celular y no en la PC).
+const userRoom = id => 'user:' + id;
+function toUser(id) { return io.to(userRoom(id)); }
+// Un video privado solo lo ve su autor: sus avisos no se difunden al resto.
+function emitVideoEvent(video, event, payload) {
+  if (!video || (video.privacy || 'public') === 'public') io.emit(event, payload);
+  else toUser(video.authorId).emit(event, payload);
+}
+function emitMembers(convId, event, payload) { String(convId).split('_').forEach(uid => toUser(uid).emit(event, payload)); }
+
 // ── Varias instancias comparten la base a través del bucket: se fusionan los cambios de las demás ──
 function broadcastRemote(events) {
   for (const [col, kind, id, rec] of events) {
@@ -147,10 +161,15 @@ function broadcastRemote(events) {
       else if (kind === 'deleted') io.emit('map_deleted', { mapId:id });
     } else if (col === 'videos') {
       if (kind === 'new' && rec.ready !== false && (rec.privacy || 'public') === 'public') io.emit('video_new', { id, title:rec.title, authorId:rec.authorId, authorName:rec.authorName, cat:rec.cat, thumb:rec.thumb, created:rec.created, privacy:rec.privacy });
+      else if (kind === 'new') io.emit('video_updated', { id, refetch:true });   // borrador o privado: cada cliente pide lo que puede ver
+      else if (kind === 'updated') io.emit('video_updated', { id, refetch:true });   // likes, vistas, comentarios, título, privacidad
       else if (kind === 'deleted') io.emit('video_deleted', { id });
     } else if (col === 'posts') {
       if (kind === 'new') io.emit('new_post', { id, authorId:rec.authorId, authorName:rec.authorName, text:(rec.text || '').substring(0, 100) });
+      else if (kind === 'updated') io.emit('post_updated', { id, refetch:true });    // likes, respuestas, ediciones
       else if (kind === 'deleted') io.emit('post_deleted', { id });
+    } else if (col === 'convs') {
+      emitMembers(id, 'conv_updated', { convId:id });                                 // mensajes que entraron por otra instancia
     } else if (col === 'users') {
       if (kind === 'new') io.emit('user_new', { userId:id, username:rec.username, color:rec.color });
       else io.emit('user_updated', { userId:id });
@@ -598,8 +617,7 @@ app.post('/api/maps/:id/team', requireAuth, (req, res) => {
     if (map.collaborators.includes(target.id)) return res.status(400).json({ ok:false, err:'Ya está en el equipo' });
     if (map.collaborators.length >= MAX_COLLABORATORS) return res.status(400).json({ ok:false, err:'El equipo está completo (' + MAX_COLLABORATORS + ')' });
     map.collaborators.push(target.id);
-    const t = onlineUsers[target.id];
-    if (t) io.to(t.socketId).emit('team_invite', { mapId:map.id, mapName:map.name || 'Proyecto', from:req.user.username });
+    toUser(target.id).emit('team_invite', { mapId:map.id, mapName:map.name || 'Proyecto', from:req.user.username });
   } else if (remove) {
     map.collaborators = map.collaborators.filter(id => id !== remove);
     const sess = teamSessions[map.id];
@@ -1266,6 +1284,7 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
   }
   await Promise.all(uploads);
   map.textureIds = [...ids]; saveDB();
+  io.emit('map_updated', { mapId:map.id });   // el resto (y tus otros dispositivos) reciben las texturas nuevas al instante
   res.json({ ok:true, textureIds: map.textureIds });
 });
 app.get('/api/maps/:id/textures/:tid', async (req, res) => {
@@ -1319,6 +1338,7 @@ app.put('/api/maps/:id/sounds/:sid', requireAuth, async (req, res) => {
     map.sounds = map.sounds || {};
     map.sounds[req.params.sid] = { name: String(req.query.name || 'Sonido').slice(0, 60), ext, mime: SND_MIME[ext], size };
     saveDB();
+    io.emit('map_updated', { mapId:map.id });
     res.json({ ok:true, sound: map.sounds[req.params.sid], sounds: map.sounds });
   } catch (e) {
     if (tmp) { try { fs.rmSync(tmp, { force:true }); } catch {} }
@@ -1339,7 +1359,7 @@ app.delete('/api/maps/:id/sounds/:sid', requireAuth, (req, res) => {
   const f = soundFile(assetId(req.params.id), req.params.sid);
   if (f) { try { fs.unlinkSync(f); } catch {} persist.delKey(`sounds/${assetId(req.params.id)}/${path.basename(f)}`); }
   if (map.sounds) delete map.sounds[req.params.sid];
-  saveDB(); res.json({ ok:true, sounds: map.sounds || {} });
+  saveDB(); io.emit('map_updated', { mapId:map.id }); res.json({ ok:true, sounds: map.sounds || {} });
 });
 
 // ── SAVE mapa ──
@@ -1412,7 +1432,8 @@ app.post('/api/maps/:id/like', requireAuth, (req, res) => {
   req.user.liked = req.user.liked || [];
   req.user.liked = liked ? [...new Set([...req.user.liked, map.id])] : req.user.liked.filter(id => id !== map.id);
   saveDB();
-  io.emit('map_updated', { mapId:map.id });
+  io.emit('map_stats', { mapId:map.id, likes:map.likes, plays:map.plays || 0 });   // liviano: nadie vuelve a bajar el catálogo por un like
+  toUser(req.user.id).emit('user_updated', { userId:req.user.id });               // tus otros dispositivos actualizan tus favoritos
   res.json({ ok:true, liked, likes:map.likes });
 });
 
@@ -1421,7 +1442,7 @@ app.post('/api/maps/:id/play', (req, res) => {
   if (!map || !canReadMap(map, readSession(req))) return res.status(404).json({ ok:false });
   map.plays = (map.plays || 0) + 1;
   saveDB();
-  io.emit('map_updated', { mapId:map.id });
+  io.emit('map_stats', { mapId:map.id, likes:map.likes || 0, plays:map.plays });
   res.json({ ok:true, plays:map.plays });
 });
 
@@ -1507,9 +1528,8 @@ app.post('/api/convs/:convId', (req, res) => {
       DB.convs[convId].push(encryptedMessage);
     saveDB();
     // Notificar en tiempo real
+    emitMembers(convId, 'new_private_msg', { convId, msg:encryptedMessage });
     convId.split('_').forEach(uid => {
-      const o = onlineUsers[uid];
-      if (o) io.to(o.socketId).emit('new_private_msg', { convId, msg:encryptedMessage });
       // El contenido va cifrado de punta a punta: el aviso no puede incluir el texto.
       if (uid !== user.id) notifyPush(uid, {
         type:'message', from:user.id, fromName:user.username, convId,
@@ -1538,8 +1558,8 @@ app.post('/api/friend-request', (req, res) => {
     if (!from.friendRequests_sent.includes(toId)) from.friendRequests_sent.push(toId);
     DB.users[fromId] = from; DB.users[toId] = to; saveDB();
     // Notificar en tiempo real si está online
-    const toOnline = onlineUsers[toId];
-    if (toOnline) io.to(toOnline.socketId).emit('friend_request', { from:from.id, fromName:from.username });
+    toUser(toId).emit('friend_request', { from:from.id, fromName:from.username });
+    toUser(fromId).emit('user_updated', { userId:fromId });   // tus otros dispositivos ven la solicitud enviada
     notifyPush(toId, { type:'friend_request', from:from.id, fromName:from.username, tag:'friend-' + from.id, url:'/?n=friend_request' }, { ttl:7 * 24 * 3600 });
     res.json({ok:true});
   } catch(e) { res.json({ok:false,err:e.message}); }
@@ -1564,8 +1584,7 @@ app.post('/api/friend-accept', (req, res) => {
     from.friendRequests_sent = (from.friendRequests_sent||[]).filter(id=>id!==toId);
     DB.users[fromId]=from; DB.users[toId]=to; saveDB();
     // Notificar a ambos
-    const fromOnline = onlineUsers[fromId];
-    if (fromOnline) io.to(fromOnline.socketId).emit('friend_accepted', { from:to.id, fromName:to.username });
+    toUser(fromId).emit('friend_accepted', { from:to.id, fromName:to.username });
     notifyPush(fromId, { type:'friend_accepted', from:to.id, fromName:to.username, tag:'friend-ok-' + to.id, url:'/?n=friend_accepted&u=' + encodeURIComponent(to.id) }, { ttl:7 * 24 * 3600 });
     io.emit('user_updated', {userId:fromId}); io.emit('user_updated', {userId:toId});
     res.json({ok:true});
@@ -1584,6 +1603,8 @@ app.post('/api/friend-reject', (req, res) => {
     if (from) { from.friendRequests_sent=(from.friendRequests_sent||[]).filter(id=>id!==toId); DB.users[fromId]=from; }
     if (to)   { to.friendRequests_recv=(to.friendRequests_recv||[]).filter(id=>id!==fromId);   DB.users[toId]=to;   }
     saveDB();
+    // Ambas cuentas (en todos sus dispositivos) actualizan sus solicitudes pendientes.
+    toUser(toId).emit('user_updated', { userId:toId }); toUser(fromId).emit('user_updated', { userId:fromId });
     res.json({ok:true});
   } catch(e) { res.json({ok:false,err:e.message}); }
 });
@@ -1645,7 +1666,10 @@ app.post('/api/videos', async (req, res) => {
     } else if (!old) saved.ready = false;                       // el archivo llega después con PUT /file
     if (idx >= 0) DB.videos[idx] = saved; else DB.videos.push(saved);
     saveDB();
-    if (saved.ready && !wasReady && saved.privacy === 'public') io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
+    const becamePublic = !!old && old.privacy !== 'public' && saved.privacy === 'public';
+    if (saved.ready && (!wasReady || becamePublic) && saved.privacy === 'public') io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
+    else if (old) io.emit('video_updated', { id: saved.id, refetch:true });   // título, descripción, miniatura o privacidad (si pasó a privado, el resto lo deja de ver)
+    else toUser(saved.authorId).emit('video_updated', { id: saved.id, refetch:true });   // borrador: sus otros dispositivos lo ven mientras sube
     res.json({ ok: true, ready: !!saved.ready });
   } catch(e) { res.json({ ok: false, err: e.message }); }
 });
@@ -1676,6 +1700,7 @@ app.put('/api/videos/:id/file', async (req, res) => {
     await persist.putFile('videos/' + file, path.join(VIDEO_DIR, file));
     saveDB();
     if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
+    else emitVideoEvent(video, 'video_updated', { id: video.id, refetch:true });   // privado: aparece en los dispositivos del autor; archivo reemplazado: todos
     res.json({ ok:true, size:video.size, mime:video.mime });
   } catch (e) {
     if (tmp) { try { fs.rmSync(tmp, { force:true }); } catch {} }
@@ -1693,6 +1718,7 @@ app.post('/api/videos/:id/like', (req, res) => {
   const liked = idx === -1;
   if (liked) v.likes.push(user.id); else v.likes.splice(idx, 1);
   saveDB();
+  emitVideoEvent(v, 'video_updated', { id:v.id, likes:v.likes });
   res.json({ ok: true, liked, likes: v.likes.length });
 });
 
@@ -1701,6 +1727,7 @@ app.post('/api/videos/:id/view', (req, res) => {
   if (!video || !canReadVideo(video, readSession(req))) return res.status(404).json({ ok:false });
   video.views = (video.views || 0) + 1;
   saveDB();
+  emitVideoEvent(video, 'video_updated', { id:video.id, views:video.views });
   res.json({ ok:true, views:video.views });
 });
 
@@ -1715,6 +1742,7 @@ app.post('/api/videos/:id/comment', (req, res) => {
   const comment = { id:`c${crypto.randomUUID()}`, authorId:user.id, authorName:user.username, text, created:new Date().toISOString() };
   v.comments.push(comment);
   saveDB();
+  emitVideoEvent(v, 'video_updated', { id:v.id, comment });
   res.json({ ok: true, comment });
 });
 
@@ -1728,7 +1756,7 @@ app.delete('/api/videos/:id', (req, res) => {
   DB.videos = DB.videos.filter(v => v.id !== req.params.id);
   { const f = videoFilePath(video); if (f) { try { fs.unlinkSync(f); } catch {} persist.delKey('videos/' + path.basename(f)); } }
   saveDB();
-  if ((video.privacy || 'public') === 'public') io.emit('video_deleted', { id:req.params.id });
+  emitVideoEvent(video, 'video_deleted', { id:req.params.id });
   res.json({ ok:true });
 });
 
@@ -1751,7 +1779,8 @@ app.post('/api/posts', (req, res) => {
     const savedPost = { ...(previous || {}), ...p, authorId:previous?.authorId || user.id, authorName:previous?.authorName || user.username, privacy:'public' };
     if (index >= 0) DB.posts[index] = savedPost; else DB.posts.unshift(savedPost);
     saveDB();
-    io.emit('new_post', { id: savedPost.id, authorId: savedPost.authorId, authorName: savedPost.authorName, text: (savedPost.text||'').substring(0,100) });
+    if (previous) io.emit('post_updated', { id: savedPost.id, refetch:true });   // edición: sin aviso de "nuevo post"
+    else io.emit('new_post', { id: savedPost.id, authorId: savedPost.authorId, authorName: savedPost.authorName, text: (savedPost.text||'').substring(0,100) });
     res.json({ ok: true });
   } catch(e) { res.json({ ok: false, err: e.message }); }
 });
@@ -1778,6 +1807,7 @@ app.post('/api/posts/:id/like', (req, res) => {
   const liked = idx === -1;
   if (liked) p.likes.push(user.id); else p.likes.splice(idx, 1);
   saveDB();
+  io.emit('post_updated', { id:p.id, likes:p.likes });
   res.json({ ok: true, liked, likes: p.likes.length });
 });
 
@@ -1792,6 +1822,7 @@ app.post('/api/posts/:id/reply', (req, res) => {
   const reply = { id:`r${crypto.randomUUID()}`, authorId:user.id, authorName:user.username, text, created:new Date().toISOString() };
   p.replies.push(reply);
   saveDB();
+  io.emit('post_updated', { id:p.id, reply });
   res.json({ ok: true, reply });
 });
 
@@ -1826,6 +1857,7 @@ if (SELF_URL) {
 // ══════════════════════════════════════════════
 io.on('connection', socket => {
   stats.total++;
+  if (socket.data.user) socket.join(userRoom(socket.data.user.id));   // todos los dispositivos de la cuenta reciben sus avisos
 
   // ── Llamadas de voz y video (señalización WebRTC) ──
   // El audio y el video van directo entre las dos personas (cifrado DTLS-SRTP); el servidor solo
@@ -2106,6 +2138,7 @@ io.on('connection', socket => {
   socket.on('user_online', ({ userId, username, color }) => {
     const user = socket.data.user;
     if (!user || user.id !== userId) return;
+    socket.join(userRoom(user.id));
     onlineUsers[user.id] = { ...(onlineUsers[user.id]||{}), socketId: socket.id, username:user.username, color:user.color };
     connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId:user.id, username:user.username, color:user.color };
     // Persistir onlineAt en DB para que el cliente lo vea

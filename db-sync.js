@@ -41,6 +41,26 @@ module.exports = function createDbSync({ getDB, onRemoteChange }) {
     if (KEYED.includes(col)) { if (DB[col]) delete DB[col][id]; return; }
     DB[col] = (Array.isArray(DB[col]) ? DB[col] : []).filter(r => !(r && String(r.id) === id));
   }
+  // Une dos listas de objetos con `id` (comentarios/respuestas) sin duplicar y por orden de fecha.
+  function unionById(a, b) {
+    const out = [], seen = new Set();
+    for (const x of [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]) {
+      const k = x && typeof x === 'object' && x.id != null ? String(x.id) : JSON.stringify(x);
+      if (seen.has(k)) continue; seen.add(k); out.push(x);
+    }
+    const ts = x => Number(new Date(x && (x.created ?? x.t ?? x.time) || 0)) || 0;
+    return out.sort((x, y) => ts(x) - ts(y));
+  }
+  function mergeAdditive(l, r) {
+    const out = {};
+    if (Array.isArray(l.comments) || Array.isArray(r.comments)) out.comments = unionById(l.comments, r.comments);
+    if (Array.isArray(l.replies) || Array.isArray(r.replies)) out.replies = unionById(l.replies, r.replies);
+    if (l.views !== undefined || r.views !== undefined) out.views = Math.max(Number(l.views) || 0, Number(r.views) || 0);
+    return out;
+  }
+  function additiveDiffers(l, add) {
+    return Object.keys(add).some(k => k === 'views' ? (Number(l.views) || 0) !== add.views : (Array.isArray(l[k]) ? l[k].length : 0) !== add[k].length);
+  }
   const remember = (col, id, rec) => { cache.set(col + ':' + id, { sig: sigOf(rec), u: Number(rec._u) || 0 }); known[col].add(id); };
 
   // Primera lectura (al arrancar): no se estampa nada, solo se memoriza el estado actual.
@@ -91,11 +111,18 @@ module.exports = function createDbSync({ getDB, onRemoteChange }) {
         if (!l) { put(DB, col, id, r); remember(col, id, r); delete T[col][id]; events.push([col, 'new', id, r]); changed = true; continue; }
         const lu = Number(l._u) || 0;
         const plays = col === 'maps' ? Math.max(Number(l.plays) || 0, Number(r.plays) || 0) : 0;   // las reproducciones solo crecen
+        // Comentarios, respuestas y vistas nunca se pierden: si dos instancias los cambiaron a la vez, se unen por id
+        // (antes ganaba el registro entero más reciente y el comentario de la otra instancia desaparecía).
+        const additive = (col === 'videos' || col === 'posts') ? mergeAdditive(l, r) : null;
         if (ru > lu) {
           if (col === 'maps') r.plays = plays;
+          if (additive) Object.assign(r, additive);
           put(DB, col, id, r); remember(col, id, r); events.push([col, 'updated', id, r]); changed = true;
         } else if (col === 'maps' && plays > (Number(l.plays) || 0)) {
           l.plays = plays; cache.set('maps:' + id, { sig: sigOf(l), u: lu }); changed = true;   // sin cambiar `_u`
+        } else if (additive && additiveDiffers(l, additive)) {
+          Object.assign(l, additive); changed = true;   // `reconcile()` estampa el cambio y se propaga a las demás instancias
+          events.push([col, 'updated', id, l]);
         }
       }
       // Registros locales que una lápida remota borró (la remota ya no los tiene).
