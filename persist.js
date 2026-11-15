@@ -207,10 +207,12 @@ function ensureLocal(key, localPath) {   // descarga bajo demanda si el archivo 
 let pendingDb = null, dbUploading = false, dbTimer = null, lastDbUpload = 0, dbFailures = 0;
 // ── Varias instancias: la base remota se baja y se fusiona (ver db-sync.js) ──
 let syncApi = null, lastEtag = null, pulling = null, syncWarnAt = 0;
+// CRIX_SYNC_MS=0 apaga TODA la sincronización entre instancias (sin sondeos al bucket). Usalo si corrés una sola instancia.
+const SYNC_OFF = String(env.CRIX_SYNC_MS || '').trim() === '0';
 function setSync(api) { syncApi = api; }
 // Baja la base remota si otra instancia la cambió y la fusiona con la local. true = la local cambió.
 function pullRemote() {
-  if (!driver || !restored || !syncApi) return Promise.resolve(false);
+  if (SYNC_OFF || !driver || !restored || !syncApi) return Promise.resolve(false);
   if (pulling) return pulling;
   pulling = (async () => {
     const tag = await driver.etag(DB_KEY);
@@ -234,6 +236,7 @@ function pullFresh(maxAge = 2000, cap = 2500) {
   return Promise.race([pullRemote(), sleep(cap).then(() => false)]);
 }
 function startSync() {
+  if (SYNC_OFF) { console.log('[PERSIST] Sincronización entre instancias APAGADA (CRIX_SYNC_MS=0): sin sondeos al bucket'); return; }
   if (!driver || !syncApi) return;
   // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 15 s; además se consulta antes de cada lectura del catálogo (máx. 1 vez cada 2 s).
   const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 15000);
