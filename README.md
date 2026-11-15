@@ -92,7 +92,16 @@ Si el alojamiento corre **más de una instancia** (escalado, o el solape entre e
 
 Sin bucket configurado hay un solo disco por instancia y no hay nada que compartir: ahí conviene correr **una sola** instancia.
 
-Limitaciones: las salas de juego, la presencia (quién está jugando dónde), las llamadas y los avisos de chat en vivo siguen siendo por instancia (un jugador solo ve a quienes están en su misma instancia). Para repartir salas entre máquinas hace falta un adaptador de Socket.IO compartido (por ejemplo Redis) o enrutamiento por sala.
+### Salas y presencia compartidas entre instancias (Redis)
+
+Con la variable `CRIX_REDIS_URL` (o `REDIS_URL`, por ejemplo `rediss://default:clave@host:6379`; sirve Upstash, Redis Cloud, etc.) las instancias juegan **juntas**:
+
+- Cada sala vive en la instancia que la creó (su id va de prefijo en el `instanceId`: `<instancia>-<uuid>`). Quien entra desde otra instancia queda conectado a la sala por Redis: se ven, se mueven, chatean y usan el SDK de apps igual que si estuvieran en la misma.
+- **En línea ahora**, el perfil, la búsqueda y la lista de servidores activos muestran a todos, estén en la instancia que estén, y **Unirme** entra a la instancia exacta de esa persona.
+- Cada instancia manda un latido cada 5 s; si la dueña de una sala cae (15 s sin latido), quienes jugaban desde otra instancia reciben un aviso y pueden volver a entrar.
+- Redis solo hace de canal (pub/sub); no guarda datos. Sin la variable todo funciona como antes, con una sola instancia.
+
+Siguen siendo por instancia: las llamadas y el estado de los scripts de servidor (corren en la instancia dueña de la sala).
 
 ## Límites
 
@@ -375,3 +384,8 @@ Reescrito con tokens (`crixscript.js`): ya no rompe cadenas ni comentarios, y so
 | `GET /status` | Consultar el estado del servidor |
 
 Solo se publican los archivos del cliente (`index.html`, `service-worker.js`, `manifest.webmanifest`, `crix-icon.svg`); el código del servidor ya no se sirve por HTTP. El registro y el login tienen límite de intentos por IP. Las rutas de escritura requieren una sesión Bearer; las operaciones administrativas también comprueban el rol en el servidor.
+
+
+## Acceso directo de un juego
+
+En la ficha de cada juego público hay un botón **📌 Acceso directo**: agrega el juego a la pantalla de inicio (o al escritorio) con su nombre y su propio ícono, y al tocarlo abre ese juego. En **Publicar** el creador elige el **ícono del acceso directo** (se recorta cuadrado); si no elige ninguno se usa la miniatura. Cada juego tiene su manifiesto en `/juego/<id>/manifest.webmanifest` y su ícono en `/juego/<id>/icon.png`. En iPhone/iPad el botón explica el paso *Compartir → Agregar a inicio*. Los juegos que no son públicos no exponen nombre ni ícono.

@@ -959,6 +959,17 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-instances')">Cerrar</button></div>
 </div>
 </div>
+<div class="mo-overlay" id="mo-shortcut">
+<div class="mo-box" style="width:min(420px,94vw);text-align:center">
+  <img id="sc-icon" alt="" style="width:88px;height:88px;border-radius:20px;object-fit:cover;margin:0 auto 10px;display:block;background:var(--bg3)">
+  <h3 id="sc-title" style="margin-bottom:6px">Acceso directo</h3>
+  <div id="sc-body" style="color:var(--text2);font-size:13px;line-height:1.5;margin-bottom:6px"></div>
+  <div class="mo-btns">
+    <button class="btn btn-g" onclick="closeModal('mo-shortcut')">Cerrar</button>
+    <button class="btn btn-p" id="sc-install" style="display:none" onclick="installGameShortcut()">📌 Agregar</button>
+  </div>
+</div>
+</div>
 <div class="mo-overlay" id="mo-avatar">
 <div class="mo-box" style="width:min(720px,100%)">
   <h3>🧍 Mi avatar</h3>
@@ -1035,6 +1046,16 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
       <input type="file" id="pub-thumb" accept="image/*" style="display:none" onchange="previewThumb(event)">
     </div>
     <canvas id="pub-thumb-preview" style="display:none;margin-top:8px;width:100%;border-radius:8px;border:1px solid var(--border)"></canvas>
+  </div>
+  <div class="field-grp">
+    <label class="field-lbl">Ícono del acceso directo (opcional)</label>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="btn btn-g" style="font-size:12px" onclick="document.getElementById('pub-icon').click()">🖼️ Elegir ícono</button>
+      <span id="pub-icon-name" style="color:var(--text2);font-size:11px">Se usa la miniatura</span>
+      <input type="file" id="pub-icon" accept="image/*" style="display:none" onchange="previewIcon(event)">
+    </div>
+    <img id="pub-icon-preview" alt="" style="display:none;margin-top:8px;width:72px;height:72px;border-radius:16px;border:1px solid var(--border);object-fit:cover">
+    <div style="color:var(--text3);font-size:10px;margin-top:4px">Es el ícono que aparece cuando alguien agrega tu juego a su pantalla de inicio. Se recorta cuadrado.</div>
   </div>
   <div class="mo-btns">
     <button class="btn btn-g" onclick="closeModal('mo-publish')">Cancelar</button>
@@ -2205,7 +2226,7 @@ function defaultParts() { return [ {id:'ground',type:'Block',name:'Suelo',x:0,y:
 const THUMB_ICONS = ['🏝️','🌋','🏙️','🌌','🏔️','🌊','🏰','🛸','⚔️','🎮','🌃','🗺️'];
 const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt-teal'];
 function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine');   renderOnlineNow(); }
-function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${m.thumb ? `<img src="${m.thumb}">` : ''}<span class="thumb-icon">${THUMB_ICONS[i%THUMB_ICONS.length]}</span>${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
+function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${m.thumb ? `<img src="${m.thumb}">` : `<span class="thumb-icon">${THUMB_ICONS[i%THUMB_ICONS.length]}</span>`}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
 function editMap(id) { const item = getMaps()[id]; if (item?.isHtmlGame) { openAppEditor(id); return; } stMapId = id; initStudio(); goTab('studio'); }
 function handleUpload(e) {
@@ -2909,8 +2930,38 @@ function updateStStatus() { document.getElementById('stu-status').textContent = 
 function delScript(id) { if(!stScripts.some(s=>s.id===id))return;recordStudioHistory();stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
 function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); maps[stMapId].textureNames = {...stTexNames}; setMaps(maps); showToast((CLOUD_READY && ME && DB.get('token')) ? '💾 Guardado' : '💾 Guardado solo en este navegador: inicia sesión para que el juego publicado use estos cambios y scripts'); if (Object.keys(stTexData).length) setTimeout(stPushTextures, 900); }
 function stuTest() { stuSave(); if(stMapId){stPlaytesting=true;const back=document.getElementById('g-back-btn');if(back)back.textContent='⏹ Volver a Crix Hub';playMap(stMapId);} }
-let pubThumbData = null;
-function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; openModal('mo-publish'); }
+let pubThumbData = null, pubIconData = null;
+// Recorta al centro y devuelve un PNG cuadrado (los íconos de pantalla de inicio tienen que ser cuadrados).
+function squareIconFromDataUrl(src, size = 512) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const side = Math.min(img.naturalWidth, img.naturalHeight) || 1, c = document.createElement('canvas');
+        c.width = c.height = size;
+        c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+        let out = c.toDataURL('image/png');
+        if (out.length > 450000 && size > 192) { c.width = c.height = 256; c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, 256, 256); out = c.toDataURL('image/png'); }
+        resolve(out);
+      } catch (_) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+function previewIcon(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = async ev => {
+    const sq = await squareIconFromDataUrl(ev.target.result);
+    if (!sq) { showToast('No se pudo leer esa imagen'); return; }
+    pubIconData = sq;
+    document.getElementById('pub-icon-name').textContent = f.name;
+    const pv = document.getElementById('pub-icon-preview'); pv.src = sq; pv.style.display = 'block';
+  };
+  r.readAsDataURL(f);
+}
+function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; pubIconData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; const hasIc = !!(m && (m.icon || m.hasIcon)); document.getElementById('pub-icon-name').textContent = hasIc ? 'Ícono actual (elegí otro para cambiarlo)' : 'Se usa la miniatura'; const ipv = document.getElementById('pub-icon-preview'); if (hasIc) { ipv.src = m.icon || ('/juego/' + encodeURIComponent(m.id) + '/icon.png?t=' + Date.now()); ipv.style.display = 'block'; } else ipv.style.display = 'none'; openModal('mo-publish'); }
 function previewThumb(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { pubThumbData = ev.target.result; document.getElementById('pub-thumb-name').textContent = f.name; const canvas = document.getElementById('pub-thumb-preview'); const img = new Image(); img.onload = () => { canvas.style.display='block'; canvas.getContext('2d').drawImage(img,0,0,canvas.width=canvas.clientWidth,canvas.height=canvas.clientWidth*9/16); }; img.src = pubThumbData; }; r.readAsDataURL(f); }
 async function confirmPublish() {
   const name = document.getElementById('pub-name').value.trim();
@@ -2925,6 +2976,9 @@ async function confirmPublish() {
   m.assignedPlayers = privacy === 'assigned' ? assignedRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
   m.authorId = ME.id; m.authorName = ME.username;
   if (pubThumbData) m.thumb = pubThumbData;
+  // Ícono del acceso directo: el que eligió el creador; si no eligió ninguno, la miniatura recortada cuadrada.
+  if (pubIconData) m.icon = pubIconData;
+  else if (!m.icon && !m.hasIcon && m.thumb) { const auto = await squareIconFromDataUrl(m.thumb); if (auto) m.icon = auto; }
   setMaps(maps); closeModal('mo-publish');
   if (!ME || !DB.get('token')) { showToast('⚠️ Iniciá sesión para que el juego se publique para todos'); return; }
   showToast('⏳ Subiendo al servidor…');
@@ -3704,9 +3758,46 @@ function crixSetUrl(path) { if (window.__crixLock) return; try { const target = 
 const CRIX_BOOT_ROUTE = crixParseRoute();
 async function crixOpenRoute(route) {
   if (!route) return;
-  if (route.kind === 'juego') { const m = getMaps()[route.key]; if (m) openGamePage(route.key); else showToast('Ese juego no existe o es privado'); }
+  if (route.kind === 'juego') {
+    const m = getMaps()[route.key];
+    if (m) {
+      openGamePage(route.key);
+      // Llegó desde el botón "Acceso directo": se ofrece instalarlo (la página ya trae el manifiesto de este juego).
+      if (/[?&]acceso=1\b/.test(location.search)) { try { history.replaceState(null, '', location.pathname); } catch (_) {} setTimeout(() => showShortcutModal(route.key), 600); }
+    } else showToast('Ese juego no existe o es privado');
+  }
   else if (route.kind === 'video') { if (getVideos().some(v => v.id === route.key)) openVideoPlayer(route.key); else showToast('Ese video no existe o es privado'); }
   else if (route.kind === 'u') { const users = getUsers(), uid = Object.keys(users).find(id => String(users[id].username || '').toLowerCase() === route.key.toLowerCase()); if (uid) goTab('profile', uid); else showToast('Ese usuario no existe'); }
+}
+// ═══ Acceso directo de un juego a la pantalla de inicio ═══
+// La página /juego/<id> trae su propio manifiesto (nombre + ícono del juego), así que "Instalar" crea un acceso
+// directo con el ícono que eligió el creador y que abre directo ese juego.
+function gameShortcutUrl(mapId) { const m = getMaps()[mapId]; return crixPath('juego', mapId, m && m.name) + '?acceso=1'; }
+function gameShortcutIcon(mapId) { return '/juego/' + encodeURIComponent(mapId) + '/icon.png'; }
+function addGameShortcut(mapId) {
+  const m = getMaps()[mapId]; if (!m) return;
+  window._scMapId = mapId;
+  const onGamePage = location.pathname.startsWith('/juego/' + encodeURIComponent(mapId));
+  if (!onGamePage) { location.href = gameShortcutUrl(mapId); return; }   // recarga con el manifiesto de este juego
+  showShortcutModal(mapId);
+}
+function showShortcutModal(mapId) {
+  const m = getMaps()[mapId]; if (!m) return;
+  window._scMapId = mapId;
+  document.getElementById('sc-icon').src = gameShortcutIcon(mapId);
+  document.getElementById('sc-title').textContent = 'Acceso directo a «' + (m.name || 'este juego') + '»';
+  const btn = document.getElementById('sc-install'), body = document.getElementById('sc-body');
+  const standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  if (standalone) { btn.style.display = 'none'; body.textContent = 'Ya estás dentro de la app instalada. Para crear el acceso directo abrí este juego desde el navegador.'; }
+  else if (typeof _deferredInstall !== 'undefined' && _deferredInstall) { btn.style.display = ''; body.textContent = 'Se agrega a tu pantalla de inicio o escritorio con este ícono y abre directo el juego.'; }
+  else if (/iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) { btn.style.display = 'none'; body.innerHTML = 'En iPhone/iPad: tocá <b>Compartir</b> (el cuadrado con la flecha) y elegí <b>Agregar a inicio</b>. Va a usar este ícono y el nombre del juego.'; }
+  else { btn.style.display = 'none'; body.innerHTML = 'Abrí el menú del navegador (⋮ o ⋯) y elegí <b>Instalar app</b> o <b>Agregar a pantalla de inicio</b>. Va a usar este ícono y el nombre del juego.'; }
+  openModal('mo-shortcut');
+}
+async function installGameShortcut() {
+  if (typeof _deferredInstall === 'undefined' || !_deferredInstall) return;
+  try { _deferredInstall.prompt(); await _deferredInstall.userChoice; } catch (_) {}
+  closeModal('mo-shortcut');
 }
 async function crixShare(kind, key) {
   const title = kind === 'juego' ? (getMaps()[key] || {}).name : kind === 'video' ? (getVideos().find(v => v.id === key) || {}).title : key;
@@ -4656,6 +4747,7 @@ function openGamePage(mapId) {
     (canPlay ? '<button class="btn btn-p" onclick="closeModal(\'mo-game-page\');playMap(\''+mapId+'\')">▶ Jugar</button><button class="btn btn-g" onclick="browseGameInstances(\''+mapId+'\')">🌐 Instancias activas</button>' :
                '<button class="btn btn-g" style="opacity:.5;cursor:not-allowed">🔒 Sin acceso</button>')+
     '<button class="btn btn-g" onclick="crixShare(\'juego\',\''+mapId+'\')">🔗 Compartir</button>'+
+    ((m.privacy||'public')==='public' ? '<button class="btn btn-g" onclick="addGameShortcut(\''+mapId+'\')">📌 Acceso directo</button>' : '')+
     '<button class="btn btn-g" id="gp-like-btn" onclick="toggleLike(\''+mapId+'\',this)">'+
     (liked?'❤️':'🤍')+' '+(m.likes||0)+'</button>'+
     ((isOwner || isCollab) ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editMap(\''+mapId+'\')">✏️ Editar'+(isCollab?' (equipo)':'')+'</button>' : '')+

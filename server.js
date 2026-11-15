@@ -17,6 +17,7 @@ if (persist.enabled && !persist.restored) {
 
 const app    = express();
 const server = http.createServer(app);
+const cluster = require('./cluster')();   // varias instancias jugando juntas (Redis); sin CRIX_REDIS_URL queda inactivo
 const io     = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
   pingTimeout: 45000, pingInterval: 15000,
@@ -37,7 +38,7 @@ app.use(express.json({ limit: LIM.json }));
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
-const INSTANCE_TAG = crypto.randomUUID().slice(0, 8);
+const INSTANCE_TAG = cluster.nodeId;
 app.use('/api', (req, res, next) => { res.set('X-Crix-Instance', INSTANCE_TAG); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
@@ -477,21 +478,40 @@ function stepServerWorldPhysics() {
 setInterval(stepServerWorldPhysics,50);
 
 // Presencia visible para todos: qué juego e instancia está jugando cada persona.
+// Presencia de una persona: la de esta instancia o, si está conectada a otra, la que esa instancia anunció.
+function presenceOf(userId) { return onlineUsers[userId] || (cluster.enabled ? cluster.remotePresence(userId) : null); }
+// Cuántas personas hay en una sala, esté en esta instancia o en otra.
+function roomPlayerCount(mapId, instanceId) {
+  const key = roomKey(mapId, instanceId), room = rooms[key];
+  if (room) return Object.keys(room.players).length;
+  const r = cluster.enabled ? cluster.remoteRoom(key) : null;
+  return r ? r.count : 0;
+}
+function publishPresence(userId) {
+  const p = onlineUsers[userId];
+  cluster.setLocalPresence(userId, p ? { username:p.username, color:p.color, mapId:p.mapId || null, instanceId:p.instanceId || null } : null);
+}
+function publishRoom(room) {
+  const players = Object.values(room.players);
+  cluster.setLocalRoom(roomKey(room.mapId, room.instanceId), players.length
+    ? { mapId:room.mapId, instanceId:room.instanceId, startedAt:room.createdAt, count:players.length, players:players.slice(0, 50).map(pl => ({ id:pl.userId, username:pl.username })) }
+    : null);
+}
 function presenceInfo(userId, viewer) {
-  const presence = onlineUsers[userId];
+  const presence = presenceOf(userId);
   if (!presence) return { online:false };
   const info = { online:true };
   const map = presence.mapId ? DB.maps[presence.mapId] : null;
   if (map && presence.instanceId && (viewer === undefined ? (map.privacy || 'public') === 'public' : (viewer?.id === userId || canReadMap(map, viewer)))) {
-    const room = rooms[roomKey(presence.mapId, presence.instanceId)];
     info.currentGameId = presence.mapId; info.currentInstanceId = presence.instanceId;
     info.currentGameName = map.name || presence.mapId;
-    info.currentInstancePlayers = room ? Object.keys(room.players).length : 1;
+    info.currentInstancePlayers = roomPlayerCount(presence.mapId, presence.instanceId) || 1;
   }
   return info;
 }
 function emitPresence(userId) {
   const user = DB.users[userId]; if (!user) return;
+  publishPresence(userId);
   io.emit('presence_update', { userId, username:user.username, color:user.color, ...presenceInfo(userId) });
 }
 
@@ -720,10 +740,11 @@ function canReadVideo(video, user) {
   return !!user && (video.authorId === user.id || user.isAdmin);
 }
 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) { socket.data.user = null; return next(); }
-  const session = DB.sessions[tokenHash(token)];
+  let session = DB.sessions[tokenHash(token)];
+  if (!session && persist.enabled) { try { await persist.pullFresh(2000, 2500); } catch {} session = DB.sessions[tokenHash(token)]; }
   const user = session && session.expiresAt > Date.now() ? DB.users[session.userId] : null;
   if (!user || user.banned) return next(new Error('Sesión inválida'));
   socket.data.user = user;
@@ -789,10 +810,39 @@ function sharePage(kind) {
       `<link rel="canonical" href="${htmlEsc(url)}">`,
       `<script>window.__CRIX_ROUTE__=${JSON.stringify({ kind, key }).replace(/</g, '\\u003c')};</script>`,
     ].join('\n');
-    const html = readIndexHtml().replace(/<title>[\s\S]*?<\/title>/, () => `<title>${htmlEsc(meta.title)}</title>`).replace('</head>', () => tags + '\n</head>');
+    let html = readIndexHtml().replace(/<title>[\s\S]*?<\/title>/, () => `<title>${htmlEsc(meta.title)}</title>`).replace('</head>', () => tags + '\n</head>');
+    const gm = kind === 'juego' ? publicMapForShortcut(key) : null;
+    if (gm) {
+      const gid = encodeURIComponent(key);
+      html = html.replace('<link rel="manifest" href="/manifest.webmanifest">', () => `<link rel="manifest" href="/juego/${gid}/manifest.webmanifest">`)
+        .replace('<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">', () => `<link rel="apple-touch-icon" href="/juego/${gid}/icon.png?v=${gameIconVersion(gm)}">`)
+        .replace('<meta name="apple-mobile-web-app-title" content="Crix">', () => `<meta name="apple-mobile-web-app-title" content="${htmlEsc(String(gm.name || 'Juego').slice(0, 30))}">`);
+    }
     res.set('Cache-Control', 'no-cache').type('html').send(html);
   };
 }
+// ── Acceso directo de un juego: manifiesto + ícono propios (ícono elegido por el creador; si no, la miniatura) ──
+const ICON_DATA_RE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+=*)$/;
+const okIconData = v => typeof v === 'string' && v.length <= 600000 && ICON_DATA_RE.test(v);
+function publicMapForShortcut(id) { const m = DB.maps[String(id || '')]; return m && (m.privacy || 'public') === 'public' ? m : null; }
+function gameIconSource(map) { return okIconData(map?.icon) ? map.icon : (typeof map?.thumb === 'string' && map.thumb.length <= 2000000 && ICON_DATA_RE.test(map.thumb) ? map.thumb : null); }
+function gameIconVersion(map) { const src = gameIconSource(map); return src ? crypto.createHash('sha1').update(src).digest('hex').slice(0, 10) : '0'; }
+app.get('/juego/:id/icon.png', (req, res) => {
+  const map = publicMapForShortcut(req.params.id), src = map && gameIconSource(map), m = src && ICON_DATA_RE.exec(src);
+  if (!m) return res.set('Cache-Control', 'public, max-age=300').sendFile(path.join(__dirname, 'icons', 'icon-512.png'));
+  res.set({ 'Content-Type': m[1], 'Cache-Control': 'public, max-age=3600' }).send(Buffer.from(m[2], 'base64'));
+});
+app.get('/juego/:id/manifest.webmanifest', (req, res) => {
+  const map = publicMapForShortcut(req.params.id), id = encodeURIComponent(String(req.params.id || '').slice(0, 120));
+  const name = String(map?.name || 'Juego de Crix').slice(0, 60);
+  const src = map && gameIconSource(map), type = (src && ICON_DATA_RE.exec(src)?.[1]) || 'image/png';
+  const icon = map && src ? `/juego/${id}/icon.png?v=${gameIconVersion(map)}` : '/icons/icon-512.png';
+  res.set({ 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' }).send(JSON.stringify({
+    id: `/juego/${id}`, name, short_name: name.slice(0, 12), description: String(map?.desc || `Jugá ${name} en Crix`).slice(0, 200), lang: 'es',
+    start_url: `/juego/${id}?pwa=1`, scope: '/', display: 'standalone', orientation: 'any', background_color: '#080a0f', theme_color: '#080a0f',
+    categories: ['games'], icons: [{ src: icon, sizes: '192x192', type, purpose: 'any' }, { src: icon, sizes: '512x512', type, purpose: 'any' }],
+  }));
+});
 app.get(['/juego/:id', '/juego/:id/:slug'], sharePage('juego'));
 app.get(['/video/:id', '/video/:id/:slug'], sharePage('video'));
 app.get('/u/:username', sharePage('u'));
@@ -968,9 +1018,8 @@ app.get('/api/users', (req, res) => {
   const viewer = readSession(req);
   const out = {};
   for (const [id, u] of Object.entries(DB.users)) {
-    const presence = onlineUsers[id];
+    const presence = presenceOf(id);
     const activeMap = presence?.mapId ? DB.maps[presence.mapId] : null;
-    const activeRoom = presence?.instanceId ? rooms[roomKey(presence.mapId, presence.instanceId)] : null;
     const canSeeGame = !!presence?.instanceId && !!activeMap && (viewer?.id === id || viewer?.isAdmin || canReadMap(activeMap, viewer));
     if (!viewer?.isAdmin && u.banned && u.banned.permanent) {
       out[id] = { id, username:'Banned User', color:'#333344', banned:true, created:u.created };
@@ -982,7 +1031,7 @@ app.get('/api/users', (req, res) => {
           currentGameId: presence.mapId,
           currentInstanceId: presence.instanceId,
           currentGameName: activeMap?.name || presence.mapId,
-          currentInstancePlayers: activeRoom ? Object.keys(activeRoom.players).length : 1,
+          currentInstancePlayers: roomPlayerCount(presence.mapId, presence.instanceId) || 1,
         } : {}),
       };
     }
@@ -1183,7 +1232,7 @@ app.get('/api/ice/test', requireAuth, async (req, res) => {
 // ── Gente en línea ahora (visible para todos) ──
 app.get('/api/online', (req, res) => {
   const viewer = readSession(req);
-  const list = Object.keys(onlineUsers).map(id => {
+  const list = [...new Set([...Object.keys(onlineUsers), ...(cluster.enabled ? cluster.remoteOnlineIds() : [])])].map(id => {
     const u = DB.users[id]; if (!u || u.banned) return null;
     return { id, username:u.username, color:u.color, avatar:u.avatar || '', ...presenceInfo(id, viewer) };
   }).filter(Boolean);
@@ -1193,13 +1242,12 @@ app.get('/api/online', (req, res) => {
 // ── Unirse al servidor de cualquier persona que esté jugando ──
 app.post('/api/join-user/:id', requireAuth, (req, res) => {
   const target = DB.users[req.params.id];
-  const presence = onlineUsers[req.params.id];
+  const presence = presenceOf(req.params.id);
   if (!target || !presence) return res.status(404).json({ ok:false, err:'Esa persona no está en línea.' });
   if (!presence.mapId || !presence.instanceId) return res.status(409).json({ ok:false, err:'Esa persona no está jugando ahora.' });
   const map = DB.maps[presence.mapId];
   if (!map || !canReadMap(map, req.user)) return res.status(403).json({ ok:false, err:'No tenés acceso al juego que está jugando.' });
-  const room = rooms[roomKey(presence.mapId, presence.instanceId)];
-  const count = room ? Object.keys(room.players).length : 0;
+  const count = roomPlayerCount(presence.mapId, presence.instanceId);
   if (count >= maxPlayersFor(map)) return res.status(409).json({ ok:false, err:'Ese servidor está lleno.' });
   res.json({ ok:true, mapId:presence.mapId, instanceId:presence.instanceId, gameName:map.name || presence.mapId, players:count });
 });
@@ -1209,7 +1257,7 @@ app.get('/api/maps', (req, res) => {
   const uObj = readSession(req);
   const out  = {};
   for (const [id, m] of Object.entries(DB.maps)) {
-    if (canReadMap(m, uObj)) out[id]=m;
+    if (canReadMap(m, uObj)) { if (m.icon) { const { icon, ...rest } = m; out[id] = { ...rest, hasIcon:true }; } else out[id] = m; }
   }
   res.json({ ok:true, maps: out });
 });
@@ -1227,8 +1275,9 @@ app.get('/api/maps/:id/instances', (req, res) => {
       startedAt: room.createdAt,
       playerCount: Object.keys(room.players).length,
       players: Object.values(room.players).map(player => ({ id:player.userId, username:player.username })),
-    }))
-    .sort((a,b) => b.playerCount-a.playerCount || a.startedAt-b.startedAt);
+    }));
+  if (cluster.enabled) for (const r of cluster.remoteRoomsList()) if (r.mapId === req.params.id && r.count > 0) instances.push({ id:r.instanceId, mapId:r.mapId, startedAt:r.startedAt, playerCount:r.count, players:r.players || [] });
+  instances.sort((a,b) => b.playerCount-a.playerCount || a.startedAt-b.startedAt);
   res.json({ ok:true, instances });
 });
 
@@ -1236,7 +1285,7 @@ app.get('/api/maps/:id/instances', (req, res) => {
 app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
   const map = DB.maps[req.params.id];
   if (!map || !canReadMap(map, req.user)) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
-  const instanceId = crypto.randomUUID();
+  const instanceId = cluster.nodeId + '-' + crypto.randomUUID();   // el prefijo dice qué instancia del servidor es dueña de la sala
   const room = getRoom(req.params.id, instanceId);
   res.status(201).json({ ok:true, instance:{ id:room.instanceId, mapId:room.mapId, startedAt:room.createdAt } });
 });
@@ -1378,6 +1427,8 @@ app.post('/api/maps', (req, res) => {
     const next = { ...body, assetsId: old?.assetsId, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [] };
     // En una sesión de equipo activa, las partes/scripts/luces ya llegan por cambios en vivo: un guardado completo no las pisa.
     if (old && teamInSession(m.id, user.id)) for (const k of TEAM_PROTECTED) if (old[k] !== undefined) next[k] = old[k];
+    if (okIconData(m.icon)) next.icon = m.icon; else if (okIconData(old?.icon)) next.icon = old.icon; else delete next.icon;
+    delete next.hasIcon;
     DB.maps[m.id] = next;
     delete DB.maps[m.id].textures;
     saveDB();
@@ -1831,7 +1882,7 @@ app.post('/api/posts/:id/reply', (req, res) => {
 require('./ai-assistant')(app, { requireAuth, log });
 
 app.get('/status', (req, res) => res.json({
-  ok:true, online: Object.keys(onlineUsers).length,
+  ok:true, online: new Set([...Object.keys(onlineUsers), ...(cluster.enabled ? cluster.remoteOnlineIds() : [])]).size,
   users: Object.keys(DB.users).length,
   maps:  Object.keys(DB.maps).length,
   uptime: Math.floor((Date.now()-stats.start)/1000),
@@ -1855,8 +1906,344 @@ if (SELF_URL) {
 // ══════════════════════════════════════════════
 // SOCKET.IO
 // ══════════════════════════════════════════════
+// ══════════════════════════════════════════════
+// INSTANCIAS COMPARTIDAS (ver cluster.js)
+// Cada sala vive en la instancia dueña (prefijo del instanceId). Quien entra desde otra instancia juega igual: sus eventos
+// viajan por Redis hasta la sala y las respuestas vuelven directo a su socket.
+// ══════════════════════════════════════════════
+const remoteSockets = new Map();   // socketId → proxy de alguien conectado a OTRA instancia que juega en una sala de ESTA
+const pendingAcks = new Map();     // ackId → { cb, t } (respuestas que esperan al dueño de la sala)
+function ownerOfInstance(instanceId) {
+  const m = /^([0-9a-f]{8})-/.exec(String(instanceId || ''));
+  return cluster.enabled && m ? m[1] : cluster.nodeId;
+}
+const userBrief = u => u ? { id:u.id, username:u.username, color:u.color, isAdmin:!!u.isAdmin, look:u.look, friends:Array.isArray(u.friends) ? u.friends.slice(0, 2000) : [] } : null;
+// Socket "de mentira" que usa la sala para hablar con alguien conectado a otra instancia.
+function makeProxy(sid, homeNode, user) {
+  let p = remoteSockets.get(sid);
+  if (!p) {
+    p = { id:sid, isProxy:true, homeNode, data:{},
+      emit:(ev, ...a) => { io.to(sid).emit(ev, ...a); return true; },
+      join:ch => { io.in(sid).socketsJoin(ch); },
+      leave:ch => { io.in(sid).socketsLeave(ch); },
+      to:ch => ({ emit:(ev, ...a) => io.to(ch).except(sid).emit(ev, ...a) }),
+    };
+    p.volatile = { emit:p.emit };
+    remoteSockets.set(sid, p);
+  }
+  p.homeNode = homeNode;
+  if (user) p.data.user = user;
+  return p;
+}
+// Esta persona deja la sala en la que esté (local o en otra instancia) y su presencia se actualiza.
+function finishRemoteLeave(socket) {
+  socket.data.gameOwner = null;
+  const meta = connSockets[socket.id]; if (meta) { meta.mapId = null; meta.instanceId = null; }
+  const uid = meta?.userId;
+  if (uid && onlineUsers[uid]?.socketId === socket.id) {
+    delete onlineUsers[uid].mapId; delete onlineUsers[uid].instanceId;
+    io.emit('online_update', { userId:uid, online:true }); emitPresence(uid);
+  }
+}
+function leaveAnyRoom(socket) {
+  const owner = socket.data.gameOwner;
+  if (owner && owner !== cluster.nodeId) {
+    cluster.sendTo(owner, { type:'fwd', sid:socket.id, ev:'leave_game', args:[] });
+    finishRemoteLeave(socket);
+    return;
+  }
+  const meta = connSockets[socket.id]; if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
+}
+function routeJoin(socket, data) {
+  const mapId = String(data?.mapId || '').slice(0, 120), instanceId = String(data?.instanceId || '').slice(0, 80);
+  const owner = ownerOfInstance(instanceId);
+  leaveAnyRoom(socket);
+  if (owner === cluster.nodeId) { socket.data.gameOwner = null; return gameHandlers.join_game(socket, data); }
+  if (!cluster.alive(owner)) { socket.emit('join_error', { message:'Esa partida ya no está activa. Abrí una nueva con "Jugar".' }); return; }
+  cluster.sendTo(owner, { type:'fwd', sid:socket.id, ev:'join_game', args:[{ mapId, instanceId, username:data?.username, look:data?.look }], user:userBrief(socket.data.user) });
+}
+function routeGame(socket, ev, args) {
+  if (!cluster.enabled) return gameHandlers[ev](socket, ...args);
+  if (ev === 'join_game') return routeJoin(socket, args[0]);
+  const owner = socket.data.gameOwner;
+  if (!owner || owner === cluster.nodeId) return gameHandlers[ev](socket, ...args);
+  if (ev === 'leave_game') return leaveAnyRoom(socket);
+  const last = args[args.length - 1], cb = typeof last === 'function' ? last : null, params = cb ? args.slice(0, -1) : args;
+  let ackId;
+  if (cb) {
+    ackId = crypto.randomUUID();
+    const t = setTimeout(() => { if (pendingAcks.delete(ackId)) cb({ ok:false, err:'La partida no respondió' }); }, 10000);
+    pendingAcks.set(ackId, { cb, t });
+  }
+  cluster.sendTo(owner, { type:'fwd', sid:socket.id, ev, args:params, ackId });
+}
+// ── Lado de la sala: ejecuta el evento de alguien que juega desde otra instancia ──
+cluster.on('fwd', async msg => {
+  const { sid, ev, ackId, from } = msg, args = Array.isArray(msg.args) ? msg.args : [];
+  if (!gameHandlers[ev] || typeof sid !== 'string' || sid.length > 60) return;
+  let proxy = remoteSockets.get(sid);
+  if (ev === 'join_game') {
+    const d = args[0] || {};
+    if (!DB.maps[String(d.mapId || '')]) { try { await persist.pullFresh(0, 3000); } catch {} }   // juego recién publicado en otra instancia
+    proxy = makeProxy(sid, from, msg.user);
+  } else if (proxy) proxy.homeNode = from;
+  if (!proxy) return;
+  const cb = ackId ? (...a) => cluster.sendTo(from, { type:'ack', ackId, args:a }) : null;
+  try { gameHandlers[ev](proxy, ...args, ...(cb ? [cb] : [])); } catch (e) { console.error('[CLUSTER] evento', ev, e.message); }
+  if (ev === 'join_game') {
+    const meta = connSockets[sid], ok = !!(meta?.mapId && rooms[roomKey(meta.mapId, meta.instanceId)]?.players[sid]);
+    cluster.sendTo(from, { type:'joined', sid, ok, mapId:meta?.mapId, instanceId:meta?.instanceId });
+    if (!ok) { remoteSockets.delete(sid); delete connSockets[sid]; }
+  }
+});
+cluster.on('ack', msg => {
+  const p = pendingAcks.get(msg.ackId); if (!p) return;
+  pendingAcks.delete(msg.ackId); clearTimeout(p.t);
+  try { p.cb(...(Array.isArray(msg.args) ? msg.args : [])); } catch {}
+});
+// ── Lado de origen: la sala confirmó (o rechazó) la entrada ──
+cluster.on('joined', msg => {
+  const s = io.sockets.sockets.get(msg.sid);
+  if (!s) { if (msg.ok) cluster.sendTo(msg.from, { type:'fwd', sid:msg.sid, ev:'leave_game', args:[] }); return; }
+  if (!msg.ok) { s.data.gameOwner = null; return; }
+  s.data.gameOwner = msg.from;
+  const meta = connSockets[s.id] || (connSockets[s.id] = {});
+  meta.mapId = msg.mapId; meta.instanceId = msg.instanceId;
+  const user = s.data.user;
+  if (user) {
+    onlineUsers[user.id] = { ...(onlineUsers[user.id] || {}), socketId:s.id, username:user.username, color:user.color, mapId:msg.mapId, instanceId:msg.instanceId };
+    io.emit('online_update', { userId:user.id, online:true, mapId:msg.mapId, instanceId:msg.instanceId });
+    emitPresence(user.id);
+  }
+});
+// Si la instancia dueña de la sala cae, quienes jugaban desde esta se enteran y pueden volver a entrar.
+setInterval(() => {
+  if (!cluster.enabled) return;
+  for (const [, s] of io.sockets.sockets) {
+    const owner = s.data.gameOwner;
+    if (owner && owner !== cluster.nodeId && !cluster.alive(owner)) {
+      finishRemoteLeave(s);
+      s.emit('join_error', { message:'Se perdió el servidor de esta partida. Volvé a entrar.' });
+    }
+  }
+}, 5000).unref();
+
+// ══════════════════════════════════════════════
+// EVENTOS DE JUEGO (sala, apps y avatares)
+// Cada handler recibe el socket por parámetro: puede ser el socket real o un "proxy" de alguien que está conectado a
+// OTRA instancia (ver cluster.js). Así la sala vive en una sola instancia y todos juegan juntos.
+// ══════════════════════════════════════════════
+const gameHandlers = {};
+function G(name, fn) { gameHandlers[name] = fn; }
+const ackFn = cb => (typeof cb === 'function' ? cb : () => {});
+G('app_hello', (socket, _, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket);
+    if (!ctx) return ack({ ok:false, reason:'not_joined' });
+    ack({ ok:true, socketId:socket.id, mapId:ctx.meta.mapId, instanceId:ctx.meta.instanceId, maxPlayers:maxPlayersFor(ctx.map),
+      players:roomPlayers(ctx.room).map(publicPlayer), state:ctx.room.appState || {} });
+});
+
+G('app_send', (socket, { type, data, to } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
+    if (typeof type !== 'string' || !APP_KEY_RE.test(type)) return ack({ ok:false, err:'Tipo de mensaje inválido' });
+    if (data !== undefined && jsonSize(data, Infinity) < 0) return ack({ ok:false, err:'Mensaje demasiado grande (máx. 8 KB)' });
+    if (!rateOk(socket, 'appsend', 90)) return ack({ ok:false, err:'Demasiados mensajes por segundo' });
+    const p = ctx.room.players[socket.id], msg = { from:publicPlayer(p), type, data: data === undefined ? null : data };
+    if (typeof to === 'string' && to) {
+      const target = roomPlayers(ctx.room).find(q => q.socketId === to || q.userId === to);
+      if (!target) return ack({ ok:false, err:'Esa persona no está en la sala' });
+      io.to(target.socketId).emit('app_msg', msg);
+    } else socket.to(gameChannel(ctx.meta.mapId, ctx.meta.instanceId)).emit('app_msg', msg);
+    ack({ ok:true });
+});
+
+G('app_state_set', (socket, { key, value } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
+    if (typeof key !== 'string' || !APP_KEY_RE.test(key)) return ack({ ok:false, err:'Clave inválida' });
+    if (!rateOk(socket, 'appstate', 40)) return ack({ ok:false, err:'Demasiados cambios por segundo' });
+    const st = ctx.room.appState || (ctx.room.appState = {});
+    if (value === null || value === undefined) delete st[key];
+    else {
+      if (jsonSize(value, Infinity) < 0) return ack({ ok:false, err:'Valor demasiado grande (máx. 16 KB)' });
+            st[key] = value;
+          }
+    io.to(gameChannel(ctx.meta.mapId, ctx.meta.instanceId)).emit('app_state', { key, value: value === undefined ? null : value, by:socket.data.user?.id || socket.id });
+    ack({ ok:true });
+});
+
+G('app_data_get', (socket, _, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para usar el guardado' });
+    ack({ ok:true, data: DB.appData?.[ctx.meta.mapId]?.[user.id]?.data ?? null });
+});
+
+G('app_data_set', (socket, { data } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para usar el guardado' });
+    if (!rateOk(socket, 'appdata', 4)) return ack({ ok:false, err:'Guardando demasiado seguido' });
+    DB.appData = DB.appData || {};
+    const bucket = DB.appData[ctx.meta.mapId] || (DB.appData[ctx.meta.mapId] = {});
+    if (data === null || data === undefined) delete bucket[user.id];
+    else {
+      if (jsonSize(data, Infinity) < 0) return ack({ ok:false, err:'El guardado supera los 64 KB' });
+      if (!bucket[user.id] && Object.keys(bucket).length >= 5000) return ack({ ok:false, err:'Esta app llegó al límite de guardados' });
+      bucket[user.id] = { data, updated:Date.now() };
+    }
+    scheduleSave(); ack({ ok:true });
+});
+
+G('app_score_submit', (socket, { board, score, mode } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para guardar puntajes' });
+    if (typeof board !== 'string' || !APP_KEY_RE.test(board) || !Number.isFinite(Number(score))) return ack({ ok:false, err:'Puntaje inválido' });
+    if (!rateOk(socket, 'appscore', 4)) return ack({ ok:false, err:'Demasiados envíos' });
+    const value = Math.max(-1e12, Math.min(1e12, Number(score)));
+    DB.appScores = DB.appScores || {};
+    const boards = DB.appScores[ctx.meta.mapId] || (DB.appScores[ctx.meta.mapId] = {});
+        const b = boards[board] || (boards[board] = { mode: mode === 'min' ? 'min' : 'max', entries:{} });
+    const cur = b.entries[user.id];
+        const better = !cur || (b.mode === 'min' ? value < cur.score : value > cur.score);
+    if (better) b.entries[user.id] = { score:value, username:user.username, at:Date.now() };
+    else if (cur.username !== user.username) cur.username = user.username;
+    scheduleSave(); ack({ ok:true, improved:better, best:b.entries[user.id].score });
+});
+
+G('app_score_top', (socket, { board, n } = {}, cb) => {
+    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
+    if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
+    if (typeof board !== 'string' || !APP_KEY_RE.test(board)) return ack({ ok:false, err:'Ranking inválido' });
+    if (!rateOk(socket, 'appscoretop', 6)) return ack({ ok:false, err:'Demasiadas consultas' });
+    const b = DB.appScores?.[ctx.meta.mapId]?.[board];
+    if (!b) return ack({ ok:true, mode:'max', top:[], me:null });
+    const sorted = Object.entries(b.entries).map(([id, e]) => ({ id, username:e.username, score:e.score }))
+      .sort((x, y) => b.mode === 'min' ? x.score - y.score : y.score - x.score);
+    const top = sorted.slice(0, Math.max(1, Math.min(50, Number(n) || 10))).map((e, i) => ({ ...e, rank:i + 1 }));
+    const mi = user ? sorted.findIndex(e => e.id === user.id) : -1;
+    ack({ ok:true, mode:b.mode, top, me: mi >= 0 ? { rank:mi + 1, score:sorted[mi].score } : null });
+});
+
+G('join_game', (socket, data) => {
+    const mapId = String(data?.mapId || '').slice(0,120);
+    const instanceId = String(data?.instanceId || '').slice(0,80);
+    const user = socket.data.user;
+    const storedMap = DB.maps[mapId];
+    if (!mapId || !instanceId || !storedMap || !canReadMap(storedMap, user)) {
+      socket.emit('join_error', { message:'No tenés acceso a esta partida o ya no existe.' });
+      return;
+    }
+    const userId = user?.id || socket.id;
+    const username = user?.username || String(data?.username || 'Invitado');
+    const color = user?.color || '#5b8def';
+    const prev = connSockets[socket.id];
+    if (prev?.mapId && (prev.mapId !== mapId || prev.instanceId !== instanceId)) leaveRoom(socket, prev.mapId, prev.instanceId);
+    const room = getRoom(mapId, instanceId);
+    if (!room.players[socket.id] && Object.keys(room.players).length >= maxPlayersFor(storedMap)) {
+      socket.emit('join_error', { message:'Este servidor está lleno. Probá con otro.' });
+      return;
+    }
+    if (!room.worldParts || room.pendingReset) initializeRoomWorld(room,storedMap);
+    const channel = gameChannel(mapId, instanceId);
+    const pd = {
+      socketId: socket.id, userId: userId||socket.id,
+      username: username.substring(0,30), color: color||'#5b8def',
+      look: CrixAvatar.sanitizeLook(user?.look && typeof user.look==='object' ? user.look : data?.look, {}),
+      x:0,y:3,z:0, ry:0, anim:0, moving:false, onGround:false, mapId, instanceId, joinedAt:Date.now(),
+    };
+    room.players[socket.id] = pd;
+    connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color, mapId, instanceId };
+    socket.join(channel);
+    if (user && !socket.isProxy) {
+      onlineUsers[user.id] = { ...(onlineUsers[user.id]||{}), socketId:socket.id, username, color, mapId, instanceId };
+      io.emit('online_update', { userId:user.id, online:true, mapId, instanceId });
+      emitPresence(user.id);
+    }
+    if (socket.isProxy) pd.homeNode = socket.homeNode;
+    publishRoom(room);
+    startRoomServerScripts(room,storedMap);
+    sendRoomPlayersToRunner(room);
+    log('JOIN', `${username} → ${mapId} / ${instanceId}`);
+    socket.emit('room_state', {
+      players: roomPlayers(room).filter(p=>p.socketId!==socket.id),
+      avatars: room.avatars,
+      chat: room.chat.slice(-30), mapId, instanceId,
+      ...roomWorldSnapshot(room), scriptRuntime:room.scriptStatus,
+    });
+    socket.to(channel).emit('player_joined', pd);
+    socket.emit('join_ack', { socketId:socket.id, mapId, instanceId, playerCount:Object.keys(room.players).length });
+});
+
+G('player_move', (socket, data) => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id]) return;
+    const p = room.players[socket.id];
+    const bounded=(value,previous,min=-10000,max=10000)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):previous;};
+    const prevX=p.x,prevY=p.y,prevZ=p.z,moveNow=Date.now(),moveDt=(moveNow-(p.moveAt||0))/1000;
+    p.x=bounded(data?.x,p.x);p.y=bounded(data?.y,p.y);p.z=bounded(data?.z,p.z);
+    if(p.moveAt&&moveDt>0.01&&moveDt<1)playerVelocity.set(p,{x:(p.x-prevX)/moveDt,y:(p.y-prevY)/moveDt,z:(p.z-prevZ)/moveDt});else playerVelocity.set(p,{x:0,y:0,z:0});
+    Object.defineProperty(p,'moveAt',{value:moveNow,writable:true,enumerable:false,configurable:true});
+    p.ry=bounded(data?.ry,p.ry,-1000,1000);p.anim=bounded(data?.anim,p.anim,-10,10);p.moving=!!data?.moving;p.onGround=!!data?.onGround;
+    sendRoomPlayersToRunner(room);
+    socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
+      { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving, og:p.onGround });
+});
+
+G('avatar_self', (socket, data) => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id]; if (!room || !player) return;
+    const now = Date.now(); player.avatarTimes = (player.avatarTimes || []).filter(time => now - time < 1000);
+    if (player.avatarTimes.length >= 20) return;                                     // 20 mensajes/s por jugador
+    player.avatarTimes.push(now);
+    const cmds = Array.isArray(data?.cmds) ? data.cmds.slice(0, 12) : [];
+    const state = room.avatars[socket.id] || (room.avatars[socket.id] = {});
+    const diffs = [];
+    for (const cmd of cmds) { const diff = CrixAvatar.sanitizeCommand(cmd); if (diff) { CrixAvatar.mergeState(state, diff); diffs.push(diff); } }
+    if (JSON.stringify(state).length > 24000) { delete room.avatars[socket.id]; return; }   // tope de tamaño por avatar
+    if (state.look) player.look = CrixAvatar.sanitizeLook(state.look, player.look);
+    for (const diff of diffs) socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('avatar_cmd', { target:socket.id, diff });
+});
+
+G('part_collect', (socket, data) => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id] || !room.worldParts) return;
+    const id = String(data?.id || '').slice(0, 120);
+    const part = room.worldParts[id];
+    if (!part || part.behavior !== 'coin' || room.collectedIds.has(id)) return;
+    const p = room.players[socket.id];
+    // Validación anti-trampa: el jugador tiene que estar cerca de la pieza.
+    if (Math.hypot((p.x||0)-part.x, (p.y||0)-part.y, (p.z||0)-part.z) > Math.max(part.sx, part.sy, part.sz) / 2 + 12) return;
+    room.collectedIds.add(id);
+    socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('part_collected', { id, by:socket.id });
+});
+
+G('script_remote', (socket, data) => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id];
+    if (!room || !player || !room.scriptStarted || !scriptRunner?.connected) return;
+    const name = String(data?.name || '');
+    if (!/^[\w.:-]{1,40}$/.test(name)) return;
+    const now = Date.now(); player.remoteTimes = (player.remoteTimes || []).filter(time => now - time < 1000);
+    if (player.remoteTimes.length >= 30) return;                       // 30 eventos por segundo por jugador
+    player.remoteTimes.push(now);
+    let payload = null; try { const text = JSON.stringify(data?.data === undefined ? null : data.data); if (text.length > 4096) return; payload = JSON.parse(text); } catch (_) { return; }
+    scriptRunner.send({ type:'remote', roomId:roomKey(room.mapId, room.instanceId), userId:String(player.userId), name, data:payload });
+});
+
+G('game_chat', (socket, data) => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId||!data?.text) return;
+    const msg = { socketId:socket.id, username:meta.username, text:String(data.text).slice(0,200), type:'chat' };
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room) return;
+    room.chat.push({...msg, time:new Date().toISOString()});
+    if (room.chat.length>100) room.chat.shift();
+    io.to(gameChannel(meta.mapId, meta.instanceId)).emit('game_chat', msg);
+});
+
+G('leave_game', (socket) => {
+    const meta = connSockets[socket.id]; if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
+});
+
 io.on('connection', socket => {
   stats.total++;
+  for (const ev of Object.keys(gameHandlers)) socket.on(ev, (...args) => routeGame(socket, ev, args));   // sala, apps y avatares (ver gameHandlers)
   if (socket.data.user) socket.join(userRoom(socket.data.user.id));   // todos los dispositivos de la cuenta reciben sus avisos
 
   // ── Llamadas de voz y video (señalización WebRTC) ──
@@ -2053,87 +2440,8 @@ io.on('connection', socket => {
   });
 
   // ── API para apps y juegos HTML (SDK window.Crix) ──
-  socket.on('app_hello', (_, cb) => {
-    const ack = ackFn(cb), ctx = appCtx(socket);
-    if (!ctx) return ack({ ok:false, reason:'not_joined' });
-    ack({ ok:true, socketId:socket.id, mapId:ctx.meta.mapId, instanceId:ctx.meta.instanceId, maxPlayers:maxPlayersFor(ctx.map),
-      players:roomPlayers(ctx.room).map(publicPlayer), state:ctx.room.appState || {} });
-  });
-  socket.on('app_send', ({ type, data, to } = {}, cb) => {
-    const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
-    if (typeof type !== 'string' || !APP_KEY_RE.test(type)) return ack({ ok:false, err:'Tipo de mensaje inválido' });
-    if (data !== undefined && jsonSize(data, Infinity) < 0) return ack({ ok:false, err:'Mensaje demasiado grande (máx. 8 KB)' });
-    if (!rateOk(socket, 'appsend', 90)) return ack({ ok:false, err:'Demasiados mensajes por segundo' });
-    const p = ctx.room.players[socket.id], msg = { from:publicPlayer(p), type, data: data === undefined ? null : data };
-    if (typeof to === 'string' && to) {
-      const target = roomPlayers(ctx.room).find(q => q.socketId === to || q.userId === to);
-      if (!target) return ack({ ok:false, err:'Esa persona no está en la sala' });
-      io.to(target.socketId).emit('app_msg', msg);
-    } else socket.to(gameChannel(ctx.meta.mapId, ctx.meta.instanceId)).emit('app_msg', msg);
-    ack({ ok:true });
-  });
-  socket.on('app_state_set', ({ key, value } = {}, cb) => {
-    const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
-    if (typeof key !== 'string' || !APP_KEY_RE.test(key)) return ack({ ok:false, err:'Clave inválida' });
-    if (!rateOk(socket, 'appstate', 40)) return ack({ ok:false, err:'Demasiados cambios por segundo' });
-    const st = ctx.room.appState || (ctx.room.appState = {});
-    if (value === null || value === undefined) delete st[key];
-    else {
-      if (jsonSize(value, Infinity) < 0) return ack({ ok:false, err:'Valor demasiado grande (máx. 16 KB)' });
-            st[key] = value;
-          }
-    io.to(gameChannel(ctx.meta.mapId, ctx.meta.instanceId)).emit('app_state', { key, value: value === undefined ? null : value, by:socket.data.user?.id || socket.id });
-    ack({ ok:true });
-  });
   // Guardado por persona y por app (queda en el servidor, no en el navegador).
-  socket.on('app_data_get', (_, cb) => {
-    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
-    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para usar el guardado' });
-    ack({ ok:true, data: DB.appData?.[ctx.meta.mapId]?.[user.id]?.data ?? null });
-  });
-  socket.on('app_data_set', ({ data } = {}, cb) => {
-    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
-    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para usar el guardado' });
-    if (!rateOk(socket, 'appdata', 4)) return ack({ ok:false, err:'Guardando demasiado seguido' });
-    DB.appData = DB.appData || {};
-    const bucket = DB.appData[ctx.meta.mapId] || (DB.appData[ctx.meta.mapId] = {});
-    if (data === null || data === undefined) delete bucket[user.id];
-    else {
-      if (jsonSize(data, Infinity) < 0) return ack({ ok:false, err:'El guardado supera los 64 KB' });
-      if (!bucket[user.id] && Object.keys(bucket).length >= 5000) return ack({ ok:false, err:'Esta app llegó al límite de guardados' });
-      bucket[user.id] = { data, updated:Date.now() };
-    }
-    scheduleSave(); ack({ ok:true });
-  });
   // Rankings: mejor puntaje por persona. mode 'max' (más alto gana, por defecto) o 'min' (más bajo gana, p. ej. tiempos).
-  socket.on('app_score_submit', ({ board, score, mode } = {}, cb) => {
-    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
-    if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para guardar puntajes' });
-    if (typeof board !== 'string' || !APP_KEY_RE.test(board) || !Number.isFinite(Number(score))) return ack({ ok:false, err:'Puntaje inválido' });
-    if (!rateOk(socket, 'appscore', 4)) return ack({ ok:false, err:'Demasiados envíos' });
-    const value = Math.max(-1e12, Math.min(1e12, Number(score)));
-    DB.appScores = DB.appScores || {};
-    const boards = DB.appScores[ctx.meta.mapId] || (DB.appScores[ctx.meta.mapId] = {});
-        const b = boards[board] || (boards[board] = { mode: mode === 'min' ? 'min' : 'max', entries:{} });
-    const cur = b.entries[user.id];
-        const better = !cur || (b.mode === 'min' ? value < cur.score : value > cur.score);
-    if (better) b.entries[user.id] = { score:value, username:user.username, at:Date.now() };
-    else if (cur.username !== user.username) cur.username = user.username;
-    scheduleSave(); ack({ ok:true, improved:better, best:b.entries[user.id].score });
-  });
-  socket.on('app_score_top', ({ board, n } = {}, cb) => {
-    const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
-    if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
-    if (typeof board !== 'string' || !APP_KEY_RE.test(board)) return ack({ ok:false, err:'Ranking inválido' });
-    if (!rateOk(socket, 'appscoretop', 6)) return ack({ ok:false, err:'Demasiadas consultas' });
-    const b = DB.appScores?.[ctx.meta.mapId]?.[board];
-    if (!b) return ack({ ok:true, mode:'max', top:[], me:null });
-    const sorted = Object.entries(b.entries).map(([id, e]) => ({ id, username:e.username, score:e.score }))
-      .sort((x, y) => b.mode === 'min' ? x.score - y.score : y.score - x.score);
-    const top = sorted.slice(0, Math.max(1, Math.min(50, Number(n) || 10))).map((e, i) => ({ ...e, rank:i + 1 }));
-    const mi = user ? sorted.findIndex(e => e.id === user.id) : -1;
-    ack({ ok:true, mode:b.mode, top, me: mi >= 0 ? { rank:mi + 1, score:sorted[mi].score } : null });
-  });
 
   socket.on('user_online', ({ userId, username, color }) => {
     const user = socket.data.user;
@@ -2166,68 +2474,7 @@ io.on('connection', socket => {
       endpoint: typeof endpoint === 'string' && endpoint.length < 1000 ? endpoint : '' };
   });
 
-  socket.on('join_game', data => {
-    const mapId = String(data?.mapId || '').slice(0,120);
-    const instanceId = String(data?.instanceId || '').slice(0,80);
-    const user = socket.data.user;
-    const storedMap = DB.maps[mapId];
-    if (!mapId || !instanceId || !storedMap || !canReadMap(storedMap, user)) {
-      socket.emit('join_error', { message:'No tenés acceso a esta partida o ya no existe.' });
-      return;
-    }
-    const userId = user?.id || socket.id;
-    const username = user?.username || String(data?.username || 'Invitado');
-    const color = user?.color || '#5b8def';
-    const prev = connSockets[socket.id];
-    if (prev?.mapId && (prev.mapId !== mapId || prev.instanceId !== instanceId)) leaveRoom(socket, prev.mapId, prev.instanceId);
-    const room = getRoom(mapId, instanceId);
-    if (!room.players[socket.id] && Object.keys(room.players).length >= maxPlayersFor(storedMap)) {
-      socket.emit('join_error', { message:'Este servidor está lleno. Probá con otro.' });
-      return;
-    }
-    if (!room.worldParts || room.pendingReset) initializeRoomWorld(room,storedMap);
-    const channel = gameChannel(mapId, instanceId);
-    const pd = {
-      socketId: socket.id, userId: userId||socket.id,
-      username: username.substring(0,30), color: color||'#5b8def',
-      look: CrixAvatar.sanitizeLook(user?.look && typeof user.look==='object' ? user.look : data?.look, {}),
-      x:0,y:3,z:0, ry:0, anim:0, moving:false, onGround:false, mapId, instanceId, joinedAt:Date.now(),
-    };
-    room.players[socket.id] = pd;
-    connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color, mapId, instanceId };
-    socket.join(channel);
-    if (user) {
-      onlineUsers[user.id] = { ...(onlineUsers[user.id]||{}), socketId:socket.id, username, color, mapId, instanceId };
-      io.emit('online_update', { userId:user.id, online:true, mapId, instanceId });
-      emitPresence(user.id);
-    }
-    startRoomServerScripts(room,storedMap);
-    sendRoomPlayersToRunner(room);
-    log('JOIN', `${username} → ${mapId} / ${instanceId}`);
-    socket.emit('room_state', {
-      players: roomPlayers(room).filter(p=>p.socketId!==socket.id),
-      avatars: room.avatars,
-      chat: room.chat.slice(-30), mapId, instanceId,
-      ...roomWorldSnapshot(room), scriptRuntime:room.scriptStatus,
-    });
-    socket.to(channel).emit('player_joined', pd);
-    socket.emit('join_ack', { socketId:socket.id, mapId, instanceId, playerCount:Object.keys(room.players).length });
-  });
 
-  socket.on('player_move', data => {
-    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
-    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id]) return;
-    const p = room.players[socket.id];
-    const bounded=(value,previous,min=-10000,max=10000)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):previous;};
-    const prevX=p.x,prevY=p.y,prevZ=p.z,moveNow=Date.now(),moveDt=(moveNow-(p.moveAt||0))/1000;
-    p.x=bounded(data?.x,p.x);p.y=bounded(data?.y,p.y);p.z=bounded(data?.z,p.z);
-    if(p.moveAt&&moveDt>0.01&&moveDt<1)playerVelocity.set(p,{x:(p.x-prevX)/moveDt,y:(p.y-prevY)/moveDt,z:(p.z-prevZ)/moveDt});else playerVelocity.set(p,{x:0,y:0,z:0});
-    Object.defineProperty(p,'moveAt',{value:moveNow,writable:true,enumerable:false,configurable:true});
-    p.ry=bounded(data?.ry,p.ry,-1000,1000);p.anim=bounded(data?.anim,p.anim,-10,10);p.moving=!!data?.moving;p.onGround=!!data?.onGround;
-    sendRoomPlayersToRunner(room);
-    socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
-      { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving, og:p.onGround });
-  });
 
   // Evento remoto LocalScript → Script de servidor (game.fireServer en el cliente, game.onClientEvent en el servidor).
   // Coleccionables compartidos: cuando alguien recoge una moneda, desaparece para todos en la sala.
@@ -2235,64 +2482,15 @@ io.on('connection', socket => {
   // ── Avatares: huesos, animaciones, cara y accesorios ───────────────────────────────────────────────────────────
   // Un cliente puede controlar SU PROPIO avatar (LocalScript, emotes); los Script de servidor controlan a cualquiera.
   // Todo se valida con las reglas compartidas de crix-avatar.js, se guarda en room.avatars (para quien entra tarde) y se replica.
-  socket.on('avatar_self', data => {
-    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
-    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id]; if (!room || !player) return;
-    const now = Date.now(); player.avatarTimes = (player.avatarTimes || []).filter(time => now - time < 1000);
-    if (player.avatarTimes.length >= 20) return;                                     // 20 mensajes/s por jugador
-    player.avatarTimes.push(now);
-    const cmds = Array.isArray(data?.cmds) ? data.cmds.slice(0, 12) : [];
-    const state = room.avatars[socket.id] || (room.avatars[socket.id] = {});
-    const diffs = [];
-    for (const cmd of cmds) { const diff = CrixAvatar.sanitizeCommand(cmd); if (diff) { CrixAvatar.mergeState(state, diff); diffs.push(diff); } }
-    if (JSON.stringify(state).length > 24000) { delete room.avatars[socket.id]; return; }   // tope de tamaño por avatar
-    if (state.look) player.look = CrixAvatar.sanitizeLook(state.look, player.look);
-    for (const diff of diffs) socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('avatar_cmd', { target:socket.id, diff });
-  });
 
-  socket.on('part_collect', data => {
-    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
-    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id] || !room.worldParts) return;
-    const id = String(data?.id || '').slice(0, 120);
-    const part = room.worldParts[id];
-    if (!part || part.behavior !== 'coin' || room.collectedIds.has(id)) return;
-    const p = room.players[socket.id];
-    // Validación anti-trampa: el jugador tiene que estar cerca de la pieza.
-    if (Math.hypot((p.x||0)-part.x, (p.y||0)-part.y, (p.z||0)-part.z) > Math.max(part.sx, part.sy, part.sz) / 2 + 12) return;
-    room.collectedIds.add(id);
-    socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('part_collected', { id, by:socket.id });
-  });
 
-  socket.on('script_remote', data => {
-    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
-    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id];
-    if (!room || !player || !room.scriptStarted || !scriptRunner?.connected) return;
-    const name = String(data?.name || '');
-    if (!/^[\w.:-]{1,40}$/.test(name)) return;
-    const now = Date.now(); player.remoteTimes = (player.remoteTimes || []).filter(time => now - time < 1000);
-    if (player.remoteTimes.length >= 30) return;                       // 30 eventos por segundo por jugador
-    player.remoteTimes.push(now);
-    let payload = null; try { const text = JSON.stringify(data?.data === undefined ? null : data.data); if (text.length > 4096) return; payload = JSON.parse(text); } catch (_) { return; }
-    scriptRunner.send({ type:'remote', roomId:roomKey(room.mapId, room.instanceId), userId:String(player.userId), name, data:payload });
-  });
 
-  socket.on('game_chat', data => {
-    const meta = connSockets[socket.id]; if (!meta?.mapId||!data?.text) return;
-    const msg = { socketId:socket.id, username:meta.username, text:String(data.text).slice(0,200), type:'chat' };
-    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room) return;
-    room.chat.push({...msg, time:new Date().toISOString()});
-    if (room.chat.length>100) room.chat.shift();
-    io.to(gameChannel(meta.mapId, meta.instanceId)).emit('game_chat', msg);
-  });
 
   socket.on('ping_req', ts => socket.emit('pong_res', ts));
 
-  socket.on('leave_game', () => {
-    const meta = connSockets[socket.id]; if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
-  });
 
   socket.on('get_online_users', () => {
-    socket.emit('online_users_list', Object.keys(onlineUsers));
+    socket.emit('online_users_list', [...new Set([...Object.keys(onlineUsers), ...(cluster.enabled ? cluster.remoteOnlineIds() : [])])]);
   });
 
   // Kick/ban en tiempo real
@@ -2326,7 +2524,7 @@ io.on('connection', socket => {
   socket.on('disconnect', () => {
     teamLeave(socket);
     const meta = connSockets[socket.id];
-    if (meta?.mapId) leaveRoom(socket, meta.mapId, meta.instanceId);
+    leaveAnyRoom(socket);
     if (meta?.userId) {
       const presence = onlineUsers[meta.userId];
       // ¿Hay otra pestaña/dispositivo de la misma cuenta conectado? Entonces la cuenta sigue en línea y se le pasa la posta;
@@ -2364,6 +2562,7 @@ io.on('connection', socket => {
             tag:'call-' + ringing.peer, url:'/?n=call&u=' + encodeURIComponent(ringing.peer) }, { ttl:40, urgency:'high', topic:'call' + String(ringing.peer).slice(0,20) }).catch(() => {});
         }
         delete onlineUsers[meta.userId];
+        publishPresence(meta.userId);
         if (DB.users[meta.userId]) { DB.users[meta.userId].onlineAt = null; }
         io.emit('online_update', { userId:meta.userId, online:false });
         io.emit('presence_update', { userId:meta.userId, online:false });
@@ -2386,8 +2585,10 @@ function leaveRoom(socket, mapId, instanceId) {
     room.scriptStarted=false;room.scriptStatus='stopped';room.pendingReset=true;room.appState=null;
   }
   socket.leave(channel);
+  publishRoom(room);
   const meta = connSockets[socket.id];
   if (meta) { meta.mapId = null; meta.instanceId = null; }
+  if (socket.isProxy) { delete connSockets[socket.id]; remoteSockets.delete(socket.id); return; }
   if (meta?.userId && onlineUsers[meta.userId]?.socketId === socket.id) {
     delete onlineUsers[meta.userId].mapId;
     delete onlineUsers[meta.userId].instanceId;
@@ -2401,22 +2602,25 @@ setInterval(() => {
   for (const [key, room] of Object.entries(rooms)) {
     let removedPlayer=false;
     for (const sid of Object.keys(room.players)) {
-      const s = io.sockets.sockets.get(sid);
-      if (!s||!s.connected) {
+      const home = room.players[sid].homeNode;
+      const s = home ? null : io.sockets.sockets.get(sid);
+      if (home ? !cluster.alive(home) : (!s||!s.connected)) {
+        if (home) { remoteSockets.delete(sid); delete connSockets[sid]; }
         delete room.players[sid]; delete room.avatars[sid];
         removedPlayer=true;
         io.to(gameChannel(room.mapId, room.instanceId)).emit('player_left', { socketId:sid });
       }
     }
     if(removedPlayer){
+      publishRoom(room);
       if(Object.keys(room.players).length)sendRoomPlayersToRunner(room);
       else{if(scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'stop',roomId:roomKey(room.mapId,room.instanceId)});room.scriptStarted=false;room.scriptStatus='stopped';room.pendingReset=true;}
     }
-    if (!Object.keys(room.players).length && Date.now()-room.createdAt > 30*60*1000) { if(scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'stop',roomId:roomKey(room.mapId,room.instanceId)});delete rooms[key]; }
+    if (!Object.keys(room.players).length && Date.now()-room.createdAt > 30*60*1000) { if(scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'stop',roomId:roomKey(room.mapId,room.instanceId)});delete rooms[key]; cluster.setLocalRoom(key, null); }
   }
 }, 30000);
 
-server.listen(PORT, () => {
+cluster.init(io).finally(() => server.listen(PORT, () => {
   console.log('');
   console.log('  ╔══════════════════════════════════╗');
   console.log('  ║    CRIX — Servidor Multijugador  ║');
@@ -2425,14 +2629,14 @@ server.listen(PORT, () => {
   console.log(`  ║  URL    : http://localhost:${PORT}   ║`);
   console.log('  ╚══════════════════════════════════╝');
   console.log('');
-});
+}));
 
 // Render envía SIGTERM en cada deploy: guardar y subir todo lo pendiente antes de salir.
 let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) return; shuttingDown = true;
   console.log(`[${signal}] Guardando datos antes de salir…`);
-  try { saveDB(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
+  try { cluster.shutdown(); saveDB(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
   process.exit(0);
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
