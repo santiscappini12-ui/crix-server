@@ -23,6 +23,15 @@ const io     = new Server(server, {
   pingTimeout: 45000, pingInterval: 15000,
   maxHttpBufferSize: 1e9,
 });
+// Node 22 corta por defecto cualquier petición que tarde más de 5 min en llegar entera (requestTimeout = 300000):
+// los videos/audios grandes en conexiones lentas morían con "timed out". Se desactiva para las subidas binarias.
+server.requestTimeout = 0;
+server.timeout = 0;
+server.headersTimeout = 65000;
+server.keepAliveTimeout = 65000;   // mayor que el idle de los proxies (60 s) para que no cierren la conexión justo al responder
+// Espera a que el archivo llegue al bucket, pero como mucho `ms`: si tarda más, responde igual (la subida sigue en segundo plano
+// y, si falla, persist la reintenta). Así el cliente/proxy no da timeout esperando la copia a S3 de un archivo enorme.
+const settleUpload = (promise, ms = 20000) => Promise.race([Promise.resolve(promise).catch(() => false), new Promise(r => { const t = setTimeout(() => r(false), ms); t.unref?.(); })]);
 // ── Límites de medios ──
 // Prácticamente sin tope por defecto: se pueden ajustar con variables de entorno (en MB) sin tocar el código.
 // Ojo con Supabase Storage: tiene un límite de tamaño POR ARCHIVO (50 MB en el plan gratis; configurable en Storage → Settings en planes
@@ -41,7 +50,7 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'videos-2026-11-16';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'videos-2026-11-16b';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
@@ -1407,7 +1416,7 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
     fs.writeFileSync(path.join(texDir(assetId(req.params.id)), name), buf); ids.add(tid);
     uploads.push(persist.putFile(`textures/${assetId(req.params.id)}/${name}`, path.join(texDir(assetId(req.params.id)), name)));
   }
-  await Promise.all(uploads);
+  await settleUpload(Promise.all(uploads));
   map.textureIds = [...ids]; saveDB();
   io.emit('map_updated', { mapId:map.id });   // el resto (y tus otros dispositivos) reciben las texturas nuevas al instante
   res.json({ ok:true, textureIds: map.textureIds });
@@ -1459,7 +1468,7 @@ app.put('/api/maps/:id/sounds/:sid', requireAuth, async (req, res) => {
     const name = `${req.params.sid}.${ext}`, old = soundFile(assetId(req.params.id), req.params.sid);
     if (old && path.basename(old) !== name) { try { fs.unlinkSync(old); } catch {} persist.delKey(`sounds/${assetId(req.params.id)}/${path.basename(old)}`); }
     fs.renameSync(tmp, path.join(soundDir(assetId(req.params.id)), name)); tmp = null;
-    await persist.putFile(`sounds/${assetId(req.params.id)}/${name}`, path.join(soundDir(assetId(req.params.id)), name));
+    await settleUpload(persist.putFile(`sounds/${assetId(req.params.id)}/${name}`, path.join(soundDir(assetId(req.params.id)), name)));
     map.sounds = map.sounds || {};
     map.sounds[req.params.sid] = { name: String(req.query.name || 'Sonido').slice(0, 60), ext, mime: SND_MIME[ext], size };
     saveDB();
@@ -1790,7 +1799,7 @@ app.post('/api/videos', async (req, res) => {
       const buf = dataUrlToBuffer(v.data);
       if (!buf) return res.status(400).json({ ok:false, err:'Archivo de video inválido' });
       let upload; try { upload = storeVideoBuffer(saved, buf); } catch (err) { return res.status(400).json({ ok:false, err:err.message }); }
-      await upload;
+      await settleUpload(upload);
     } else if (!old) saved.ready = false;                       // el archivo llega después con PUT /file
     if (idx >= 0) DB.videos[idx] = saved; else DB.videos.push(saved);
     saveDB();
@@ -1826,7 +1835,7 @@ app.put('/api/videos/:id/file', async (req, res) => {
     fs.renameSync(tmp, path.join(VIDEO_DIR, file)); tmp = null;
     if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} persist.delKey('videos/' + path.basename(oldPath)); }
     video.file = file; video.mime = mime; video.size = size; video.ready = true; delete video.data;
-    await persist.putFile('videos/' + file, path.join(VIDEO_DIR, file));
+    await settleUpload(persist.putFile('videos/' + file, path.join(VIDEO_DIR, file)));
     saveDB();
     if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
     else emitVideoEvent(video, 'video_updated', { id: video.id, refetch:true });   // privado: aparece en los dispositivos del autor; archivo reemplazado: todos
