@@ -19,7 +19,9 @@ const placeholder = http.createServer((req, res) => {
     'Crix está iniciando…\n\n' +
     `Intento de restauración #${attempt}\n` +
     (lastError
-      ? `Último error: ${lastError}\n\nRevisá las variables CRIX_S3_* (bucket, claves, endpoint, región).`
+      ? `Último error: ${lastError}\n\n` + (/cap exceeded|Caps & Alerts|403|429/i.test(lastError)
+          ? 'El bucket alcanzó su tope diario. Subí el cap Class B/C en Backblaze → Caps & Alerts (o esperá al reinicio diario, 00:00 UTC). Se reintenta solo.'
+          : 'Revisá las variables CRIX_S3_* (bucket, claves, endpoint, región).')
       : 'Restaurando datos desde el almacenamiento externo.')
   );
 });
