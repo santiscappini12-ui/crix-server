@@ -25,7 +25,9 @@ const io     = new Server(server, {
 });
 // ── Límites de medios ──
 // Prácticamente sin tope por defecto: se pueden ajustar con variables de entorno (en MB) sin tocar el código.
-// El costo real en Backblaze B2 es solo el espacio guardado (los primeros 10 GB son gratis, después ~US$6 por TB al mes).
+// Ojo con Supabase Storage: tiene un límite de tamaño POR ARCHIVO (50 MB en el plan gratis; configurable en Storage → Settings en planes
+// de pago) y 1 GB de espacio / 5 GB de salida en el plan gratis. Un video o audio más grande que ese límite se guarda en el disco local
+// pero NO se puede subir al bucket. Bajá CRIX_MAX_VIDEO_MB / CRIX_MAX_SOUND_MB si querés rechazarlos de entrada.
 const envMB = (name, def) => { const v = Number(process.env[name]); return Math.round((Number.isFinite(v) && v > 0 ? v : def) * 1024 * 1024); };
 const LIM = {
   json:  envMB('CRIX_MAX_JSON_MB', 8192),       // cuerpo JSON (texturas en base64, mapas)
