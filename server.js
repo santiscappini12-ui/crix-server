@@ -180,9 +180,6 @@ function broadcastRemote(events) {
 dbSync = require('./db-sync')({ getDB: () => DB, onRemoteChange: broadcastRemote });
 dbSync.init();
 persist.setSync({ merge(remote) { const changed = dbSync.merge(remote); if (changed) saveDB(); return changed; } });
-// Sincronización por avisos: al subir la base se avisa por Redis; las otras instancias la bajan solo entonces (casi sin gastar cupo del bucket).
-persist.setPush({ active: () => cluster.enabled, notify: () => cluster.broadcast({ type: 'dbsaved' }) });
-cluster.on('dbsaved', () => persist.remoteChanged());
 persist.startSync();
 
 // Notificaciones push (mensajes, llamadas y solicitudes con la app cerrada)
@@ -693,6 +690,18 @@ function sniffVideo(buf) {
   if (['ftyp','moov','mdat','free','wide','skip'].includes(box)) return 'video/mp4';  // MP4 / MOV / M4V / 3GP
   return null;
 }
+// Con varias instancias, el video creado por POST puede estar en otra instancia y aún no haber llegado a esta:
+// lo buscamos aquí y, si falta, traemos la base del bucket y reintentamos antes de dar 404.
+async function findVideoFresh(id) {
+  let v = (DB.videos || []).find(x => x.id === id);
+  if (v || !persist.enabled) return v || null;
+  for (let i = 0; i < 5 && !v; i++) {
+    try { await persist.pullFresh(0, 3000); } catch {}
+    v = (DB.videos || []).find(x => x.id === id);
+    if (!v) await new Promise(r => setTimeout(r, 800));
+  }
+  return v || null;
+}
 function videoFilePath(video) { return video && video.file ? path.join(VIDEO_DIR, path.basename(video.file)) : null; }
 function storeVideoBuffer(video, buffer) {
   if (!VIDEO_ID_RE.test(String(video.id))) throw new Error('Identificador de video inválido');
@@ -800,7 +809,7 @@ function shareMeta(kind, key) {
   return fallback;
 }
 function sharePage(kind) {
-  return async (req, res) => {
+  return (req, res) => {
     const key = String(req.params.id || req.params.username || '').slice(0, 200);
     const meta = shareMeta(kind, key);
     const origin = `${req.protocol}://${req.get('host')}`;
@@ -814,7 +823,7 @@ function sharePage(kind) {
       `<script>window.__CRIX_ROUTE__=${JSON.stringify({ kind, key }).replace(/</g, '\\u003c')};</script>`,
     ].join('\n');
     let html = readIndexHtml().replace(/<title>[\s\S]*?<\/title>/, () => `<title>${htmlEsc(meta.title)}</title>`).replace('</head>', () => tags + '\n</head>');
-    const gm = kind === 'juego' ? await shortcutMap(key) : null;
+    const gm = kind === 'juego' ? publicMapForShortcut(key) : null;
     if (gm) {
       const gid = encodeURIComponent(key);
       html = html.replace('<link rel="manifest" href="/manifest.webmanifest">', () => `<link rel="manifest" href="/juego/${gid}/manifest.webmanifest">`)
@@ -828,34 +837,21 @@ function sharePage(kind) {
 const ICON_DATA_RE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+=*)$/;
 const okIconData = v => typeof v === 'string' && v.length <= 600000 && ICON_DATA_RE.test(v);
 function publicMapForShortcut(id) { const m = DB.maps[String(id || '')]; return m && (m.privacy || 'public') === 'public' ? m : null; }
-// Con varias instancias, el juego pudo subirse en otra y esta todavía no lo bajó: antes de dar el manifiesto/ícono genérico de Crix, se mira el bucket (máx. una vez cada 5 s).
-let lastShortcutMissPull = 0;
-async function shortcutMap(id) {
-  let m = publicMapForShortcut(id);
-  if (!m && persist.enabled && Date.now() - lastShortcutMissPull > 5000) {
-    lastShortcutMissPull = Date.now();
-    try { await persist.pullRemote(); } catch {}
-    m = publicMapForShortcut(id);
-  }
-  return m;
-}
 function gameIconSource(map) { return okIconData(map?.icon) ? map.icon : (typeof map?.thumb === 'string' && map.thumb.length <= 2000000 && ICON_DATA_RE.test(map.thumb) ? map.thumb : null); }
 function gameIconVersion(map) { const src = gameIconSource(map); return src ? crypto.createHash('sha1').update(src).digest('hex').slice(0, 10) : '0'; }
-app.get('/juego/:id/icon.png', async (req, res) => {
-  const map = await shortcutMap(req.params.id), src = map && gameIconSource(map), m = src && ICON_DATA_RE.exec(src);
+app.get('/juego/:id/icon.png', (req, res) => {
+  const map = publicMapForShortcut(req.params.id), src = map && gameIconSource(map), m = src && ICON_DATA_RE.exec(src);
   if (!m) return res.set('Cache-Control', 'public, max-age=300').sendFile(path.join(__dirname, 'icons', 'icon-512.png'));
   res.set({ 'Content-Type': m[1], 'Cache-Control': 'public, max-age=3600' }).send(Buffer.from(m[2], 'base64'));
 });
-// El alcance (scope) de cada juego es SOLO su propia ruta: así no se solapa con el de Crix ("/") y el navegador lo trata como una app aparte,
-// aunque Crix ya esté instalada. Las páginas /juego/<id>/ y /juego/<id>/<slug> caen dentro de ese alcance.
-app.get('/juego/:id/manifest.webmanifest', async (req, res) => {
-  const map = await shortcutMap(req.params.id), id = encodeURIComponent(String(req.params.id || '').slice(0, 120));
+app.get('/juego/:id/manifest.webmanifest', (req, res) => {
+  const map = publicMapForShortcut(req.params.id), id = encodeURIComponent(String(req.params.id || '').slice(0, 120));
   const name = String(map?.name || 'Juego de Crix').slice(0, 60);
   const src = map && gameIconSource(map), type = (src && ICON_DATA_RE.exec(src)?.[1]) || 'image/png';
   const icon = map && src ? `/juego/${id}/icon.png?v=${gameIconVersion(map)}` : '/icons/icon-512.png';
   res.set({ 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' }).send(JSON.stringify({
     id: `/juego/${id}`, name, short_name: name.slice(0, 12), description: String(map?.desc || `Jugá ${name} en Crix`).slice(0, 200), lang: 'es',
-    start_url: `/juego/${id}/?pwa=1`, scope: `/juego/${id}/`, display: 'standalone', orientation: 'any', background_color: '#080a0f', theme_color: '#080a0f',
+    start_url: `/juego/${id}?pwa=1`, scope: '/', display: 'standalone', orientation: 'any', background_color: '#080a0f', theme_color: '#080a0f',
     categories: ['games'], icons: [{ src: icon, sizes: '192x192', type, purpose: 'any' }, { src: icon, sizes: '512x512', type, purpose: 'any' }],
   }));
 });
@@ -1733,6 +1729,7 @@ app.post('/api/videos', async (req, res) => {
     } else if (!old) saved.ready = false;                       // el archivo llega después con PUT /file
     if (idx >= 0) DB.videos[idx] = saved; else DB.videos.push(saved);
     saveDB();
+    if (!old && persist.enabled) { try { await persist.flush(8000); } catch {} }   // que otra instancia ya pueda ver el video cuando llegue el PUT del archivo
     const becamePublic = !!old && old.privacy !== 'public' && saved.privacy === 'public';
     if (saved.ready && (!wasReady || becamePublic) && saved.privacy === 'public') io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
     else if (old) io.emit('video_updated', { id: saved.id, refetch:true });   // título, descripción, miniatura o privacidad (si pasó a privado, el resto lo deja de ver)
@@ -1747,7 +1744,7 @@ app.put('/api/videos/:id/file', async (req, res) => {
   try {
     const user = readSession(req);
     if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' });
-    const video = (DB.videos || []).find(x => x.id === req.params.id);
+    const video = await findVideoFresh(req.params.id);
     if (!video) return res.status(404).json({ ok:false, err:'Primero creá el video' });
     if (video.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
     if (!VIDEO_ID_RE.test(String(video.id))) return res.status(400).json({ ok:false, err:'Identificador de video inválido' });
