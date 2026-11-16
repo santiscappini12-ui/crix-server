@@ -4554,7 +4554,14 @@ async function confirmUploadVideo() {
     uvProgress(0);
     for (let tries = 0; ; ) {   // un 404 pasajero (otra instancia aún no ve el video) se reintenta
       try { await uploadVideoFile(v.id, file, uvProgress); break; }
-      catch (e) { if (e.status === 404 && ++tries < 4) { uvProgress(0); await new Promise(r => setTimeout(r, 1500 * tries)); continue; } throw e; }
+      catch (e) {
+        if (e.status === 404 && e.routeMissing && file.size <= 24 * 1048576) {   // servidor viejo sin PUT /file: subida clásica en base64
+          const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(new Error('No se pudo leer el video')); r.readAsDataURL(file); });
+          await apiRequest('/api/videos', { method:'POST', body:{ ...v, data } }); break;
+        }
+        if (e.status === 404 && ++tries < 4) { uvProgress(0); await new Promise(r => setTimeout(r, 1500 * tries)); continue; }
+        throw e;
+      }
     }
   } catch (err) {
     try { await apiRequest('/api/videos/' + encodeURIComponent(v.id), { method:'DELETE' }); } catch {}
@@ -6138,7 +6145,14 @@ function uploadVideoFile(id, file, onProgress) {
     xhr.setRequestHeader('Authorization', 'Bearer ' + DB.get('token'));
     xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100)); };
-    xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch {} if (xhr.status >= 200 && xhr.status < 300 && j.ok) resolve(j); else { const e = new Error(j.err || ('Error ' + xhr.status)); e.status = xhr.status; reject(e); } };
+    xhr.onload = () => {
+      let j = null; try { j = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300 && j && j.ok) return resolve(j);
+      const build = xhr.getResponseHeader('X-Crix-Build');
+      // Respuesta que no es de la API de Crix (p. ej. "Cannot PUT ..."): la ruta no existe en el servidor que corre o la cortó el proxy.
+      const e = new Error((j && j.err) || ('Error ' + xhr.status + ' en ' + xhr.responseURL.replace(location.origin, '') + (build ? ' (servidor ' + build + ')' : ' (el servidor no tiene la versión nueva: sin X-Crix-Build)') + (xhr.responseText ? ': ' + xhr.responseText.replace(/<[^>]+>/g, ' ').trim().slice(0, 100) : '')));
+      e.status = xhr.status; e.routeMissing = !j; reject(e);
+    };
     xhr.onerror = () => reject(new Error('Sin conexión con el servidor'));
     xhr.send(file);
   });
