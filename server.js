@@ -39,13 +39,14 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-app.use('/api', (req, res, next) => { res.set('X-Crix-Instance', INSTANCE_TAG); next(); });
+const CRIX_BUILD = 'videos-2026-11-16';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
   if (req.method === 'GET') { try { await persist.pullFresh(2000, 2500); } catch {} }
   next();
 });
-app.get('/api/instance', (req, res) => res.json({ ok:true, instance:INSTANCE_TAG, uptime:Math.round(process.uptime()), maps:Object.keys(DB.maps).length, users:Object.keys(DB.users).length, persist:persist.enabled }));
+app.get('/api/instance', (req, res) => res.json({ ok:true, build:CRIX_BUILD, instance:INSTANCE_TAG, uptime:Math.round(process.uptime()), maps:Object.keys(DB.maps).length, users:Object.keys(DB.users).length, persist:persist.enabled }));
 // Compresión gzip (asíncrona) de las respuestas JSON grandes: el catálogo de mapas pesa muchos MB sin comprimir.
 const zlib = require('zlib');
 app.use('/api', (req, res, next) => {
@@ -699,6 +700,18 @@ async function findVideoFresh(id) {
     try { await persist.pullFresh(0, 3000); } catch {}
     v = (DB.videos || []).find(x => x.id === id);
     if (!v) await new Promise(r => setTimeout(r, 800));
+  }
+  return v || null;
+}
+async function findVideoReady(id) {   // para reproducir: el registro (con su archivo) puede estar recién subido en otra instancia
+  let v = (DB.videos || []).find(x => x.id === id);
+  if ((!v || v.ready === false || !v.file) && persist.enabled) {
+    for (let i = 0; i < 4; i++) {
+      try { await persist.pullFresh(0, 3000); } catch {}
+      v = (DB.videos || []).find(x => x.id === id);
+      if (v && v.file && v.ready !== false) break;
+      await new Promise(r => setTimeout(r, 700));
+    }
   }
   return v || null;
 }
@@ -1731,7 +1744,7 @@ app.get('/api/videos', (req, res) => {
 
 // Compatibilidad con clientes viejos: devuelve el archivo como data URL (solo videos chicos).
 app.get('/api/videos/:id/data', async (req, res) => {
-  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  const v = await findVideoReady(req.params.id);
   if (!v || !canReadVideo(v, readSession(req))) return res.status(404).json({ ok: false });
   const file = await videoLocalFile(v);
   if (!file) return res.status(404).json({ ok:false, err:'El archivo del video no está disponible' });
@@ -1742,7 +1755,7 @@ app.get('/api/videos/:id/data', async (req, res) => {
 // Reproducción por streaming (con soporte de rangos para adelantar/retroceder).
 // El <video> no puede enviar encabezados, por eso el token de sesión también se acepta por ?t= (solo aquí).
 app.get('/api/videos/:id/stream', async (req, res) => {
-  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  const v = await findVideoReady(req.params.id);
   const user = readSession(req) || userFromToken(req.query.t);
   if (!v || !canReadVideo(v, user)) return res.status(404).end();
   const file = await videoLocalFile(v);
