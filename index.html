@@ -6142,7 +6142,59 @@ function uvProgress(pct) {
   box.style.display = 'block'; document.getElementById('uv-progress-bar').style.width = pct + '%';
   document.getElementById('uv-progress-txt').textContent = pct >= 100 ? 'Procesando…' : 'Subiendo… ' + pct + ' %';
 }
-function uploadVideoFile(id, file, onProgress) {
+// Subida por partes de 4 MB: cada petición dura pocos segundos, así el proxy del hosting no la corta por "request timeout".
+// Cada parte se reintenta sola; si el servidor es viejo y no tiene /chunk, usa la subida de una sola petición.
+function xhrSend(method, url, body, contentType, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    xhr.setRequestHeader('Authorization', 'Bearer ' + DB.get('token'));
+    if (contentType) xhr.setRequestHeader('Content-Type', contentType);
+    if (onProgress) xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded); };
+    xhr.onload = () => {
+      let j = null; try { j = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300 && j && j.ok) return resolve(j);
+      const e = new Error((j && j.err) || ('Error ' + xhr.status + (xhr.responseText ? ': ' + xhr.responseText.replace(/<[^>]+>/g, ' ').trim().slice(0, 100) : '')));
+      e.status = xhr.status; e.routeMissing = !j; e.restart = !!(j && j.restart); reject(e);
+    };
+    xhr.onerror = () => { const e = new Error('Sin conexión con el servidor'); e.network = true; reject(e); };
+    xhr.ontimeout = () => { const e = new Error('Tiempo de espera agotado'); e.network = true; reject(e); };
+    xhr.timeout = 120000;
+    xhr.send(body);
+  });
+}
+async function uploadVideoFile(id, file, onProgress) {
+  const CHUNK = 4 * 1048576, base = '/api/videos/' + encodeURIComponent(id);
+  for (let restarts = 0; ; restarts++) {
+    const uid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    try {
+      for (let off = 0; off < file.size; off += CHUNK) {
+        const blob = file.slice(off, Math.min(off + CHUNK, file.size));
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await xhrSend('PUT', base + '/chunk?u=' + uid + '&o=' + off, blob, 'application/octet-stream', loaded => onProgress(Math.min(99, Math.round((off + loaded) / file.size * 100))));
+            break;
+          } catch (e) {
+            if (e.routeMissing && e.status === 404 && off === 0) return uploadVideoFileWhole(id, file, onProgress);   // servidor sin subida por partes
+            const fatal = !e.network && [400, 401, 403, 409, 413].includes(e.status) || e.routeMissing && e.status === 404;
+            if (fatal || attempt >= 5) throw e;
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          }
+        }
+        onProgress(Math.min(99, Math.round(Math.min(off + CHUNK, file.size) / file.size * 100)));
+      }
+      onProgress(100);
+      for (let attempt = 0; ; attempt++) {   // ensamblar: puede tardar (copia al bucket), con reintento si se cortó la respuesta
+        try { return await xhrSend('POST', base + '/finish?u=' + uid + '&size=' + file.size, null, null, null); }
+        catch (e) { if (!e.network && e.status !== 502 && e.status !== 504 || attempt >= 2) throw e; await new Promise(r => setTimeout(r, 2000)); }
+      }
+    } catch (e) {
+      if (e.restart && restarts < 2) { onProgress(0); continue; }   // faltaron partes (p. ej. cayeron en otra instancia): empieza de nuevo
+      throw e;
+    }
+  }
+}
+function uploadVideoFileWhole(id, file, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', '/api/videos/' + encodeURIComponent(id) + '/file');
