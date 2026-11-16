@@ -88,7 +88,14 @@ function s3Driver() {
     // Identificador de versión del objeto (null si no existe): sirve para saber si otra instancia lo cambió.
     async etag(key) {
       try { const r = await client.send(new S3.HeadObjectCommand({ Bucket: bucket, Key: K(key) })); return r.ETag || null; }
-      catch (e) { if (isNotFound(e)) return null; throw e; }
+      catch (e) {
+        if (isNotFound(e)) return null;
+        // Algunos proveedores/proxies responden a HEAD con un error sin cuerpo (el SDK lo llama "UnknownError"): se consulta el
+        // mismo dato por listado, que sí funciona. Sin esto la base remota nunca se comparaba ni se fusionaba entre instancias.
+        const r = await client.send(new S3.ListObjectsV2Command({ Bucket: bucket, Prefix: K(key), MaxKeys: 5 }));
+        const hit = (r.Contents || []).find(o => o.Key === K(key));
+        return hit ? (hit.ETag || null) : null;
+      }
     },
     // Sube desde el disco como stream (sin cargar el archivo entero en memoria: sirve para videos/audios enormes).
     async putStream(key, file, contentType) {
@@ -206,22 +213,32 @@ function ensureLocal(key, localPath) {   // descarga bajo demanda si el archivo 
 // ── Base de datos ──
 let pendingDb = null, dbUploading = false, dbTimer = null, lastDbUpload = 0, dbFailures = 0;
 // ── Varias instancias: la base remota se baja y se fusiona (ver db-sync.js) ──
-let syncApi = null, lastEtag = null, pulling = null, syncWarnAt = 0;
+let syncApi = null, lastEtag = null, pulling = null, syncWarnAt = 0, pullFailed = false;
 function setSync(api) { syncApi = api; }
 // Baja la base remota si otra instancia la cambió y la fusiona con la local. true = la local cambió.
 function pullRemote() {
   if (!driver || !restored || !syncApi) return Promise.resolve(false);
   if (pulling) return pulling;
   pulling = (async () => {
-    const tag = await driver.etag(DB_KEY);
-    if (!tag || tag === lastEtag) return false;
-    const gz = await driver.get(DB_KEY);
-    if (!gz) return false;
-    const remote = JSON.parse((await gunzip(gz)).toString('utf8'));
-    lastEtag = tag;   // si mientras tanto alguien subió otra versión, el próximo sondeo la ve igual
-    return !!syncApi.merge(remote);
-  })().catch(e => { if (Date.now() - syncWarnAt > 60000) { syncWarnAt = Date.now(); console.warn('[PERSIST] No se pudo sincronizar con el bucket:', e.message); } return false; })
-    .finally(() => { pulling = null; });
+    let stage = 'etag';
+    try {
+      const tag = await driver.etag(DB_KEY);
+      if (!tag || tag === lastEtag) { pullFailed = false; return false; }
+      stage = 'get';
+      const gz = await driver.get(DB_KEY);
+      if (!gz) { pullFailed = false; return false; }
+      stage = 'merge';
+      const remote = JSON.parse((await gunzip(gz)).toString('utf8'));
+      lastEtag = tag;   // si mientras tanto alguien subió otra versión, el próximo sondeo la ve igual
+      const changed = !!syncApi.merge(remote);
+      pullFailed = false;
+      return changed;
+    } catch (e) { e.stage = stage; throw e; }
+  })().catch(e => {
+    pullFailed = true;
+    if (Date.now() - syncWarnAt > 60000) { syncWarnAt = Date.now(); console.warn(`[PERSIST] No se pudo sincronizar con el bucket (${e.stage}): ${e.name || ''} ${e.message} http=${e.$metadata?.httpStatusCode ?? '?'} code=${e.Code || e.code || '-'}`); }
+    return false;
+  }).finally(() => { pulling = null; });
   return pulling;
 }
 // Antes de responder una lectura (catálogo, videos, foros, usuarios): si pasaron más de `maxAge` ms desde la
@@ -256,7 +273,11 @@ async function uploadDb() {
   try {
     // Antes de subir, traer lo que otras instancias hayan guardado: así no se pisa su trabajo.
     // Si hubo cambios, la fusión ya generó una base nueva en `pendingDb` (vía saveDb).
-    if (syncApi && await pullRemote() && pendingDb !== null) { json = pendingDb; pendingDb = null; }
+    if (syncApi) {
+      if (await pullRemote() && pendingDb !== null) { json = pendingDb; pendingDb = null; }
+      // Si no se pudo mirar la base remota, subir la local la podría pisar con una más chica (así se perdían juegos): se reintenta luego.
+      if (pullFailed) throw new Error('no se pudo comprobar la base remota antes de subir; no se sube para no pisarla');
+    }
     const gz = await gzip(Buffer.from(json, 'utf8'));
     lastEtag = await driver.put(DB_KEY, gz, 'application/gzip') || lastEtag;
     lastDbUpload = Date.now(); dbFailures = 0;
