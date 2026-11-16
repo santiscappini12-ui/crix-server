@@ -1765,10 +1765,20 @@ function setUsers(u) {
 function getMaps()   { return DB.get('maps')   || {}; }
 // Juegos propios cuya última subida al servidor no se completó (no se pierden al refrescar y se reintentan).
 const UNSYNCED_MAPS = new Set(), MAP_UPLOADS = {};
+// El catálogo llega liviano (partial:true): el juego completo se baja al abrirlo, jugarlo o editarlo.
+const _fullMapLoads = {};
+async function ensureFullMap(id) {
+  const cur = getMaps()[id];
+  if (!cur || !cur.partial) return cur || null;
+  if (!_fullMapLoads[id]) _fullMapLoads[id] = apiRequest('/api/maps/' + encodeURIComponent(id)).then(r => {
+    const maps = getMaps(); if (r.map) { maps[id] = r.map; DB.set('maps', maps); } return maps[id] || null;
+  }).finally(() => { delete _fullMapLoads[id]; });
+  return _fullMapLoads[id];
+}
 async function uploadMapWithRetry(id) {
   for (let n = 1; n <= 3; n++) {
     const map = getMaps()[id];   // siempre la versión más reciente
-    if (!map || !teamCanEdit(map)) { UNSYNCED_MAPS.delete(id); return { ok:true, skipped:true }; }
+    if (!map || map.partial || !teamCanEdit(map)) { UNSYNCED_MAPS.delete(id); return { ok:true, skipped:true }; }
     try { await apiRequest('/api/maps', { method:'POST', body:map }); UNSYNCED_MAPS.delete(id); return { ok:true, id }; }
     catch (err) {
       if (err && err.status === 403 && ME && map.authorId === ME.id) { const nid = reIdMap(id); if (nid) { id = nid; continue; } }
@@ -1803,7 +1813,7 @@ function setMaps(m)  {
   DB.set('maps', m); BC.postMessage({ type: 'map_update' });
   if (!ME || !DB.get('token')) return;
   Object.entries(m).forEach(([id, map]) => {
-    if (teamCanEdit(map) && JSON.stringify(previous[id]) !== JSON.stringify(map)) {
+    if (!map.partial && teamCanEdit(map) && JSON.stringify(previous[id]) !== JSON.stringify(map)) {
       UNSYNCED_MAPS.add(id);
       queueMapUpload(id).then(r => {
         if (r.ok) return;
@@ -2044,7 +2054,7 @@ async function syncCloudData() {
   const localVideos = getVideos();
   const localPosts = getPosts();
   try {
-    const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id);
+    const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id && !map.partial);
     const ownVideos = localVideos.filter(video => video.authorId === ME.id);
     const ownPosts = localPosts.filter(post => post.authorId === ME.id);
     // El envío inicial se hace una sola vez por sesión (los reintentos solo vuelven a descargar).
@@ -2228,7 +2238,7 @@ const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt
 function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine');   renderOnlineNow(); }
 function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${m.thumb ? `<img src="${m.thumb}">` : `<span class="thumb-icon">${THUMB_ICONS[i%THUMB_ICONS.length]}</span>`}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
-function editMap(id) { const item = getMaps()[id]; if (item?.isHtmlGame) { openAppEditor(id); return; } stMapId = id; initStudio(); goTab('studio'); }
+async function editMap(id) { try { await ensureFullMap(id); } catch (err) { showToast('No se pudo abrir el juego: ' + err.message); return; } const item = getMaps()[id]; if (item?.isHtmlGame) { openAppEditor(id); return; } stMapId = id; initStudio(); goTab('studio'); }
 function handleUpload(e) {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
@@ -3940,6 +3950,7 @@ function _patchGameLoopWithNet() { if (_netPatchApplied) return; _netPatchApplie
 const _origPlayMap = window.playMap;
 window.playMap = function(mapId) { _origPlayMap(mapId); setTimeout(() => { netJoinGame(mapId); _patchGameLoopWithNet(); }, 200); };
 window.playMap = async function(mapId, instanceId = null) {
+  try { await ensureFullMap(mapId); } catch (err) { showToast('No se pudo cargar el juego: ' + err.message); return; }
   let targetInstanceId = instanceId;
   if (!targetInstanceId && ME && !stPlaytesting) {
     try {
@@ -5313,7 +5324,7 @@ async function refreshLive(kind) {
       const r = await apiRequest('/api/posts'); DB.set('crix_posts', r.posts || []);
     } else if (kind === 'maps') {
       const r = await apiRequest('/api/maps'), merged = { ...(r.maps||{}) }, mine = getMaps();
-      if (stMapId && mine[stMapId] && !merged[stMapId]) merged[stMapId] = mine[stMapId];
+      if (stMapId && mine[stMapId] && (!merged[stMapId] || (merged[stMapId].partial && !mine[stMapId].partial))) merged[stMapId] = mine[stMapId];
       keepUnsyncedMaps(merged);
       DB.set('maps', merged);
     } else if (kind === 'users') {
