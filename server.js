@@ -2702,6 +2702,7 @@ cluster.init(io).finally(() => server.listen(PORT, () => {
   console.log('  ║    CRIX — Servidor Multijugador  ║');
   console.log('  ╠══════════════════════════════════╣');
   console.log(`  ║  Puerto : ${PORT}                    ║`);
+  console.log(`  Build   : ${CRIX_BUILD}`);
   console.log(`  ║  URL    : http://localhost:${PORT}   ║`);
   console.log('  ╚══════════════════════════════════╝');
   console.log('');
