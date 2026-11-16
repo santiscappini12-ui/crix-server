@@ -38,10 +38,21 @@ const DB_MIN_INTERVAL = Math.max(300, Number(env.CRIX_DB_UPLOAD_MS) || 800);   /
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const isNotFound = e => !!e && (e.name === 'NoSuchKey' || e.name === 'NotFound' || e.Code === 'NoSuchKey' || e.code === 'ENOENT' || e.$metadata?.httpStatusCode === 404);
+// Tope de transacciones/ancho de banda del proveedor (Backblaze: "Class B cap exceeded"). Las respuestas HEAD no traen cuerpo,
+// así que el SDK las reporta como "UnknownError" con http 403/429: se tratan igual. Reintentar en ese caso solo gasta más cuota.
+const isCapError = e => !!e && (e.$metadata?.httpStatusCode === 403 || e.$metadata?.httpStatusCode === 429 || /cap exceeded|Caps & Alerts|SlowDown|TooManyRequests/i.test(`${e.message || ''} ${e.name || ''} ${e.Code || ''}`));
+let capUntil = 0;   // mientras dure, no se consulta el bucket (salvo subir cambios)
+const CAP_PAUSE_MS = Math.max(60000, Number(env.CRIX_CAP_PAUSE_MS) || 30 * 60000);
+function noteCap(e) {
+  if (!isCapError(e)) return false;
+  if (Date.now() > capUntil) console.warn(`[PERSIST] El bucket rechazó la consulta (http ${e.$metadata?.httpStatusCode ?? '?'}): tope diario de transacciones alcanzado o clave sin permiso. Se pausan las consultas ${CAP_PAUSE_MS / 60000} min. Subí el cap en Backblaze → Caps & Alerts (Class B / Class C).`);
+  capUntil = Date.now() + CAP_PAUSE_MS;
+  return true;
+}
 async function retry(fn, tries = 4, base = 800) {
   let last;
   for (let i = 0; i < tries; i++) {
-    try { return await fn(); } catch (e) { last = e; if (i < tries - 1) await sleep(base * 2 ** i); }
+    try { return await fn(); } catch (e) { last = e; if (isCapError(e)) break; if (i < tries - 1) await sleep(base * 2 ** i); }
   }
   throw last;
 }
@@ -90,6 +101,7 @@ function s3Driver() {
       try { const r = await client.send(new S3.HeadObjectCommand({ Bucket: bucket, Key: K(key) })); return r.ETag || null; }
       catch (e) {
         if (isNotFound(e)) return null;
+        if (isCapError(e)) throw e;   // el listado también fallaría (y gastaría otra transacción)
         // Algunos proveedores/proxies responden a HEAD con un error sin cuerpo (el SDK lo llama "UnknownError"): se consulta el
         // mismo dato por listado, que sí funciona. Sin esto la base remota nunca se comparaba ni se fusionaba entre instancias.
         const r = await client.send(new S3.ListObjectsV2Command({ Bucket: bucket, Prefix: K(key), MaxKeys: 5 }));
@@ -218,6 +230,7 @@ function setSync(api) { syncApi = api; }
 // Baja la base remota si otra instancia la cambió y la fusiona con la local. true = la local cambió.
 function pullRemote() {
   if (!driver || !restored || !syncApi) return Promise.resolve(false);
+  if (Date.now() < capUntil) return Promise.resolve(false);
   if (pulling) return pulling;
   pulling = (async () => {
     let stage = 'etag';
@@ -236,6 +249,7 @@ function pullRemote() {
     } catch (e) { e.stage = stage; throw e; }
   })().catch(e => {
     pullFailed = true;
+    if (noteCap(e)) return false;
     if (Date.now() - syncWarnAt > 60000) { syncWarnAt = Date.now(); console.warn(`[PERSIST] No se pudo sincronizar con el bucket (${e.stage}): ${e.name || ''} ${e.message} http=${e.$metadata?.httpStatusCode ?? '?'} code=${e.Code || e.code || '-'}`); }
     return false;
   }).finally(() => { pulling = null; });
@@ -244,16 +258,23 @@ function pullRemote() {
 // Antes de responder una lectura (catálogo, videos, foros, usuarios): si pasaron más de `maxAge` ms desde la
 // última consulta, mira si otra instancia subió algo nuevo. Nunca bloquea más de `cap` ms.
 let lastFreshPull = 0;
+// Cada consulta cuenta como transacción Class B (B2 gratis: 2.500/día): se impone un piso al intervalo. Con una sola instancia
+// no hace falta sincronizar nunca (CRIX_SYNC_MS=0 apaga todo el sondeo).
+const FRESH_MIN_MS = Math.max(5000, Number(env.CRIX_FRESH_MS) || 120000);
+const MISS_MIN_MS = 10000;   // cuando falta un juego/video concreto (maxAge 0)
+const SYNC_OFF = env.CRIX_SYNC_MS === '0';
 function pullFresh(maxAge = 2000, cap = 2500) {
-  if (!driver || !restored || !syncApi) return Promise.resolve(false);
+  if (!driver || !restored || !syncApi || SYNC_OFF) return Promise.resolve(false);
+  maxAge = maxAge === 0 ? MISS_MIN_MS : Math.max(maxAge, FRESH_MIN_MS);
   if (!pulling && Date.now() - lastFreshPull < maxAge) return Promise.resolve(false);
   if (!pulling) lastFreshPull = Date.now();
   return Promise.race([pullRemote(), sleep(cap).then(() => false)]);
 }
 function startSync() {
   if (!driver || !syncApi) return;
-  // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 15 s; además se consulta antes de cada lectura del catálogo (máx. 1 vez cada 2 s).
-  const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 15000);
+  if (SYNC_OFF) { console.log('[PERSIST] Sincronización entre instancias desactivada (CRIX_SYNC_MS=0)'); return; }
+  // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 5 min.
+  const every = Math.max(30000, Number(env.CRIX_SYNC_MS) || 300000);
   setInterval(() => { pullRemote(); }, every).unref();
   console.log(`[PERSIST] Sincronización entre instancias activa (cada ${every / 1000} s)`);
 }
@@ -283,15 +304,20 @@ async function uploadDb() {
     lastDbUpload = Date.now(); dbFailures = 0;
     await dailyBackup(gz).catch(e => console.warn('[PERSIST] Respaldo diario falló:', e.message));
   } catch (e) {
+    noteCap(e);
     dbFailures++; if (pendingDb === null) pendingDb = json;
     console.error(`[PERSIST] No se pudo subir la base (intento ${dbFailures}): ${e.message}`);
   } finally { dbUploading = false; kickDb(); }
 }
+let lastBackupDay = '';
 async function dailyBackup(gz) {   // un respaldo por día (el primero del día), se conservan los últimos 7
-  const today = `${BACKUP_PREFIX}${new Date().toISOString().slice(0, 10)}.json.gz`;
+  const day = new Date().toISOString().slice(0, 10);
+  if (day === lastBackupDay || Date.now() < capUntil) return;   // sin esto se listaba el bucket en cada subida de la base
+  const today = `${BACKUP_PREFIX}${day}.json.gz`;
   const existing = (await driver.list(BACKUP_PREFIX)).map(o => o.key).sort();
   if (!existing.includes(today)) { await driver.put(today, gz, 'application/gzip'); existing.push(today); existing.sort(); }
   for (const key of existing.slice(0, Math.max(0, existing.length - BACKUPS_TO_KEEP))) await driver.del(key);
+  lastBackupDay = day;
 }
 
 // ── Espera a que todo lo pendiente llegue al bucket (se usa al apagar) ──
