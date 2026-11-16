@@ -180,6 +180,9 @@ function broadcastRemote(events) {
 dbSync = require('./db-sync')({ getDB: () => DB, onRemoteChange: broadcastRemote });
 dbSync.init();
 persist.setSync({ merge(remote) { const changed = dbSync.merge(remote); if (changed) saveDB(); return changed; } });
+// Sincronización por avisos: al subir la base se avisa por Redis; las otras instancias la bajan solo entonces (casi sin gastar cupo del bucket).
+persist.setPush({ active: () => cluster.enabled, notify: () => cluster.broadcast({ type: 'dbsaved' }) });
+cluster.on('dbsaved', () => persist.remoteChanged());
 persist.startSync();
 
 // Notificaciones push (mensajes, llamadas y solicitudes con la app cerrada)
