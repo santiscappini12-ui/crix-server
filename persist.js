@@ -207,13 +207,27 @@ function ensureLocal(key, localPath) {   // descarga bajo demanda si el archivo 
 let pendingDb = null, dbUploading = false, dbTimer = null, lastDbUpload = 0, dbFailures = 0;
 // ── Varias instancias: la base remota se baja y se fusiona (ver db-sync.js) ──
 let syncApi = null, lastEtag = null, pulling = null, syncWarnAt = 0;
-// CRIX_SYNC_MS=0 apaga TODA la sincronización entre instancias (sin sondeos al bucket). Usalo si corrés una sola instancia.
-const SYNC_OFF = String(env.CRIX_SYNC_MS || '').trim() === '0';
 function setSync(api) { syncApi = api; }
+// ── Sincronización por avisos (Redis) en vez de sondear el bucket ──
+// Si hay bus entre instancias (cluster.js), cada instancia avisa "subí una base nueva" y las demás la bajan SOLO entonces.
+// Así casi no se gastan transacciones del bucket (B2 gratis: 2.500 Class B y 2.500 Class C por día).
+// El sondeo periódico queda como red de seguridad cada CRIX_SAFETY_SYNC_MS (por defecto 5 min).
+const SAFETY_MS = Math.max(15000, Number(env.CRIX_SAFETY_SYNC_MS) || 300000);
+const PULL_MIN_MS = Math.max(1000, Number(env.CRIX_PULL_MIN_MS) || 60000);   // tope: una descarga por aviso cada tanto (junta varios avisos)
+let push = { active: () => false, notify: () => {} }, remoteDirty = false, lastPullAt = 0, lastNotifyPull = 0, notifyTimer = null;
+function setPush(p) { push = p; }                       // server.js: { active(): bool, notify(): avisa a las demás instancias }
+function remoteChanged() {                              // llegó un aviso de otra instancia
+  remoteDirty = true;
+  if (notifyTimer) return;
+  const wait = Math.max(0, PULL_MIN_MS - (Date.now() - lastNotifyPull));
+  notifyTimer = setTimeout(() => { notifyTimer = null; lastNotifyPull = Date.now(); remoteDirty = false; pullRemote(); }, wait);
+  notifyTimer.unref();
+}
 // Baja la base remota si otra instancia la cambió y la fusiona con la local. true = la local cambió.
 function pullRemote() {
-  if (SYNC_OFF || !driver || !restored || !syncApi) return Promise.resolve(false);
+  if (!driver || !restored || !syncApi) return Promise.resolve(false);
   if (pulling) return pulling;
+  lastPullAt = Date.now();
   pulling = (async () => {
     const tag = await driver.etag(DB_KEY);
     if (!tag || tag === lastEtag) return false;
@@ -231,17 +245,20 @@ function pullRemote() {
 let lastFreshPull = 0;
 function pullFresh(maxAge = 2000, cap = 2500) {
   if (!driver || !restored || !syncApi) return Promise.resolve(false);
+  if (push.active()) { if (!remoteDirty && Date.now() - lastPullAt < SAFETY_MS) return Promise.resolve(false); maxAge = Math.max(maxAge, 1000); }
   if (!pulling && Date.now() - lastFreshPull < maxAge) return Promise.resolve(false);
   if (!pulling) lastFreshPull = Date.now();
   return Promise.race([pullRemote(), sleep(cap).then(() => false)]);
 }
 function startSync() {
-  if (SYNC_OFF) { console.log('[PERSIST] Sincronización entre instancias APAGADA (CRIX_SYNC_MS=0): sin sondeos al bucket'); return; }
   if (!driver || !syncApi) return;
   // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 15 s; además se consulta antes de cada lectura del catálogo (máx. 1 vez cada 2 s).
   const every = Math.max(1000, Number(env.CRIX_SYNC_MS) || 15000);
-  setInterval(() => { pullRemote(); }, every).unref();
-  console.log(`[PERSIST] Sincronización entre instancias activa (cada ${every / 1000} s)`);
+  setInterval(() => {
+    if (push.active() && Date.now() - lastPullAt < SAFETY_MS) return;   // con avisos por Redis no hace falta preguntar al bucket
+    pullRemote();
+  }, every).unref();
+  console.log(`[PERSIST] Sincronización entre instancias activa (sondeo cada ${every / 1000} s; con Redis solo avisos + red de seguridad cada ${SAFETY_MS / 1000} s)`);
 }
 function saveDb(json) {
   if (!driver || !restored) return;
@@ -259,21 +276,26 @@ async function uploadDb() {
   try {
     // Antes de subir, traer lo que otras instancias hayan guardado: así no se pisa su trabajo.
     // Si hubo cambios, la fusión ya generó una base nueva en `pendingDb` (vía saveDb).
-    if (syncApi && await pullRemote() && pendingDb !== null) { json = pendingDb; pendingDb = null; }
+    // Con avisos por Redis solo se lee si otra instancia avisó de un cambio que todavía no se bajó.
+    if (syncApi && (!push.active() || remoteDirty)) { remoteDirty = false; if (await pullRemote() && pendingDb !== null) { json = pendingDb; pendingDb = null; } }
     const gz = await gzip(Buffer.from(json, 'utf8'));
     lastEtag = await driver.put(DB_KEY, gz, 'application/gzip') || lastEtag;
     lastDbUpload = Date.now(); dbFailures = 0;
+    try { push.notify(); } catch {}
     await dailyBackup(gz).catch(e => console.warn('[PERSIST] Respaldo diario falló:', e.message));
   } catch (e) {
     dbFailures++; if (pendingDb === null) pendingDb = json;
     console.error(`[PERSIST] No se pudo subir la base (intento ${dbFailures}): ${e.message}`);
   } finally { dbUploading = false; kickDb(); }
 }
+let backupDoneFor = '';
 async function dailyBackup(gz) {   // un respaldo por día (el primero del día), se conservan los últimos 7
   const today = `${BACKUP_PREFIX}${new Date().toISOString().slice(0, 10)}.json.gz`;
+  if (backupDoneFor === today) return;   // ya está hecho hoy: no listar el bucket en cada subida (cuenta como Class C)
   const existing = (await driver.list(BACKUP_PREFIX)).map(o => o.key).sort();
   if (!existing.includes(today)) { await driver.put(today, gz, 'application/gzip'); existing.push(today); existing.sort(); }
   for (const key of existing.slice(0, Math.max(0, existing.length - BACKUPS_TO_KEEP))) await driver.del(key);
+  backupDoneFor = today;
 }
 
 // ── Espera a que todo lo pendiente llegue al bucket (se usa al apagar) ──
@@ -341,5 +363,5 @@ module.exports = {
   DATA_FILE, VIDEO_DIR, TEX_DIR, SOUND_DIR,
   get enabled() { return !!driver; },
   get restored() { return restored; },
-  restore, saveDb, setSync, startSync, pullRemote, pullFresh, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
+  restore, saveDb, setSync, setPush, remoteChanged, startSync, pullRemote, pullFresh, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
 };
