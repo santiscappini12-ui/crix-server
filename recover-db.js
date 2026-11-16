@@ -1,5 +1,6 @@
 'use strict';
-// Recupera la base de Crix desde una versión anterior del bucket (versiones de B2 o respaldos db/backup-*.json.gz).
+// Recupera la base de Crix desde un respaldo del bucket (db/backup-*.json.gz). Supabase Storage no tiene versionado de objetos,
+// así que los respaldos diarios son la fuente; si el proveedor sí versiona (B2, S3), también lista las versiones.
 //
 //   node recover-db.js list                     → versiones de la base y respaldos, con tamaño y fecha
 //   node recover-db.js inspect <key> [versionId> → baja esa copia y muestra cuántos usuarios/juegos/videos/posts tiene
@@ -18,7 +19,7 @@ const unK = k => prefix ? k.slice(prefix.length + 1) : k;
 const DB_KEY = 'db/crix_data.json.gz';
 if (!bucket || !env.CRIX_S3_ACCESS_KEY_ID || !env.CRIX_S3_SECRET_ACCESS_KEY) { console.error('Faltan variables CRIX_S3_BUCKET / CRIX_S3_ACCESS_KEY_ID / CRIX_S3_SECRET_ACCESS_KEY'); process.exit(1); }
 const client = new S3.S3Client({
-  region: env.CRIX_S3_REGION || 'auto', endpoint: env.CRIX_S3_ENDPOINT || undefined, forcePathStyle: true,
+  region: env.CRIX_S3_REGION || 'us-east-1', endpoint: env.CRIX_S3_ENDPOINT || undefined, forcePathStyle: true,
   credentials: { accessKeyId: env.CRIX_S3_ACCESS_KEY_ID, secretAccessKey: env.CRIX_S3_SECRET_ACCESS_KEY },
   requestChecksumCalculation: 'WHEN_REQUIRED', responseChecksumValidation: 'WHEN_REQUIRED',
 });
@@ -39,7 +40,7 @@ async function list() {
       for (const v of r.Versions || []) { any = true; console.log(`${unK(v.Key)}  versionId=${v.VersionId}  ${fmt(v.Size)}  ${v.LastModified.toISOString()}${v.IsLatest ? '  (actual)' : ''}`); }
       km = r.IsTruncated ? r.NextKeyMarker : undefined; vm = r.IsTruncated ? r.NextVersionIdMarker : undefined;
     } while (km);
-  } catch (e) { console.warn('No se pudieron listar versiones (' + e.message + '); listo solo los objetos actuales'); }
+  } catch (e) { console.warn('Este bucket no ofrece versiones de objetos (normal en Supabase); listo los objetos actuales y los respaldos diarios'); }
   if (!any) {
     const r = await client.send(new S3.ListObjectsV2Command({ Bucket: bucket, Prefix: K('db/') }));
     for (const o of r.Contents || []) console.log(`${unK(o.Key)}  ${fmt(o.Size)}  ${o.LastModified.toISOString()}`);
