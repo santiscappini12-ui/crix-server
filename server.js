@@ -1265,13 +1265,62 @@ app.post('/api/join-user/:id', requireAuth, (req, res) => {
 });
 
 // ── GET mapas ──
+// ── Catálogo liviano ──
+// Antes /api/maps mandaba CADA juego completo (partes, scripts, HTML...): con miles de juegos la respuesta pesaba cientos de MB
+// y en el celular la descarga fallaba, así que solo se veía lo propio. Ahora el catálogo manda solo lo que muestran las tarjetas
+// (`partial:true`) y el juego completo se pide al abrirlo (GET /api/maps/:id). Los propios y los de colaboración van completos
+// hasta un tope de tamaño. `?full=1` devuelve el catálogo completo como antes.
+const MAP_LIST_FULL_BUDGET = 8 * 1024 * 1024;
+const MAP_LIGHT_KEYS = ['likedBy', 'collaborators', 'assignedPlayers', 'textureIds', 'textureNames', 'sounds', 'tags'];
+function publicMapRecord(m) { if (m.icon) { const { icon, ...rest } = m; return { ...rest, hasIcon:true }; } return m; }
+function summarizeMap(id, m) {
+  const out = { partial:true };
+  for (const [k, v] of Object.entries(m)) {
+    if (k === 'icon' || k === 'thumb') continue;
+    if (v === null || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'string') { if (v.length <= 4096) out[k] = v; }
+    else if (MAP_LIGHT_KEYS.includes(k) && Array.isArray(v) && v.length <= 500) out[k] = v;
+    else if (MAP_LIGHT_KEYS.includes(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length <= 500) out[k] = v;
+  }
+  out.id = id;
+  if (m.icon) out.hasIcon = true;
+  if (typeof m.thumb === 'string' && m.thumb) {
+    if (m.thumb.length <= 4096) out.thumb = m.thumb;
+    else if ((m.privacy || 'public') === 'public' && /^data:image\/(jpeg|png|webp|gif);base64,/.test(m.thumb)) out.thumb = `/api/maps/${encodeURIComponent(id)}/thumb?v=${Number(m._u) || 0}`;
+    else if (m.thumb.length <= 400000) out.thumb = m.thumb;   // no públicos: sin URL abierta, la miniatura va dentro
+  }
+  return out;
+}
 app.get('/api/maps', (req, res) => {
   const uObj = readSession(req);
   const out  = {};
+  const wantFull = req.query.full === '1';
+  let used = 0;
   for (const [id, m] of Object.entries(DB.maps)) {
-    if (canReadMap(m, uObj)) { if (m.icon) { const { icon, ...rest } = m; out[id] = { ...rest, hasIcon:true }; } else out[id] = m; }
+    if (!canReadMap(m, uObj)) continue;
+    const mine = uObj && (m.authorId === uObj.id || (Array.isArray(m.collaborators) && m.collaborators.includes(uObj.id)));
+    if (wantFull) { out[id] = publicMapRecord(m); continue; }
+    if (mine && used < MAP_LIST_FULL_BUDGET) {
+      const rec = publicMapRecord(m);
+      used += (typeof m.htmlContent === 'string' ? m.htmlContent.length : 0) + (Array.isArray(m.parts) ? m.parts.length * 400 : 0) + (typeof m.thumb === 'string' ? m.thumb.length : 0) + 2000;
+      out[id] = rec;
+    } else out[id] = summarizeMap(id, m);
   }
   res.json({ ok:true, maps: out });
+});
+// Un juego completo (lo pide el cliente al abrirlo, jugarlo o editarlo).
+app.get('/api/maps/:id', (req, res) => {
+  const m = DB.maps[req.params.id];
+  if (!m || !canReadMap(m, readSession(req))) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  res.json({ ok:true, map: publicMapRecord(m) });
+});
+// Miniatura como imagen real (solo juegos públicos): así el catálogo no lleva cientos de KB en base64 por juego.
+app.get('/api/maps/:id/thumb', (req, res) => {
+  const m = DB.maps[req.params.id];
+  const match = m && (m.privacy || 'public') === 'public' && typeof m.thumb === 'string' ? /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(m.thumb) : null;
+  if (!match) return res.status(404).end();
+  res.set({ 'Content-Type': match[1], 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=86400' });
+  res.end(Buffer.from(match[2], 'base64'));
 });
 
 // ── PARTIDAS ACTIVAS (cada instancia es una sala separada) ──
@@ -1430,6 +1479,7 @@ app.post('/api/maps', (req, res) => {
     if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para guardar juegos' });
     const m = req.body;
     if (!m || !m.id) return res.json({ ok:false });
+    if (m.partial) return res.status(400).json({ ok:false, err:'Juego incompleto (catálogo liviano): se descarga completo antes de guardarlo' });
     const old = DB.maps[m.id];
     if (old && !canEditMap(old, user))
       return res.status(403).json({ ok:false, err:'No podés editar este juego' });
