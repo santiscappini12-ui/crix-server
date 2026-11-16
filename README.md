@@ -26,29 +26,37 @@ Los datos se guardan en un archivo JSON (`CRIX_DATA_FILE` elige la ruta; por def
 Render (plan gratis) borra el disco local en cada deploy o reinicio. Crix puede respaldar **usuarios, juegos, posts, videos y texturas** en un bucket compatible con S3 y restaurarlos solo al arrancar:
 
 - Al iniciar, `start.js` baja la base del bucket; las texturas y los videos se bajan bajo demanda la primera vez que alguien los pide.
-- Cada cambio de la base se sube comprimida (como máximo una vez cada 3 s) y cada video/textura se sube al guardarse.
+- Cada cambio de la base se sube comprimida (como máximo una vez cada ~1 s) y cada video/textura se sube al guardarse.
 - Al recibir `SIGTERM` (cada deploy de Render) se guarda y se sube todo lo pendiente antes de salir.
 - Se conserva un respaldo diario de la base (los últimos 7 días) en `db/backup-AAAA-MM-DD.json.gz`.
 - Si el bucket no responde al arrancar, el servidor **no arranca**, para no reemplazar tus datos con una base vacía.
 - Si se configura el bucket y ya había datos en el disco local, lo que falte en el bucket se sube solo.
 
-Configuración (ejemplo con Backblaze B2; sirve cualquier servicio compatible con S3):
+Configuración con **Supabase Storage** (usa su API compatible con S3):
 
-1. Creá un bucket **privado** y una *Application Key* con acceso a ese bucket.
-2. En Render → *Environment* cargá las variables:
+1. En Supabase → *Storage* creá un bucket **privado** (no marques *Public bucket*).
+2. En Supabase → *Storage* → *S3 Connection* copiá el **Endpoint** y la **Region**, y generá un *Access key* (te da un *Access key ID* y un *Secret access key*; el secreto se muestra una sola vez). Son distintas de las claves `anon`/`service_role`.
+3. En Suga (o Render) → *Environment* cargá las variables:
 
 | Variable | Valor |
 | --- | --- |
-| `CRIX_S3_BUCKET` | nombre del bucket |
-| `CRIX_S3_ACCESS_KEY_ID` | keyID de la clave |
-| `CRIX_S3_SECRET_ACCESS_KEY` | applicationKey |
-| `CRIX_S3_ENDPOINT` | por ejemplo `https://s3.us-west-004.backblazeb2.com` |
-| `CRIX_S3_REGION` | por ejemplo `us-west-004` |
+| `CRIX_S3_BUCKET` | nombre exacto del bucket |
+| `CRIX_S3_ACCESS_KEY_ID` | *Access key ID* de S3 Connection |
+| `CRIX_S3_SECRET_ACCESS_KEY` | *Secret access key* de S3 Connection |
+| `CRIX_S3_ENDPOINT` | `https://<project-ref>.storage.supabase.co/storage/v1/s3` |
+| `CRIX_S3_REGION` | región del proyecto, por ejemplo `us-east-1` (tiene que coincidir con la del proyecto) |
 | `CRIX_S3_PREFIX` | (opcional) carpeta dentro del bucket |
 
-3. El *Start Command* de Render tiene que ser `npm start` (no `node server.js`; en ese caso el servidor se niega a iniciar para proteger los datos).
+4. El *Start Command* tiene que ser `npm start` (no `node server.js`; en ese caso el servidor se niega a iniciar para proteger los datos).
 
-El bucket no tiene tope fijo: el costo crece solo con lo que se almacena. Sin estas variables Crix funciona como antes, solo con disco local.
+Cosas a tener en cuenta con Supabase:
+
+- **Límite por archivo:** 50 MB en el plan gratis (en planes de pago se sube en *Storage → Settings → Global file size limit*, y también existe un límite por bucket). Un video o audio mayor queda solo en el disco local y se avisa en el log; no se reintenta.
+- **Espacio y tráfico:** el plan gratis incluye 1 GB de almacenamiento y 5 GB de salida al mes.
+- **Sin versionado de objetos:** Supabase no guarda versiones anteriores. La protección son los respaldos diarios `db/backup-AAAA-MM-DD.json.gz` (últimos 7). `node recover-db.js list` los lista.
+- **Error 403 al arrancar:** casi siempre es endpoint, región o claves que no coinciden, o un bucket que no existe.
+
+Sin estas variables Crix funciona como antes, solo con disco local.
 
 ## Notificaciones (PWA)
 
