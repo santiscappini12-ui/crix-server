@@ -54,7 +54,9 @@ const CRIX_BUILD = 'videos-2026-11-16c';   // sirve para comprobar qué versión
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
-  if (req.method === 'GET') { try { await persist.pullFresh(2000, 2500); } catch {} }
+  // El streaming de video NO consulta el bucket: Safari/iPhone pide el video en muchos tramos (Range) y cada uno esperaba hasta
+  // 2,5 s a esa consulta, lo que se notaba como trabas. El video ya se busca por su cuenta (findVideoReady) si falta.
+  if (req.method === 'GET' && !/^\/api\/videos\/[^/?]+\/(stream|data)(\?|$)/.test(req.originalUrl)) { try { await persist.pullFresh(2000, 2500); } catch {} }
   next();
 });
 app.get('/api/instance', (req, res) => res.json({ ok:true, build:CRIX_BUILD, instance:INSTANCE_TAG, uptime:Math.round(process.uptime()), maps:Object.keys(DB.maps).length, users:Object.keys(DB.users).length, persist:persist.enabled }));
