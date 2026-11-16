@@ -846,6 +846,8 @@ app.get('/juego/:id/icon.png', async (req, res) => {
   if (!m) return res.set('Cache-Control', 'public, max-age=300').sendFile(path.join(__dirname, 'icons', 'icon-512.png'));
   res.set({ 'Content-Type': m[1], 'Cache-Control': 'public, max-age=3600' }).send(Buffer.from(m[2], 'base64'));
 });
+// El alcance (scope) de cada juego es SOLO su propia ruta: así no se solapa con el de Crix ("/") y el navegador lo trata como una app aparte,
+// aunque Crix ya esté instalada. Las páginas /juego/<id>/ y /juego/<id>/<slug> caen dentro de ese alcance.
 app.get('/juego/:id/manifest.webmanifest', async (req, res) => {
   const map = await shortcutMap(req.params.id), id = encodeURIComponent(String(req.params.id || '').slice(0, 120));
   const name = String(map?.name || 'Juego de Crix').slice(0, 60);
@@ -853,7 +855,7 @@ app.get('/juego/:id/manifest.webmanifest', async (req, res) => {
   const icon = map && src ? `/juego/${id}/icon.png?v=${gameIconVersion(map)}` : '/icons/icon-512.png';
   res.set({ 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' }).send(JSON.stringify({
     id: `/juego/${id}`, name, short_name: name.slice(0, 12), description: String(map?.desc || `Jugá ${name} en Crix`).slice(0, 200), lang: 'es',
-    start_url: `/juego/${id}?pwa=1`, scope: '/', display: 'standalone', orientation: 'any', background_color: '#080a0f', theme_color: '#080a0f',
+    start_url: `/juego/${id}/?pwa=1`, scope: `/juego/${id}/`, display: 'standalone', orientation: 'any', background_color: '#080a0f', theme_color: '#080a0f',
     categories: ['games'], icons: [{ src: icon, sizes: '192x192', type, purpose: 'any' }, { src: icon, sizes: '512x512', type, purpose: 'any' }],
   }));
 });
