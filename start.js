@@ -20,7 +20,7 @@ const placeholder = http.createServer((req, res) => {
     `Intento de restauración #${attempt}\n` +
     (lastError
       ? `Último error: ${lastError}\n\n` + (/cap exceeded|Caps & Alerts|403|429/i.test(lastError)
-          ? 'El bucket alcanzó su tope diario. Subí el cap Class B/C en Backblaze → Caps & Alerts (o esperá al reinicio diario, 00:00 UTC). Se reintenta solo.'
+          ? 'Supabase rechazó la conexión (403/429). Revisá en Supabase → Storage → S3 Connection que endpoint, región y claves coincidan con CRIX_S3_*, y que el bucket exista. Se reintenta solo.'
           : 'Revisá las variables CRIX_S3_* (bucket, claves, endpoint, región).')
       : 'Restaurando datos desde el almacenamiento externo.')
   );
