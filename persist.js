@@ -4,14 +4,14 @@
 //
 // Render (plan gratis) borra el disco local en cada deploy/reinicio. Este módulo
 // guarda una copia de la base de datos y de los medios (videos, texturas) en un
-// bucket compatible con S3 (Backblaze B2, Cloudflare R2, Supabase Storage, etc.)
+// bucket compatible con S3 (Supabase Storage, Cloudflare R2, Backblaze B2, etc.)
 // y la restaura al arrancar. El disco local sigue siendo la fuente que usa el
 // servidor; el bucket es el respaldo duradero.
 //
 // Variables de entorno:
 //   CRIX_S3_BUCKET, CRIX_S3_ACCESS_KEY_ID, CRIX_S3_SECRET_ACCESS_KEY  (obligatorias)
-//   CRIX_S3_ENDPOINT   p. ej. https://s3.us-west-004.backblazeb2.com
-//   CRIX_S3_REGION     (por defecto "auto"; en B2 es la región, p. ej. us-west-004)
+//   CRIX_S3_ENDPOINT   Supabase: https://<project-ref>.storage.supabase.co/storage/v1/s3
+//   CRIX_S3_REGION     Supabase: la región del proyecto, p. ej. us-east-1 (por defecto "us-east-1")
 //   CRIX_S3_PREFIX     carpeta dentro del bucket (opcional)
 //   CRIX_PERSIST_DIR   alternativa para pruebas: usa una carpeta local como "bucket"
 // Sin ninguna de ellas, todo funciona como antes (solo disco local).
@@ -37,15 +37,18 @@ const BACKUPS_TO_KEEP = 7;
 const DB_MIN_INTERVAL = Math.max(300, Number(env.CRIX_DB_UPLOAD_MS) || 800);   // ms mínimos entre subidas de la base (antes 3000)
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const isNotFound = e => !!e && (e.name === 'NoSuchKey' || e.name === 'NotFound' || e.Code === 'NoSuchKey' || e.code === 'ENOENT' || e.$metadata?.httpStatusCode === 404);
-// Tope de transacciones/ancho de banda del proveedor (Backblaze: "Class B cap exceeded"). Las respuestas HEAD no traen cuerpo,
-// así que el SDK las reporta como "UnknownError" con http 403/429: se tratan igual. Reintentar en ese caso solo gasta más cuota.
-const isCapError = e => !!e && (e.$metadata?.httpStatusCode === 403 || e.$metadata?.httpStatusCode === 429 || /cap exceeded|Caps & Alerts|SlowDown|TooManyRequests/i.test(`${e.message || ''} ${e.name || ''} ${e.Code || ''}`));
+// Un bucket inexistente también responde 404, pero NO es "objeto no encontrado": si se confundiera, el servidor arrancaría con
+// la base vacía creyendo que todavía no hay copia remota. Por eso NoSuchBucket se trata como error real.
+const isNotFound = e => !!e && e.name !== 'NoSuchBucket' && e.Code !== 'NoSuchBucket' && (e.name === 'NoSuchKey' || e.name === 'NotFound' || e.Code === 'NoSuchKey' || e.code === 'ENOENT' || e.$metadata?.httpStatusCode === 404);
+// Rechazo del almacenamiento: 403 (en Supabase casi siempre = clave/endpoint/región incorrectos o sin permiso sobre el bucket) o 429
+// (demasiadas solicitudes). Las respuestas HEAD no traen cuerpo, así que el SDK las reporta como "UnknownError" con http 403/429: se
+// tratan igual. Reintentar enseguida no arregla ninguno de los dos casos.
+const isCapError = e => !!e && (e.$metadata?.httpStatusCode === 403 || e.$metadata?.httpStatusCode === 429 || /cap exceeded|Caps & Alerts|SlowDown|TooManyRequests|AccessDenied|SignatureDoesNotMatch|InvalidAccessKeyId/i.test(`${e.message || ''} ${e.name || ''} ${e.Code || ''}`));
 let capUntil = 0;   // mientras dure, no se consulta el bucket (salvo subir cambios)
 const CAP_PAUSE_MS = Math.max(60000, Number(env.CRIX_CAP_PAUSE_MS) || 30 * 60000);
 function noteCap(e) {
   if (!isCapError(e)) return false;
-  if (Date.now() > capUntil) console.warn(`[PERSIST] El bucket rechazó la consulta (http ${e.$metadata?.httpStatusCode ?? '?'}): tope diario de transacciones alcanzado o clave sin permiso. Se pausan las consultas ${CAP_PAUSE_MS / 60000} min. Subí el cap en Backblaze → Caps & Alerts (Class B / Class C).`);
+  if (Date.now() > capUntil) console.warn(`[PERSIST] El bucket rechazó la consulta (http ${e.$metadata?.httpStatusCode ?? '?'}): límite de solicitudes o credenciales/permisos incorrectos. Revisá en Supabase: Storage → S3 Connection (endpoint, región y claves) y que el bucket exista. Se pausan las consultas ${CAP_PAUSE_MS / 60000} min.`);
   capUntil = Date.now() + CAP_PAUSE_MS;
   return true;
 }
@@ -71,9 +74,9 @@ function s3Driver() {
   const K = key => prefix ? `${prefix}/${key}` : key;
   const unK = key => prefix ? key.slice(prefix.length + 1) : key;
   const client = new S3.S3Client({
-    region: env.CRIX_S3_REGION || 'auto',
+    region: env.CRIX_S3_REGION || 'us-east-1',   // Supabase firma con la región del proyecto; 'auto' solo sirve en R2
     endpoint: env.CRIX_S3_ENDPOINT || undefined,
-    forcePathStyle: env.CRIX_S3_FORCE_PATH_STYLE !== '0',
+    forcePathStyle: env.CRIX_S3_FORCE_PATH_STYLE !== '0',   // Supabase Storage requiere path-style
     credentials: { accessKeyId: env.CRIX_S3_ACCESS_KEY_ID, secretAccessKey: env.CRIX_S3_SECRET_ACCESS_KEY },
     // Evita checksums extra que algunos servicios compatibles con S3 no aceptan.
     requestChecksumCalculation: 'WHEN_REQUIRED',
@@ -165,7 +168,14 @@ function putFile(key, localPath) {
   if (!driver) return Promise.resolve(true);
   return track((async () => {
     try { await retry(async () => driver.putStream ? driver.putStream(key, localPath) : driver.put(key, await fsp.readFile(localPath)), 3, 1000); retryQueue.delete(key); return true; }
-    catch (e) { console.error(`[PERSIST] No se pudo subir ${key}: ${e.message} (se reintentará)`); retryQueue.set(key, localPath); return false; }
+    catch (e) {
+      // 413 / EntityTooLarge: el archivo supera el límite por archivo de Supabase; reintentar cada minuto no lo arregla.
+      if (e.$metadata?.httpStatusCode === 413 || /EntityTooLarge|too large|exceeded the maximum/i.test(`${e.name || ''} ${e.Code || ''} ${e.message || ''}`)) {
+        console.error(`[PERSIST] ${key} supera el límite de tamaño por archivo del bucket (Supabase: Storage → Settings → Global file size limit). Queda solo en el disco local; no se reintenta.`);
+        retryQueue.delete(key); return false;
+      }
+      console.error(`[PERSIST] No se pudo subir ${key}: ${e.message} (se reintentará)`); retryQueue.set(key, localPath); return false;
+    }
   })());
 }
 function delKey(key) {
@@ -258,7 +268,7 @@ function pullRemote() {
 // Antes de responder una lectura (catálogo, videos, foros, usuarios): si pasaron más de `maxAge` ms desde la
 // última consulta, mira si otra instancia subió algo nuevo. Nunca bloquea más de `cap` ms.
 let lastFreshPull = 0;
-// Cada consulta cuenta como transacción Class B (B2 gratis: 2.500/día): se impone un piso al intervalo. Con una sola instancia
+// Se impone un piso al intervalo para no saturar el límite de solicitudes del proyecto. Con una sola instancia
 // no hace falta sincronizar nunca (CRIX_SYNC_MS=0 apaga todo el sondeo).
 const FRESH_MIN_MS = Math.max(5000, Number(env.CRIX_FRESH_MS) || 120000);
 const MISS_MIN_MS = 10000;   // cuando falta un juego/video concreto (maxAge 0)
@@ -273,7 +283,7 @@ function pullFresh(maxAge = 2000, cap = 2500) {
 function startSync() {
   if (!driver || !syncApi) return;
   if (SYNC_OFF) { console.log('[PERSIST] Sincronización entre instancias desactivada (CRIX_SYNC_MS=0)'); return; }
-  // Cada consulta al bucket cuenta como transacción Class B (B2 gratis: 2.500/día). Por defecto 5 min.
+  // Por defecto cada 5 min (Supabase no cobra por solicitud, pero cada sondeo es una llamada HEAD al bucket).
   const every = Math.max(30000, Number(env.CRIX_SYNC_MS) || 300000);
   setInterval(() => { pullRemote(); }, every).unref();
   console.log(`[PERSIST] Sincronización entre instancias activa (cada ${every / 1000} s)`);
