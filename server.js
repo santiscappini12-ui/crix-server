@@ -800,7 +800,7 @@ function shareMeta(kind, key) {
   return fallback;
 }
 function sharePage(kind) {
-  return (req, res) => {
+  return async (req, res) => {
     const key = String(req.params.id || req.params.username || '').slice(0, 200);
     const meta = shareMeta(kind, key);
     const origin = `${req.protocol}://${req.get('host')}`;
@@ -814,7 +814,7 @@ function sharePage(kind) {
       `<script>window.__CRIX_ROUTE__=${JSON.stringify({ kind, key }).replace(/</g, '\\u003c')};</script>`,
     ].join('\n');
     let html = readIndexHtml().replace(/<title>[\s\S]*?<\/title>/, () => `<title>${htmlEsc(meta.title)}</title>`).replace('</head>', () => tags + '\n</head>');
-    const gm = kind === 'juego' ? publicMapForShortcut(key) : null;
+    const gm = kind === 'juego' ? await shortcutMap(key) : null;
     if (gm) {
       const gid = encodeURIComponent(key);
       html = html.replace('<link rel="manifest" href="/manifest.webmanifest">', () => `<link rel="manifest" href="/juego/${gid}/manifest.webmanifest">`)
@@ -828,15 +828,26 @@ function sharePage(kind) {
 const ICON_DATA_RE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+=*)$/;
 const okIconData = v => typeof v === 'string' && v.length <= 600000 && ICON_DATA_RE.test(v);
 function publicMapForShortcut(id) { const m = DB.maps[String(id || '')]; return m && (m.privacy || 'public') === 'public' ? m : null; }
+// Con varias instancias, el juego pudo subirse en otra y esta todavía no lo bajó: antes de dar el manifiesto/ícono genérico de Crix, se mira el bucket (máx. una vez cada 5 s).
+let lastShortcutMissPull = 0;
+async function shortcutMap(id) {
+  let m = publicMapForShortcut(id);
+  if (!m && persist.enabled && Date.now() - lastShortcutMissPull > 5000) {
+    lastShortcutMissPull = Date.now();
+    try { await persist.pullRemote(); } catch {}
+    m = publicMapForShortcut(id);
+  }
+  return m;
+}
 function gameIconSource(map) { return okIconData(map?.icon) ? map.icon : (typeof map?.thumb === 'string' && map.thumb.length <= 2000000 && ICON_DATA_RE.test(map.thumb) ? map.thumb : null); }
 function gameIconVersion(map) { const src = gameIconSource(map); return src ? crypto.createHash('sha1').update(src).digest('hex').slice(0, 10) : '0'; }
-app.get('/juego/:id/icon.png', (req, res) => {
-  const map = publicMapForShortcut(req.params.id), src = map && gameIconSource(map), m = src && ICON_DATA_RE.exec(src);
+app.get('/juego/:id/icon.png', async (req, res) => {
+  const map = await shortcutMap(req.params.id), src = map && gameIconSource(map), m = src && ICON_DATA_RE.exec(src);
   if (!m) return res.set('Cache-Control', 'public, max-age=300').sendFile(path.join(__dirname, 'icons', 'icon-512.png'));
   res.set({ 'Content-Type': m[1], 'Cache-Control': 'public, max-age=3600' }).send(Buffer.from(m[2], 'base64'));
 });
-app.get('/juego/:id/manifest.webmanifest', (req, res) => {
-  const map = publicMapForShortcut(req.params.id), id = encodeURIComponent(String(req.params.id || '').slice(0, 120));
+app.get('/juego/:id/manifest.webmanifest', async (req, res) => {
+  const map = await shortcutMap(req.params.id), id = encodeURIComponent(String(req.params.id || '').slice(0, 120));
   const name = String(map?.name || 'Juego de Crix').slice(0, 60);
   const src = map && gameIconSource(map), type = (src && ICON_DATA_RE.exec(src)?.[1]) || 'image/png';
   const icon = map && src ? `/juego/${id}/icon.png?v=${gameIconVersion(map)}` : '/icons/icon-512.png';
