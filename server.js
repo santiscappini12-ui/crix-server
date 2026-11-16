@@ -50,7 +50,7 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'videos-2026-11-16b';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'videos-2026-11-16c';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
@@ -1827,24 +1827,79 @@ app.put('/api/videos/:id/file', async (req, res) => {
     fs.mkdirSync(VIDEO_DIR, { recursive:true });
     tmp = path.join(VIDEO_DIR, `${video.id}.${Date.now()}.part`);
     const size = await streamToFile(req, tmp, MAX_VIDEO_BYTES);
-    if (!size) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Archivo vacío' }); }
+    const tmpToClean = tmp; tmp = null;   // finalizeVideoUpload se encarga del archivo temporal desde acá
+    res.json(await finalizeVideoUpload(video, tmpToClean, size));
+  } catch (e) {
+    if (tmp) { try { fs.rmSync(tmp, { force:true }); } catch {} }
+    if (!res.headersSent) res.status(e.status || (e.code === 'TOO_BIG' ? 413 : 500)).json({ ok:false, err:e.message });
+  }
+});
+
+// Valida el archivo temporal ya completo, lo deja como definitivo, lo copia al bucket y avisa a los clientes.
+async function finalizeVideoUpload(video, tmp, size) {
+  const bad = (status, msg) => { try { fs.rmSync(tmp, { force:true }); } catch {} const e = new Error(msg); e.status = status; return e; };
+  try {
+    if (!size) throw bad(400, 'Archivo vacío');
     const head = Buffer.alloc(16); const fd = fs.openSync(tmp, 'r'); fs.readSync(fd, head, 0, 16, 0); fs.closeSync(fd);
     const mime = sniffVideo(head);
-    if (!mime) { fs.rmSync(tmp, { force:true }); return res.status(400).json({ ok:false, err:'Formato no soportado. Usá MP4, WebM u OGG.' }); }
+    if (!mime) throw bad(400, 'Formato no soportado. Usá MP4, WebM u OGG.');
     const wasReady = !!video.ready, oldPath = videoFilePath(video), file = `${video.id}.${VIDEO_EXT[mime]}`;
-    fs.renameSync(tmp, path.join(VIDEO_DIR, file)); tmp = null;
+    fs.renameSync(tmp, path.join(VIDEO_DIR, file));
     if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} persist.delKey('videos/' + path.basename(oldPath)); }
     video.file = file; video.mime = mime; video.size = size; video.ready = true; delete video.data;
     await settleUpload(persist.putFile('videos/' + file, path.join(VIDEO_DIR, file)));
     saveDB();
     if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
     else emitVideoEvent(video, 'video_updated', { id: video.id, refetch:true });   // privado: aparece en los dispositivos del autor; archivo reemplazado: todos
-    res.json({ ok:true, size:video.size, mime:video.mime });
-  } catch (e) {
-    if (tmp) { try { fs.rmSync(tmp, { force:true }); } catch {} }
-    if (!res.headersSent) res.status(e.code === 'TOO_BIG' ? 413 : 500).json({ ok:false, err:e.message });
-  }
+    return { ok:true, size:video.size, mime:video.mime };
+  } catch (e) { try { if (fs.existsSync(tmp)) fs.rmSync(tmp, { force:true }); } catch {} throw e; }
+}
+
+// Subida por partes: el cliente manda trozos chicos (cada PUT dura segundos, así ningún proxy los corta) y al final pide ensamblar.
+// Cada parte se escribe en su posición (offset), por eso reintentar una parte es seguro.
+const CHUNK_MAX = 32 * 1024 * 1024;
+const UPLOAD_ID_RE = /^[A-Za-z0-9]{6,40}$/;
+async function chunkContext(req, res) {
+  const user = readSession(req);
+  if (!user) { res.status(401).json({ ok:false, err:'Iniciá sesión para publicar' }); return null; }
+  const video = await findVideoFresh(req.params.id);
+  if (!video) { res.status(404).json({ ok:false, err:'Primero creá el video' }); return null; }
+  if (video.authorId !== user.id && !user.isAdmin) { res.status(403).json({ ok:false, err:'No podés editar este contenido' }); return null; }
+  if (!VIDEO_ID_RE.test(String(video.id)) || !UPLOAD_ID_RE.test(String(req.query.u || ''))) { res.status(400).json({ ok:false, err:'Parámetros inválidos' }); return null; }
+  fs.mkdirSync(VIDEO_DIR, { recursive:true });
+  return { video, tmp: path.join(VIDEO_DIR, `${video.id}.${req.query.u}.part`) };
+}
+app.put('/api/videos/:id/chunk', async (req, res) => {
+  try {
+    const ctx = await chunkContext(req, res); if (!ctx) return;
+    const offset = Number(req.query.o);
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= MAX_VIDEO_BYTES) return res.status(400).json({ ok:false, err:'Posición inválida' });
+    if (Number(req.headers['content-length']) > CHUNK_MAX) return res.status(413).json({ ok:false, err:'Parte demasiado grande' });
+    if (offset === 0) fs.rmSync(ctx.tmp, { force:true });
+    else if (!fs.existsSync(ctx.tmp)) return res.status(409).json({ ok:false, err:'Falta el inicio de la subida (¿otra instancia del servidor?)', restart:true });
+    const n = await new Promise((resolve, reject) => {
+      const ws = fs.createWriteStream(ctx.tmp, { flags: fs.existsSync(ctx.tmp) ? 'r+' : 'w', start: offset });
+      let bytes = 0, done = false;
+      const fail = err => { if (done) return; done = true; try { req.unpipe(ws); } catch {} ws.destroy(); reject(err); };
+      req.on('data', c => { bytes += c.length; if (bytes > CHUNK_MAX || offset + bytes > MAX_VIDEO_BYTES) { const e = new Error('El archivo supera el máximo permitido'); e.status = 413; fail(e); } });
+      req.on('error', fail); req.on('aborted', () => fail(new Error('Subida cancelada')));
+      ws.on('error', fail); ws.on('finish', () => { if (!done) { done = true; resolve(bytes); } });
+      req.pipe(ws);
+    });
+    res.json({ ok:true, received:n });
+  } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ ok:false, err:e.message }); }
 });
+app.post('/api/videos/:id/finish', async (req, res) => {
+  try {
+    const ctx = await chunkContext(req, res); if (!ctx) return;
+    if (!fs.existsSync(ctx.tmp)) return res.status(409).json({ ok:false, err:'No llegaron las partes del video (¿otra instancia del servidor?)', restart:true });
+    const size = fs.statSync(ctx.tmp).size, expected = Number(req.query.size);
+    if (expected !== size) return res.status(409).json({ ok:false, err:`Subida incompleta: llegaron ${size} de ${expected} bytes`, restart:true });
+    res.json(await finalizeVideoUpload(ctx.video, ctx.tmp, size));
+  } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ ok:false, err:e.message }); }
+});
+// Limpieza de subidas abandonadas (partes sueltas de más de 6 h).
+setInterval(() => { try { for (const f of fs.readdirSync(VIDEO_DIR)) if (f.endsWith('.part')) { const p = path.join(VIDEO_DIR, f); if (Date.now() - fs.statSync(p).mtimeMs > 6 * 3600 * 1000) fs.rmSync(p, { force:true }); } } catch {} }, 3600 * 1000).unref();
 
 app.post('/api/videos/:id/like', (req, res) => {
   const user = readSession(req);
