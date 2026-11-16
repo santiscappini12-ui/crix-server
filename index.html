@@ -4555,11 +4555,15 @@ async function confirmUploadVideo() {
     for (let tries = 0; ; ) {   // un 404 pasajero (otra instancia aún no ve el video) se reintenta
       try { await uploadVideoFile(v.id, file, uvProgress); break; }
       catch (e) {
-        if (e.status === 404 && e.routeMissing && file.size <= 24 * 1048576) {   // servidor viejo sin PUT /file: subida clásica en base64
+        if (e.status === 404 && e.routeMissing && file.size <= 60 * 1048576) {   // servidor viejo sin PUT /file: subida clásica en base64
           const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(new Error('No se pudo leer el video')); r.readAsDataURL(file); });
           await apiRequest('/api/videos', { method:'POST', body:{ ...v, data } }); break;
         }
         if (e.status === 404 && ++tries < 4) { uvProgress(0); await new Promise(r => setTimeout(r, 1500 * tries)); continue; }
+        if (e.routeMissing) {   // diagnóstico: ¿corre el servidor nuevo, o la subida la corta algo por delante (proxy)?
+          try { const ir = await fetch('/api/instance', { cache:'no-store' }); e.message += ` · GET /api/instance → ${ir.status}, build=${ir.headers.get('X-Crix-Build') || 'ninguno (servidor viejo)'}`; } catch { e.message += ' · /api/instance no responde'; }
+          if (file.size > 60 * 1048576) e.message += ` · el video pesa ${Math.round(file.size / 1048576)} MB (el modo de respaldo solo sirve hasta 60 MB)`;
+        }
         throw e;
       }
     }
