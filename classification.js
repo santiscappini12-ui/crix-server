@@ -292,4 +292,39 @@ async function detectCountry(req, fetchJson) {
   return { country: null, source: 'none' };
 }
 
-module.exports = { evaluate, isValid, publicConfig, detectCountry, countryOf, COUNTRIES, SYSTEMS, KINDS, VERSION, langOf };
+// ── Insignia en SVG para usar fuera de Crix (GET /api/v1/rating/badge.svg y campo `badge` de /evaluate) ──
+// Mismos dibujos que CLS_SYS en index.html (forma + código por sistema). Son diseños propios de Crix, no sellos oficiales.
+const BADGE_STYLE = {
+  GENERIC: ['GL', 'circle'], ESRB: ['EUU', 'shield'], PEGI: ['EU', 'hexagon'], USK: ['DE', 'square'], CLASSIND: ['BR', 'diamond'],
+  CERO: ['JP', 'octagon'], GRAC: ['KR', 'pentagon'], ACB: ['AU', 'pill'], MX: ['MX', 'banner'], AR: ['AR', 'ring'], CL: ['CL', 'arch'], CO: ['CO', 'hex2'],
+};
+const BADGE_SHAPES = {
+  circle:  '<circle class="sh" cx="18" cy="20" r="17"/>',
+  ring:    '<circle class="sh" cx="18" cy="20" r="17"/><circle cx="18" cy="20" r="13.5" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.2"/>',
+  shield:  '<path class="sh" d="M18 2 L33 7 V20 C33 30 26 36 18 39 C10 36 3 30 3 20 V7 Z"/>',
+  hexagon: '<path class="sh" d="M18 2 L33 11 V29 L18 38 L3 29 V11 Z"/>',
+  square:  '<rect class="sh" x="3" y="4" width="30" height="32" rx="8"/>',
+  diamond: '<path class="sh" d="M18 1 L35 20 L18 39 L1 20 Z"/>',
+  octagon: '<path class="sh" d="M12 3 H24 L33 12 V28 L24 37 H12 L3 28 V12 Z"/>',
+  pentagon:'<path class="sh" d="M18 2 L34 14 L28 36 H8 L2 14 Z"/>',
+  pill:    '<rect class="sh" x="2" y="6" width="32" height="28" rx="14"/>',
+  banner:  '<path class="sh" d="M4 3 H32 V28 L18 38 L4 28 Z"/>',
+  arch:    '<path class="sh" d="M3 38 V16 Q3 2 18 2 Q33 2 33 16 V38 Z"/>',
+  hex2:    '<path class="sh" d="M10 2 H26 L34 20 L26 38 H10 L2 20 Z"/>',
+};
+const BADGE_COLORS = { 0: '#2f9e5f', 7: '#2b9aa8', 12: '#e5b22a', 16: '#e8782a', 18: '#d93a3a' };
+// Devuelve el SVG (texto) o null si el sistema o la edad no existen. `size` = alto en px.
+function badgeSvg(systemId, age, explicit, size) {
+  const st = BADGE_STYLE[systemId], sys = SYSTEMS[systemId], tier = TIERS.includes(Number(age)) ? Number(age) : null;
+  if (!st || !sys || tier === null) return null;
+  const label = explicit && sys.explicit ? sys.explicit.label : sys.labels[TIERS.indexOf(tier)];
+  const num = explicit && sys.explicit ? '18' : ((label.match(/\d+/) || [])[0] || (label === 'Livre' ? 'L' : 'T'));
+  const h = Math.max(16, Math.min(512, Number(size) || 64)), w = Math.round(h * 36 / 40);
+  const txt = tier === 12 ? '#1b1b1b' : '#fff';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 40" width="${w}" height="${h}" role="img" aria-label="${sys.name} · ${label}"><title>${sys.name} · ${label}</title>` +
+    `<style>.sh{fill:${BADGE_COLORS[tier]}}text{fill:${txt};text-anchor:middle;font-family:Arial,Helvetica,sans-serif;font-weight:900}</style>` +
+    BADGE_SHAPES[st[1]] + `<text x="18" y="12.5" font-size="7">${st[0]}</text><text x="18" y="29" font-size="${num.length > 1 ? 15 : 17}">${num}</text>` +
+    (explicit && sys.explicit ? '<text x="18" y="36" font-size="6">XXX</text>' : '') + '</svg>';
+}
+
+module.exports = { badgeSvg, evaluate, isValid, publicConfig, detectCountry, countryOf, COUNTRIES, SYSTEMS, KINDS, VERSION, langOf };

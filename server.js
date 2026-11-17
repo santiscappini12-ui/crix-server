@@ -95,7 +95,7 @@ const DATA_FILE = persist.DATA_FILE;
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
 // a un disco persistente montado por el proveedor de alojamiento.
 // ══════════════════════════════════════════════
-let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, push: {}, _v: 0 };
+let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, apiKeys: {}, push: {}, _v: 0 };
 let dbSync = null;   // fusión entre instancias (db-sync.js); se crea justo después de loadDB()
 
 function loadDB() {
@@ -103,9 +103,9 @@ function loadDB() {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf8');
       const parsed = JSON.parse(raw);
-      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, push:{}, _v:0, ...parsed };
+      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, apiKeys:{}, push:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
-      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {};
+      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {}; DB.apiKeys = DB.apiKeys || {};
       // Los mensajes anteriores al cifrado E2EE no se pueden proteger retroactivamente.
       // Eliminarlos evita volver a servir o conservar conversaciones en texto plano.
       let legacyMessagesRemoved = 0;
@@ -1396,6 +1396,63 @@ app.post('/api/classification/evaluate', requireAuth, (req, res) => {
   const ev = classification.evaluate(req.body, req.query.lang || req.body?.lang);
   if (!ev.ok) return res.status(422).json({ ok:false, code:ev.code, err:ev.err, reasons:ev.reasons });
   res.json({ ok:true, result:ev.result });
+});
+// ── API de clasificación para usar FUERA de Crix ──
+// Cada usuario puede conseguir claves propias (POST /api/classification/keys, con su sesión) y usarlas desde su sitio, juego o app:
+//   GET  /api/v1/rating/config?kind=game&lang=es   preguntas y países del cuestionario
+//   POST /api/v1/rating/evaluate                    { kind, country, answers, legal, declared } → insignia Crix del país (o 422 si es ilegal)
+//   GET  /api/v1/rating/badge.svg?system=AR&age=12  dibujo de la insignia (público, sin clave, para usar en <img>)
+// La clave va en la cabecera X-Crix-Key. Se guarda solo su hash, y se muestra una única vez al crearla.
+const API_KEY_RATE = Number.isFinite(Number(process.env.CRIX_API_RATE)) && process.env.CRIX_API_RATE !== undefined && process.env.CRIX_API_RATE !== '' ? Number(process.env.CRIX_API_RATE) : 120;   // pedidos por minuto por clave (0 = sin límite)
+const apiKeyHits = new Map();                // id de clave → { n, reset }
+function publicKey(k) { return { id:k.id, name:k.name, prefix:k.prefix, createdAt:k.createdAt, lastUsed:k.lastUsed || null }; }
+app.get('/api/classification/keys', requireAuth, (req, res) => {
+  res.json({ ok:true, keys:Object.values(DB.apiKeys).filter(k => k.userId === req.user.id).sort((a, b) => b.createdAt - a.createdAt).map(publicKey) });
+});
+app.post('/api/classification/keys', requireAuth, (req, res) => {
+  const key = 'crxc_' + crypto.randomBytes(24).toString('base64url');
+  const id = crypto.randomBytes(6).toString('hex');
+  DB.apiKeys[tokenHash(key)] = { id, userId:req.user.id, name:String(req.body?.name || 'Mi clave').trim().slice(0, 40) || 'Mi clave', prefix:key.slice(0, 9), createdAt:Date.now() };
+  saveDB();
+  res.json({ ok:true, key, info:publicKey(DB.apiKeys[tokenHash(key)]) });   // la clave completa solo se ve ahora
+});
+app.delete('/api/classification/keys/:id', requireAuth, (req, res) => {
+  const h = Object.keys(DB.apiKeys).find(x => DB.apiKeys[x].id === req.params.id && DB.apiKeys[x].userId === req.user.id);
+  if (!h) return res.status(404).json({ ok:false, err:'Clave no encontrada' });
+  delete DB.apiKeys[h]; saveDB(); res.json({ ok:true });
+});
+// CORS abierto solo para /api/v1 (se llama desde otros sitios; la clave viaja en cabecera, no en cookies).
+app.use('/api/v1', (req, res, next) => {
+  res.set({ 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Methods':'GET, POST, OPTIONS', 'Access-Control-Allow-Headers':'Content-Type, X-Crix-Key', 'Access-Control-Max-Age':'86400' });
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
+app.get('/api/v1/rating/badge.svg', (req, res) => {
+  const svg = classification.badgeSvg(String(req.query.system || ''), Number(req.query.age), req.query.explicit === '1', req.query.size);
+  if (!svg) return res.status(400).type('text/plain').send('system o age inválidos');
+  res.set({ 'Content-Type':'image/svg+xml; charset=utf-8', 'Cache-Control':'public, max-age=86400' }).send(svg);
+});
+function requireApiKey(req, res, next) {
+  const key = String(req.get('x-crix-key') || '');
+  const rec = key.startsWith('crxc_') ? DB.apiKeys[tokenHash(key)] : null;
+  const owner = rec && DB.users[rec.userId];
+  if (!rec || !owner || owner.banned) return res.status(401).json({ ok:false, err:'Clave inválida. Mandala en la cabecera X-Crix-Key.' });
+  const now = Date.now(), hit = apiKeyHits.get(rec.id);
+  if (!hit || hit.reset <= now) apiKeyHits.set(rec.id, { n:1, reset:now + 60000 });
+  else if (API_KEY_RATE > 0 && ++hit.n > API_KEY_RATE) return res.status(429).set('Retry-After', String(Math.ceil((hit.reset - now) / 1000))).json({ ok:false, err:'Demasiados pedidos. Probá en un minuto.' });
+  if (apiKeyHits.size > 5000) for (const [k, v] of apiKeyHits) if (v.reset <= now) apiKeyHits.delete(k);
+  if (!rec.lastUsed || now - rec.lastUsed > 3600000) { rec.lastUsed = now; saveDB(); }   // se guarda a lo sumo cada hora
+  next();
+}
+app.get('/api/v1/rating/config', requireApiKey, (req, res) => res.json({ ok:true, ...classification.publicConfig(req.query.kind, req.query.lang) }));
+app.post('/api/v1/rating/evaluate', requireApiKey, (req, res) => {
+  const ev = classification.evaluate(req.body, req.query.lang || req.body?.lang);
+  if (!ev.ok) return res.status(422).json({ ok:false, code:ev.code, err:ev.err, reasons:ev.reasons });
+  const { system, age, icon } = ev.result, explicit = /-X$/.test(icon || '');
+  const origin = (req.protocol + '://' + req.get('host'));
+  res.json({ ok:true, result:{ country:ev.result.country, countryName:ev.result.countryName, systemId:system, system:ev.result.systemName, label:ev.result.label, age, adult:ev.result.adult,
+    descriptors:ev.result.descriptors, descriptorLabels:ev.result.descriptorLabels, badgeUrl:`${origin}/api/v1/rating/badge.svg?system=${system}&age=${age}${explicit ? '&explicit=1' : ''}`,
+    badge:classification.badgeSvg(system, age, explicit, 64), at:ev.result.at, note:'Insignia propia de Crix; no es una clasificación oficial.' } });
 });
 app.get('/api/maps', (req, res) => {
   const uObj = readSession(req);

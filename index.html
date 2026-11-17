@@ -8505,6 +8505,25 @@ function stuAddSound(folderId) {
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-settings')">Cerrar</button></div>
 </div>
 </div>
+<!-- ═══ API DE CLASIFICACIÓN (para usar fuera de Crix) ═══ -->
+<div class="mo-overlay" id="mo-cls-api">
+<div class="mo-box" style="max-width:560px">
+  <h3>🔑 API de clasificación</h3>
+  <div class="set-note">Usá el cuestionario y las insignias de Crix en tu propio sitio, juego o app. Cada vez que tocás el botón se crea una clave distinta, sin límite de cantidad. Cada una se muestra <b>una sola vez</b>, así que guardala. Si se filtra, borrala y creá otra.</div>
+  <div id="cls-api-new"></div>
+  <div id="cls-api-list" class="set-note" style="max-height:240px;overflow:auto"></div>
+  <div class="mo-btns"><button class="btn btn-p" id="cls-api-btn" onclick="clsApiCreate()">➕ Conseguir una API</button><button class="btn btn-g" onclick="closeModal('mo-cls-api')">Cerrar</button></div>
+  <details class="set-note" style="margin-top:12px"><summary>Cómo se usa</summary>
+<pre style="white-space:pre-wrap;font-size:11px;background:var(--bg3);padding:10px;border-radius:8px;overflow:auto">curl -H "X-Crix-Key: TU_CLAVE" "$ORIGIN/api/v1/rating/config?kind=game&amp;lang=es"
+
+curl -X POST -H "X-Crix-Key: TU_CLAVE" -H "Content-Type: application/json" \
+  -d '{"kind":"game","country":"AR","answers":{...},"legal":{...},"declared":true}' \
+  $ORIGIN/api/v1/rating/evaluate
+
+&lt;img src="$ORIGIN/api/v1/rating/badge.svg?system=AR&amp;age=12&amp;size=48"&gt;</pre>
+    Límite: 120 pedidos por minuto por clave. Las insignias son propias de Crix, no una clasificación oficial.</details>
+</div>
+</div>
 <div class="mo-overlay" id="mo-guest-gate">
 <div class="mo-box">
   <h3>🔑 Necesitás una cuenta</h3>
@@ -8798,6 +8817,31 @@ window.enterGuestMode = async function () {
 };
 window.leaveGuest = function () { location.reload(); };
 
+
+/* ── API de clasificación (claves de usuario) ── */
+window.openClsApi = async function () { if (!ME) return; document.getElementById('cls-api-new').innerHTML = ''; openModal('mo-cls-api'); clsApiLoad(); };
+async function clsApiLoad() {
+  const box = document.getElementById('cls-api-list');
+  try {
+    const r = await apiRequest('/api/classification/keys');
+    box.innerHTML = r.keys.length ? r.keys.map(k => '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><code>' + esc(k.prefix) + '…</code><span style="flex:1">' + esc(k.name) + ' · ' + new Date(k.createdAt).toLocaleDateString() +
+      (k.lastUsed ? ' · usada ' + new Date(k.lastUsed).toLocaleDateString() : ' · sin usar') + '</span><button class="btn btn-g" style="font-size:11px" onclick="clsApiDelete(\'' + k.id + '\')">Borrar</button></div>').join('') : 'Todavía no tenés ninguna clave.';
+  } catch (e) { box.textContent = e.message; }
+}
+window.clsApiCreate = async function () {
+  try {
+    const r = await apiRequest('/api/classification/keys', { method: 'POST', body: { name: 'Clave ' + new Date().toLocaleDateString() } });
+    const el = document.getElementById('cls-api-new');
+    el.innerHTML = '<div class="set-note"><b>Tu clave (guardala ahora, no se vuelve a mostrar):</b><br><code id="cls-api-key" style="word-break:break-all;user-select:all"></code> <button class="btn btn-g" style="font-size:11px" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById(\'cls-api-key\').textContent);showToast(\'Copiada\')">Copiar</button></div>';
+    document.getElementById('cls-api-key').textContent = r.key;
+    clsApiLoad();
+  } catch (e) { showToast(e.message); }
+};
+window.clsApiDelete = async function (id) {
+  if (!confirm('¿Borrar esta clave? Lo que la use dejará de funcionar.')) return;
+  try { await apiRequest('/api/classification/keys/' + id, { method: 'DELETE' }); clsApiLoad(); } catch (e) { showToast(e.message); }
+};
+
 /* ── Configuración ── */
 window.openSettings = function () {
   const box = document.getElementById('set-account');
@@ -8806,6 +8850,7 @@ window.openSettings = function () {
   } else if (ME) {
     box.innerHTML = '<div class="set-note"><span>Sesión iniciada como</span> <b></b></div><button class="btn btn-red" onclick="closeModal(\'mo-settings\');logout()">← Cerrar sesión</button>';
     box.querySelector('b').textContent = ME.username;
+    box.insertAdjacentHTML('afterbegin', '<button class="btn btn-g" style="margin-bottom:10px" onclick="closeModal(\'mo-settings\');openClsApi()">🔑 Conseguir API de clasificación</button>');
   } else box.innerHTML = '';
   fillLangSelects();
   openModal('mo-settings');

@@ -69,6 +69,16 @@ Crix solo prohíbe lo **ilegal**. Antes de subir un video, un juego o una app ha
 - **Obligatorio en el servidor:** `POST /api/videos` rechaza un video nuevo sin clasificación válida; `POST /api/maps` recalcula siempre la clasificación desde las respuestas (el cliente nunca decide la etiqueta). Un juego o app **nuevo** sin clasificar queda como borrador oculto (solo lo ven su autor, colaboradores y admins) hasta que se clasifique con 🏷️. Lo publicado antes de esta función sigue visible y se puede clasificar cuando su autor quiera.
 - Las insignias son **propias de Crix**: dibujos nuestros (SVG, en `index.html`, tabla `CLS_SYS`), sin logos, sellos ni nombres de organismos de clasificación. No son una clasificación oficial ni dicen serlo. Si un organismo autoriza el uso de su sello, se agrega aparte. Las preguntas están en español e inglés (los demás idiomas usan inglés). Para agregar países, sistemas o preguntas, editá `classification.js` (y `CLS_SYS` en `index.html` para el dibujo).
 
+## API de clasificación (para usar fuera de Crix)
+
+Cualquier usuario con sesión puede conseguir sus propias claves desde **⚙️ Configuración → 🔑 Conseguir API de clasificación** (sin límite de cantidad; cada vez que toca el botón se crea una distinta). La clave completa se muestra **una sola vez**; el servidor guarda solo su hash. Se puede borrar en cualquier momento.
+
+- `GET /api/v1/rating/config?kind=game|app|video&lang=es|en`: preguntas, países y sistemas.
+- `POST /api/v1/rating/evaluate`: cuerpo `{ kind, country, answers, legal, declared }`. Devuelve la insignia Crix del país (`system`, `label`, `age`, `adult`, `descriptors`, `badgeUrl` y `badge` en SVG) o `422` si el contenido es ilegal.
+- `GET /api/v1/rating/badge.svg?system=AR&age=12&size=48` (`explicit=1` para la categoría explícita): dibujo de la insignia. Es público y sin clave, para usarlo en un `<img>`.
+- La clave va en la cabecera `X-Crix-Key`. Hay CORS abierto en `/api/v1`, y el límite por defecto es de 120 pedidos por minuto por clave (`429` si se pasa); se cambia con la variable `CRIX_API_RATE` (`0` = sin límite).
+- Las insignias son propias de Crix, no una clasificación oficial. Quien use la API es responsable de la veracidad de las respuestas que envía.
+
 ## Notificaciones (PWA)
 
 Al instalar Crix como aplicación (o desde el navegador) aparece un aviso para **activar las notificaciones**. Con ellas activas, el teléfono o la PC **suena y vibra** cuando alguien te llama (con botones *Contestar* / *Rechazar*), te escribe o te manda una solicitud de amistad, aunque Crix esté cerrado o en segundo plano. Funciona con Web Push (VAPID) a través del service worker.
