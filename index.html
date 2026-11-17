@@ -445,11 +445,26 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
   #msg-sidebar{width:210px;}
   .nav-search{display:none;}
 }
+
+/* ═══ Invitado · idiomas · Google ═══ */
+.auth-or{display:flex;align-items:center;gap:10px;color:var(--text3);font-size:11px;margin:18px 0 12px;}
+.auth-or:before,.auth-or:after{content:'';flex:1;height:1px;background:var(--border);}
+#google-btn-wrap{display:none;justify-content:center;margin-bottom:10px;min-height:44px;}
+#lang-auth{position:fixed;top:14px;right:14px;z-index:5;}
+#lang-auth select{width:auto;font-size:12px;padding:6px 10px;}
+.nav-gear{background:none;border:none;font-size:18px;cursor:pointer;padding:4px 6px;color:var(--text);flex-shrink:0;}
+#nav-login-btn{display:none;font-size:12px;padding:6px 12px;white-space:nowrap;}
+.set-note{font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.5;}
+.set-note b{color:var(--text);}
+body.is-guest .nav-tabs .nav-tab:nth-child(n+5){display:none;}
+body.is-guest .notif-wrap{display:none;}
+body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"],body.is-guest [onclick*="openUploadVideo"]{display:none!important;}
 </style>
 </head>
 <body>
 <!-- ═══ AUTH ═══ -->
 <div id="s-auth" class="screen active">
+<div id="lang-auth"><select class="inp" data-lang-sel onchange="setLang(this.value)" aria-label="Idioma"></select></div>
 <div class="auth-wrap">
   <div class="auth-brand" style="padding:0;background:none;-webkit-text-fill-color:unset"><?xml version="1.0" encoding="UTF-8"?>
 <svg id="Capa_1" data-name="Capa 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1519.66 433.08" style="height:64px;width:auto;display:block;filter:brightness(0) invert(1)">
@@ -522,6 +537,11 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
         ¿Ya tenés? <button class="link-btn" onclick="swapForm('login')">Iniciá sesión</button>
       </div>
     </div>
+    <div id="auth-alt">
+      <div class="auth-or"><span>o</span></div>
+      <div id="google-btn-wrap"></div>
+      <button class="btn btn-g" id="btn-guest" style="width:100%" onclick="enterGuestMode()">👁 Entrar sin cuenta (solo ver)</button>
+    </div>
   </div>
 </div>
 </div>
@@ -574,6 +594,8 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
     <div class="nav-search-wrap">
       <input class="nav-search" id="nav-search-inp" placeholder="Buscar juegos, usuarios..." onkeydown="if(event.key==='Enter')doSearch(this.value)">
     </div>
+    <button class="btn btn-p" id="nav-login-btn" onclick="leaveGuest()">🔑 Iniciar sesión</button>
+    <button class="nav-gear" onclick="openSettings()" title="Configuración" aria-label="Configuración">⚙️</button>
     <div class="notif-wrap" onclick="goTab('msg')">
       <span style="font-size:18px">🔔</span>
       <div class="notif-dot" id="notif-dot"></div>
@@ -8143,6 +8165,351 @@ function stuAddSound(folderId) {
   stScripts.push({ id, name: 'Sound' + n, type: 'Sound', soundId: '', volume: 1, speed: 1, looped: false, playOnStart: false, part: '', maxDistance: 120, refDistance: 8, code: '', language: 'javascript', parent: folderId || 'SoundService' });
   refreshExplorer(); openSoundProps(id);
 }
+</script>
+<!-- ═══ CONFIGURACIÓN / INVITADO ═══ -->
+<div class="mo-overlay" id="mo-settings">
+<div class="mo-box">
+  <h3>⚙️ Configuración</h3>
+  <div class="field-grp"><label class="field-lbl">Idioma</label><select class="inp" id="lang-sel-settings" data-lang-sel onchange="setLang(this.value)" aria-label="Idioma"></select></div>
+  <div class="field-grp"><label class="field-lbl">Cuenta</label><div id="set-account"></div></div>
+  <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-settings')">Cerrar</button></div>
+</div>
+</div>
+<div class="mo-overlay" id="mo-guest-gate">
+<div class="mo-box">
+  <h3>🔑 Necesitás una cuenta</h3>
+  <div class="set-note" id="gate-msg"></div>
+  <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-guest-gate')">Seguir mirando</button><button class="btn btn-p" onclick="leaveGuest()">🔑 Iniciar sesión</button></div>
+</div>
+</div>
+<script>
+/* ═══ Modo invitado · Idiomas · Acceso con Google ═══ */
+(function () {
+'use strict';
+
+/* ── Idiomas ──────────────────────────────────────────────────────────
+   Para agregar textos: sumá una fila [es, en, pt, fr, de, it] a ROWS.
+   El texto en español debe ser idéntico al que aparece en pantalla.     */
+const LANGS = { es:'Español', en:'English', pt:'Português', fr:'Français', de:'Deutsch', it:'Italiano' };
+const ORDER = ['es','en','pt','fr','de','it'];
+const GLOC  = { es:'es', en:'en', pt:'pt-BR', fr:'fr', de:'de', it:'it' };
+const ROWS = [
+  // acceso
+  ["Creá. Jugá. Conectate.","Create. Play. Connect.","Crie. Jogue. Conecte-se.","Crée. Joue. Connecte-toi.","Erstelle. Spiele. Vernetze dich.","Crea. Gioca. Connettiti."],
+  ["Iniciar Sesión","Log in","Entrar","Se connecter","Anmelden","Accedi"],
+  ["Usuario","Username","Usuário","Utilisateur","Benutzername","Utente"],
+  ["Contraseña","Password","Senha","Mot de passe","Passwort","Password"],
+  ["Entrar →","Log in →","Entrar →","Connexion →","Anmelden →","Accedi →"],
+  ["¿Sin cuenta?","No account?","Sem conta?","Pas de compte ?","Noch kein Konto?","Nessun account?"],
+  ["Registrate gratis","Sign up for free","Cadastre-se grátis","Inscris-toi gratuitement","Kostenlos registrieren","Registrati gratis"],
+  ["Crear Cuenta","Create account","Criar conta","Créer un compte","Konto erstellen","Crea account"],
+  ["Crear Cuenta →","Create account →","Criar conta →","Créer un compte →","Konto erstellen →","Crea account →"],
+  ["Nombre de usuario","Username","Nome de usuário","Nom d'utilisateur","Benutzername","Nome utente"],
+  ["Repetir Contraseña","Repeat password","Repetir senha","Répéter le mot de passe","Passwort wiederholen","Ripeti password"],
+  ["¿Ya tenés?","Already have one?","Já tem conta?","Déjà un compte ?","Schon ein Konto?","Hai già un account?"],
+  ["Iniciá sesión","Log in","Entre","Connecte-toi","Melde dich an","Accedi"],
+  ["tu_nombre","your_name","seu_nome","ton_nom","dein_name","il_tuo_nome"],
+  ["Solo letras, números y _","Letters, numbers and _ only","Apenas letras, números e _","Lettres, chiffres et _ uniquement","Nur Buchstaben, Zahlen und _","Solo lettere, numeri e _"],
+  ["Mínimo 6 caracteres","At least 6 characters","Mínimo de 6 caracteres","6 caractères minimum","Mindestens 6 Zeichen","Minimo 6 caratteri"],
+  ["Completá los campos.","Fill in all fields.","Preencha os campos.","Remplis les champs.","Fülle alle Felder aus.","Compila i campi."],
+  ["Completá todos los campos.","Fill in all fields.","Preencha todos os campos.","Remplis tous les champs.","Fülle alle Felder aus.","Compila tutti i campi."],
+  ["Mínimo 3 caracteres en el nombre.","The name needs at least 3 characters.","O nome precisa ter pelo menos 3 caracteres.","Le nom doit contenir au moins 3 caractères.","Der Name braucht mindestens 3 Zeichen.","Il nome deve avere almeno 3 caratteri."],
+  ["La contraseña necesita al menos 6 caracteres.","The password needs at least 6 characters.","A senha precisa ter pelo menos 6 caracteres.","Le mot de passe doit contenir au moins 6 caractères.","Das Passwort braucht mindestens 6 Zeichen.","La password deve avere almeno 6 caratteri."],
+  ["Las contraseñas no coinciden.","Passwords don't match.","As senhas não coincidem.","Les mots de passe ne correspondent pas.","Die Passwörter stimmen nicht überein.","Le password non coincidono."],
+  ["Solo letras, números y guión bajo.","Only letters, numbers and underscores.","Apenas letras, números e sublinhado.","Uniquement lettres, chiffres et tiret bas.","Nur Buchstaben, Zahlen und Unterstrich.","Solo lettere, numeri e trattino basso."],
+  ["Usuario no encontrado o contraseña incorrecta.","User not found or wrong password.","Usuário não encontrado ou senha incorreta.","Utilisateur introuvable ou mot de passe incorrect.","Benutzer nicht gefunden oder falsches Passwort.","Utente non trovato o password errata."],
+  ["Usuario no encontrado","User not found","Usuário não encontrado","Utilisateur introuvable","Benutzer nicht gefunden","Utente non trovato"],
+  ["Contraseña incorrecta","Wrong password","Senha incorreta","Mot de passe incorrect","Falsches Passwort","Password errata"],
+  ["Ese nombre ya existe","That name is already taken","Esse nome já existe","Ce nom existe déjà","Dieser Name ist bereits vergeben","Questo nome esiste già"],
+  ["Demasiados intentos. Esperá unos minutos.","Too many attempts. Wait a few minutes.","Muitas tentativas. Aguarde alguns minutos.","Trop de tentatives. Attends quelques minutes.","Zu viele Versuche. Warte ein paar Minuten.","Troppi tentativi. Aspetta qualche minuto."],
+  ["Esta cuenta está suspendida.","This account is suspended.","Esta conta está suspensa.","Ce compte est suspendu.","Dieses Konto ist gesperrt.","Questo account è sospeso."],
+  ["No se pudo verificar tu cuenta de Google","Couldn't verify your Google account","Não foi possível verificar sua conta Google","Impossible de vérifier ton compte Google","Dein Google-Konto konnte nicht verifiziert werden","Impossibile verificare il tuo account Google"],
+  ["No se pudo iniciar sesión con Google","Couldn't sign in with Google","Não foi possível entrar com o Google","Connexion avec Google impossible","Anmeldung mit Google fehlgeschlagen","Impossibile accedere con Google"],
+  // navegación
+  ["🏠 Inicio","🏠 Home","🏠 Início","🏠 Accueil","🏠 Start","🏠 Home"],
+  ["🔭 Descubrir","🔭 Discover","🔭 Descobrir","🔭 Découvrir","🔭 Entdecken","🔭 Scopri"],
+  ["🎬 Videos","🎬 Videos","🎬 Vídeos","🎬 Vidéos","🎬 Videos","🎬 Video"],
+  ["💬 Foros","💬 Forums","💬 Fóruns","💬 Forums","💬 Foren","💬 Forum"],
+  ["👤 Perfil","👤 Profile","👤 Perfil","👤 Profil","👤 Profil","👤 Profilo"],
+  ["Buscar juegos, usuarios...","Search games, users...","Buscar jogos, usuários...","Rechercher jeux, utilisateurs...","Spiele, Nutzer suchen...","Cerca giochi, utenti..."],
+  ["Configuración","Settings","Configurações","Paramètres","Einstellungen","Impostazioni"],
+  ["⚙️ Configuración","⚙️ Settings","⚙️ Configurações","⚙️ Paramètres","⚙️ Einstellungen","⚙️ Impostazioni"],
+  ["Ocultar barra superior","Hide top bar","Ocultar barra superior","Masquer la barre supérieure","Obere Leiste ausblenden","Nascondi barra superiore"],
+  // inicio
+  ["🟢 En línea ahora","🟢 Online now","🟢 Online agora","🟢 En ligne maintenant","🟢 Jetzt online","🟢 Online ora"],
+  ["Tocá \"Unirme\" para entrar al servidor de quien quieras","Tap \"Join\" to enter anyone's server","Toque em \"Entrar\" para entrar no servidor de quem quiser","Touche \"Rejoindre\" pour entrer sur le serveur de ton choix","Tippe auf \"Beitreten\", um einen Server zu betreten","Tocca \"Unisciti\" per entrare nel server di chi vuoi"],
+  ["Juegos Destacados","Featured Games","Jogos em Destaque","Jeux à la une","Beliebte Spiele","Giochi in evidenza"],
+  ["Los más jugados","Most played","Os mais jogados","Les plus joués","Am meisten gespielt","I più giocati"],
+  ["Recién Publicados","Recently Published","Publicados Recentemente","Récemment publiés","Neu veröffentlicht","Appena pubblicati"],
+  ["Últimas creaciones","Latest creations","Últimas criações","Dernières créations","Neueste Kreationen","Ultime creazioni"],
+  ["Mis Juegos","My Games","Meus Jogos","Mes jeux","Meine Spiele","I miei giochi"],
+  ["Todavía no hay juegos aquí.","No games here yet.","Ainda não há jogos aqui.","Pas encore de jeux ici.","Hier gibt es noch keine Spiele.","Nessun gioco qui per ora."],
+  ["➕ Nuevo juego","➕ New game","➕ Novo jogo","➕ Nouveau jeu","➕ Neues Spiel","➕ Nuovo gioco"],
+  ["📱 Nueva app","📱 New app","📱 Novo app","📱 Nouvelle app","📱 Neue App","📱 Nuova app"],
+  ["📁 Importar","📁 Import","📁 Importar","📁 Importer","📁 Importieren","📁 Importa"],
+  ["🔥 POPULAR","🔥 POPULAR","🔥 POPULAR","🔥 POPULAIRE","🔥 BELIEBT","🔥 POPOLARE"],
+  ["✨ NUEVO","✨ NEW","✨ NOVO","✨ NOUVEAU","✨ NEU","✨ NUOVO"],
+  ["✏️ MIO","✏️ MINE","✏️ MEU","✏️ À MOI","✏️ MEINS","✏️ MIO"],
+  ["✏️ Editar","✏️ Edit","✏️ Editar","✏️ Modifier","✏️ Bearbeiten","✏️ Modifica"],
+  ["Sin descripción.","No description.","Sem descrição.","Sans description.","Keine Beschreibung.","Nessuna descrizione."],
+  ["▶ Jugar","▶ Play","▶ Jogar","▶ Jouer","▶ Spielen","▶ Gioca"],
+  ["▶ Unirme","▶ Join","▶ Entrar","▶ Rejoindre","▶ Beitreten","▶ Unisciti"],
+  ["▶ Unirme a su partida","▶ Join their game","▶ Entrar na partida dele","▶ Rejoindre sa partie","▶ Seinem Spiel beitreten","▶ Unisciti alla sua partita"],
+  ["🔒 No tenés acceso a este juego","🔒 You don't have access to this game","🔒 Você não tem acesso a este jogo","🔒 Tu n'as pas accès à ce jeu","🔒 Du hast keinen Zugriff auf dieses Spiel","🔒 Non hai accesso a questo gioco"],
+  ["Mapa no encontrado","Map not found","Mapa não encontrado","Carte introuvable","Karte nicht gefunden","Mappa non trovata"],
+  ["Juego no encontrado","Game not found","Jogo não encontrado","Jeu introuvable","Spiel nicht gefunden","Gioco non trovato"],
+  ["Ese juego no existe o es privado","That game doesn't exist or is private","Esse jogo não existe ou é privado","Ce jeu n'existe pas ou est privé","Dieses Spiel existiert nicht oder ist privat","Quel gioco non esiste o è privato"],
+  ["Ese video no existe o es privado","That video doesn't exist or is private","Esse vídeo não existe ou é privado","Cette vidéo n'existe pas ou est privée","Dieses Video existiert nicht oder ist privat","Quel video non esiste o è privato"],
+  ["Ese usuario no existe","That user doesn't exist","Esse usuário não existe","Cet utilisateur n'existe pas","Dieser Nutzer existiert nicht","Quell'utente non esiste"],
+  // descubrir / videos / foros
+  ["Descubrir","Discover","Descobrir","Découvrir","Entdecken","Scopri"],
+  ["🔥 Populares","🔥 Popular","🔥 Populares","🔥 Populaires","🔥 Beliebt","🔥 Popolari"],
+  ["✨ Nuevos","✨ New","✨ Novos","✨ Nouveaux","✨ Neu","✨ Nuovi"],
+  ["🎮 Juegos","🎮 Games","🎮 Jogos","🎮 Jeux","🎮 Spiele","🎮 Giochi"],
+  ["👤 Usuarios","👤 Users","👤 Usuários","👤 Utilisateurs","👤 Nutzer","👤 Utenti"],
+  ["Creadores","Creators","Criadores","Créateurs","Ersteller","Creatori"],
+  ["Usuarios activos","Active users","Usuários ativos","Utilisateurs actifs","Aktive Nutzer","Utenti attivi"],
+  ["Mostrar más creaciones","Show more creations","Mostrar mais criações","Afficher plus de créations","Mehr Kreationen anzeigen","Mostra altre creazioni"],
+  ["⚔️ Aventura","⚔️ Adventure","⚔️ Aventura","⚔️ Aventure","⚔️ Abenteuer","⚔️ Avventura"],
+  ["🏗️ Construcción","🏗️ Building","🏗️ Construção","🏗️ Construction","🏗️ Bauen","🏗️ Costruzione"],
+  ["🎭 Rol","🎭 Roleplay","🎭 RPG","🎭 Jeu de rôle","🎭 Rollenspiel","🎭 Gioco di ruolo"],
+  ["+ Subir video","+ Upload video","+ Enviar vídeo","+ Mettre en ligne","+ Video hochladen","+ Carica video"],
+  ["Todos","All","Todos","Tous","Alle","Tutti"],
+  ["🎮 Gaming","🎮 Gaming","🎮 Gaming","🎮 Gaming","🎮 Gaming","🎮 Gaming"],
+  ["📚 Tutorial","📚 Tutorial","📚 Tutorial","📚 Tutoriel","📚 Tutorial","📚 Tutorial"],
+  ["🎵 Música","🎵 Music","🎵 Música","🎵 Musique","🎵 Musik","🎵 Musica"],
+  ["🎨 Arte","🎨 Art","🎨 Arte","🎨 Art","🎨 Kunst","🎨 Arte"],
+  ["🌐 Otro","🌐 Other","🌐 Outro","🌐 Autre","🌐 Sonstiges","🌐 Altro"],
+  ["Foros Crix","Crix Forums","Fóruns Crix","Forums Crix","Crix-Foren","Forum Crix"],
+  ["¿Qué está pasando?","What's happening?","O que está acontecendo?","Quoi de neuf ?","Was passiert gerade?","Cosa sta succedendo?"],
+  ["Publicar","Post","Publicar","Publier","Posten","Pubblica"],
+  ["Para vos","For you","Para você","Pour toi","Für dich","Per te"],
+  ["🔥 Trending","🔥 Trending","🔥 Em alta","🔥 Tendances","🔥 Im Trend","🔥 di tendenza"],
+  ["📝 Mis posts","📝 My posts","📝 Meus posts","📝 Mes posts","📝 Meine Beiträge","📝 I miei post"],
+  ["Visibilidad","Visibility","Visibilidade","Visibilité","Sichtbarkeit","Visibilità"],
+  ["Título","Title","Título","Titre","Titel","Titolo"],
+  ["Descripción","Description","Descrição","Description","Beschreibung","Descrizione"],
+  ["Categoría","Category","Categoria","Catégorie","Kategorie","Categoria"],
+  ["🌍 Público","🌍 Public","🌍 Público","🌍 Public","🌍 Öffentlich","🌍 Pubblico"],
+  ["🔒 Privado","🔒 Private","🔒 Privado","🔒 Privé","🔒 Privat","🔒 Privato"],
+  // generales
+  ["Cancelar","Cancel","Cancelar","Annuler","Abbrechen","Annulla"],
+  ["Cerrar","Close","Fechar","Fermer","Schließen","Chiudi"],
+  ["Enviar","Send","Enviar","Envoyer","Senden","Invia"],
+  ["Agregar","Add","Adicionar","Ajouter","Hinzufügen","Aggiungi"],
+  ["← Volver","← Back","← Voltar","← Retour","← Zurück","← Indietro"],
+  ["← Salir","← Exit","← Sair","← Quitter","← Verlassen","← Esci"],
+  ["← Cerrar sesión","← Log out","← Sair da conta","← Se déconnecter","← Abmelden","← Esci dall'account"],
+  ["Invitado","Guest","Convidado","Invité","Gast","Ospite"],
+  // invitado / configuración
+  ["o","or","ou","ou","oder","o"],
+  ["👁 Entrar sin cuenta (solo ver)","👁 Continue without an account (view only)","👁 Entrar sem conta (apenas ver)","👁 Continuer sans compte (lecture seule)","👁 Ohne Konto fortfahren (nur ansehen)","👁 Entra senza account (solo visione)"],
+  ["🔑 Iniciar sesión","🔑 Log in","🔑 Entrar","🔑 Se connecter","🔑 Anmelden","🔑 Accedi"],
+  ["Idioma","Language","Idioma","Langue","Sprache","Lingua"],
+  ["Cuenta","Account","Conta","Compte","Konto","Account"],
+  ["Estás en modo invitado: podés mirar juegos, videos y foros, pero no crear ni jugar.","You're in guest mode: you can browse games, videos and forums, but you can't create or play.","Você está no modo convidado: pode ver jogos, vídeos e fóruns, mas não pode criar nem jogar.","Tu es en mode invité : tu peux parcourir jeux, vidéos et forums, mais pas créer ni jouer.","Du bist im Gastmodus: Du kannst Spiele, Videos und Foren ansehen, aber nichts erstellen oder spielen.","Sei in modalità ospite: puoi guardare giochi, video e forum, ma non creare né giocare."],
+  ["🔑 Iniciar sesión o registrarme","🔑 Log in or sign up","🔑 Entrar ou cadastrar-me","🔑 Se connecter ou s'inscrire","🔑 Anmelden oder registrieren","🔑 Accedi o registrati"],
+  ["Sesión iniciada como","Logged in as","Conectado como","Connecté en tant que","Angemeldet als","Accesso eseguito come"],
+  ["Necesitás una cuenta","You need an account","Você precisa de uma conta","Tu as besoin d'un compte","Du brauchst ein Konto","Serve un account"],
+  ["Seguir mirando","Keep browsing","Continuar vendo","Continuer à regarder","Weiter ansehen","Continua a guardare"],
+  ["Iniciá sesión para jugar.","Log in to play.","Entre para jogar.","Connecte-toi pour jouer.","Melde dich an, um zu spielen.","Accedi per giocare."],
+  ["Iniciá sesión para crear juegos.","Log in to create games.","Entre para criar jogos.","Connecte-toi pour créer des jeux.","Melde dich an, um Spiele zu erstellen.","Accedi per creare giochi."],
+  ["Iniciá sesión para editar.","Log in to edit.","Entre para editar.","Connecte-toi pour modifier.","Melde dich an, um zu bearbeiten.","Accedi per modificare."],
+  ["Iniciá sesión para dar me gusta.","Log in to like.","Entre para curtir.","Connecte-toi pour aimer.","Melde dich an, um zu liken.","Accedi per mettere mi piace."],
+  ["Iniciá sesión para seguir a otros usuarios.","Log in to follow other users.","Entre para seguir outros usuários.","Connecte-toi pour suivre d'autres utilisateurs.","Melde dich an, um anderen zu folgen.","Accedi per seguire altri utenti."],
+  ["Iniciá sesión para agregar amigos.","Log in to add friends.","Entre para adicionar amigos.","Connecte-toi pour ajouter des amis.","Melde dich an, um Freunde hinzuzufügen.","Accedi per aggiungere amici."],
+  ["Iniciá sesión para chatear.","Log in to chat.","Entre para conversar.","Connecte-toi pour discuter.","Melde dich an, um zu chatten.","Accedi per chattare."],
+  ["Iniciá sesión para publicar.","Log in to post.","Entre para publicar.","Connecte-toi pour publier.","Melde dich an, um zu posten.","Accedi per pubblicare."],
+  ["Iniciá sesión para comentar.","Log in to comment.","Entre para comentar.","Connecte-toi pour commenter.","Melde dich an, um zu kommentieren.","Accedi per commentare."],
+  ["Iniciá sesión para subir videos.","Log in to upload videos.","Entre para enviar vídeos.","Connecte-toi pour mettre en ligne des vidéos.","Melde dich an, um Videos hochzuladen.","Accedi per caricare video."],
+  ["Iniciá sesión para usar esta función.","Log in to use this feature.","Entre para usar este recurso.","Connecte-toi pour utiliser cette fonction.","Melde dich an, um diese Funktion zu nutzen.","Accedi per usare questa funzione."]
+];
+const PATTERNS = [   // textos con partes variables: [regex, plantilla por idioma (mismo orden que ORDER)]
+  [/^por (.+)$/, ["", "by $1", "por $1", "par $1", "von $1", "di $1"]],
+  [/^👁 (\d+) jugadas$/, ["", "👁 $1 plays", "👁 $1 jogadas", "👁 $1 parties", "👁 $1 Spiele", "👁 $1 partite"]],
+  [/^Resultados: (.+)$/, ["", "Results: $1", "Resultados: $1", "Résultats : $1", "Ergebnisse: $1", "Risultati: $1"]]
+];
+const DICT = {};
+ORDER.slice(1).forEach((l, i) => { const m = new Map(); ROWS.forEach(r => m.set(r[0], r[i + 1])); DICT[l] = m; });
+
+let LANG = 'es';
+try { const s = localStorage.getItem('crix_lang'); if (s && LANGS[s]) LANG = s; } catch (_) {}
+
+function trStr(src, lang) {
+  if (lang === 'es') return src;
+  const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(src), core = m[2];
+  if (!core) return src;
+  let out = DICT[lang].get(core);
+  if (out === undefined) {
+    const idx = ORDER.indexOf(lang);
+    for (const [re, tpl] of PATTERNS) if (re.test(core)) { out = core.replace(re, tpl[idx]); break; }
+  }
+  return out === undefined ? src : m[1] + out + m[3];
+}
+window.crixT = s => trStr(String(s), LANG);
+
+const ATTRS = ['placeholder', 'title', 'aria-label'];
+const textRec = new WeakMap(), attrRec = new WeakMap();
+const skipEl = el => !el || !!(el.closest && el.closest('script,style,textarea,pre,code,#code-ta,#code-hl,#game-wrap,.no-i18n'));
+function doText(n) {
+  const p = n.parentElement; if (!p || skipEl(p)) return;
+  const v = n.nodeValue; if (!/\S/.test(v)) return;
+  const r = textRec.get(n), src = (r && v === r.out) ? r.src : v, out = trStr(src, LANG);
+  if (out !== v) n.nodeValue = out;
+  textRec.set(n, { src, out });
+}
+function doAttrs(el) {
+  if (skipEl(el)) return;
+  let rec = attrRec.get(el);
+  for (const a of ATTRS) {
+    if (!el.hasAttribute(a)) continue;
+    const v = el.getAttribute(a), r = rec && rec[a], src = (r && v === r.out) ? r.src : v, out = trStr(src, LANG);
+    if (out !== v) el.setAttribute(a, out);
+    if (!rec) { rec = {}; attrRec.set(el, rec); }
+    rec[a] = { src, out };
+  }
+}
+function walk(root) {
+  if (root.nodeType === 3) { doText(root); return; }
+  if (root.nodeType !== 1) return;
+  doAttrs(root);
+  const tw = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  let n; while ((n = tw.nextNode())) { if (n.nodeType === 3) doText(n); else doAttrs(n); }
+}
+const observer = new MutationObserver(list => {
+  for (const m of list) {
+    if (m.type === 'childList') m.addedNodes.forEach(walk);
+    else if (m.type === 'characterData') doText(m.target);
+    else if (m.type === 'attributes') doAttrs(m.target);
+  }
+});
+function fillLangSelects() {
+  document.querySelectorAll('select[data-lang-sel]').forEach(sel => {
+    if (!sel.options.length) ORDER.forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = LANGS[k]; sel.appendChild(o); });
+    sel.value = LANG;
+  });
+}
+function setLang(l) {
+  if (!LANGS[l]) return;
+  LANG = l;
+  try { localStorage.setItem('crix_lang', l); } catch (_) {}
+  document.documentElement.lang = l;
+  observer.disconnect();
+  walk(document.body);
+  if (l !== 'es') observer.observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:ATTRS });
+  fillLangSelects();
+  renderGoogleButton();
+}
+window.setLang = setLang;
+['alert', 'confirm', 'prompt'].forEach(k => { const o = window[k].bind(window); window[k] = (m, ...r) => o(typeof m === 'string' ? trStr(m, LANG) : m, ...r); });
+
+/* ── Modo invitado (solo lectura) ─────────────────────────────────────
+   Los datos públicos se guardan SOLO en memoria: no pisan la caché de ninguna cuenta real. */
+let GUEST = false;
+const GUEST_KEYS = { users:1, maps:1, crix_videos:1, crix_posts:1 };
+const GUEST_MEM = {};
+const _get = DB.get.bind(DB), _set = DB.set.bind(DB), _del = DB.del.bind(DB);
+DB.get = k => { if (GUEST) { if (k === 'token' || k === 'session') return null; if (GUEST_KEYS[k]) return k in GUEST_MEM ? GUEST_MEM[k] : null; } return _get(k); };
+DB.set = (k, v) => { if (GUEST) { if (GUEST_KEYS[k]) { GUEST_MEM[k] = JSON.parse(JSON.stringify(v)); return true; } if (k === 'token' || k === 'session') return true; } return _set(k, v); };
+DB.del = k => { if (GUEST) { if (GUEST_KEYS[k]) { delete GUEST_MEM[k]; return; } if (k === 'token' || k === 'session') return; } _del(k); };
+
+const BLOCK = {
+  playMap:'Iniciá sesión para jugar.', joinUserGame:'Iniciá sesión para jugar.', joinFriendGame:'Iniciá sesión para jugar.',
+  createNewGame:'Iniciá sesión para crear juegos.', createNewApp:'Iniciá sesión para crear juegos.', handleUpload:'Iniciá sesión para crear juegos.',
+  editMap:'Iniciá sesión para editar.', deleteMap:'Iniciá sesión para editar.', editProfile:'Iniciá sesión para editar.', openAvatarEditor:'Iniciá sesión para editar.',
+  toggleLike:'Iniciá sesión para dar me gusta.', toggleVideoLike:'Iniciá sesión para dar me gusta.',
+  toggleFollow:'Iniciá sesión para seguir a otros usuarios.',
+  sendFriendRequest:'Iniciá sesión para agregar amigos.', addFriend:'Iniciá sesión para agregar amigos.',
+  openConvWith:'Iniciá sesión para chatear.', sendMsg:'Iniciá sesión para chatear.', startCall:'Iniciá sesión para chatear.',
+  submitPost:'Iniciá sesión para publicar.', attachPostImage:'Iniciá sesión para publicar.',
+  submitVideoComment:'Iniciá sesión para comentar.',
+  openUploadVideo:'Iniciá sesión para subir videos.', confirmUploadVideo:'Iniciá sesión para subir videos.', uploadVideoFile:'Iniciá sesión para subir videos.', uploadVideoFileWhole:'Iniciá sesión para subir videos.'
+};
+function gate(msg) { document.getElementById('gate-msg').textContent = msg || 'Iniciá sesión para usar esta función.'; openModal('mo-guest-gate'); }
+Object.keys(BLOCK).forEach(name => {
+  const f = window[name]; if (typeof f !== 'function') return;
+  window[name] = function (...a) { if (GUEST) { gate(BLOCK[name]); return; } return f.apply(this, a); };
+});
+const _goTab = window.goTab;
+window.goTab = function (t, extra) {
+  if (GUEST) {
+    if (t === 'studio' || t === 'msg') { gate(); return; }
+    if (t === 'profile' && (!extra || extra === 'guest')) { openSettings(); return; }
+  }
+  return _goTab.call(this, t, extra);
+};
+const _saveMe = window.saveMe;
+window.saveMe = function () { if (GUEST) return; return _saveMe.apply(this, arguments); };
+
+async function guestLoad() {
+  const get = url => apiRequest(url, { token:'' }).catch(() => null);
+  const [u, m, v, p] = await Promise.all([get('/api/users'), get('/api/maps'), get('/api/videos'), get('/api/posts')]);
+  DB.set('users', (u && u.users) || {}); DB.set('maps', (m && m.maps) || {});
+  DB.set('crix_videos', (v && v.videos) || []); DB.set('crix_posts', (p && p.posts) || []);
+}
+window.enterGuestMode = async function () {
+  if (GUEST) return;
+  const btn = document.getElementById('btn-guest'); if (btn) btn.disabled = true;
+  GUEST = true;
+  ME = { id:'guest', username:'Invitado', color:'#5b8def', guest:true, friends:[], games:[], visits:0, bio:'', following:[], liked:[], friendRequests:[] };
+  document.body.classList.add('is-guest');
+  await guestLoad();
+  document.getElementById('s-auth').classList.remove('active');
+  document.getElementById('nav').style.display = 'flex';
+  try { updateOwnAvatar(); } catch (_) {}
+  const mine = document.getElementById('grid-mine'); if (mine) { mine.style.display = 'none'; if (mine.previousElementSibling) mine.previousElementSibling.style.display = 'none'; }
+  const up = document.getElementById('upload-file'); if (up && up.closest('label')) up.closest('label').style.display = 'none';
+  const cmp = document.getElementById('compose-text'); if (cmp) { const box = cmp.closest('div[style*="background:var(--bg2)"]'); if (box) box.style.display = 'none'; }
+  document.getElementById('nav-login-btn').style.display = '';
+  goTab('home');
+  if (!window.__crixRouteDone) { window.__crixRouteDone = true; setTimeout(() => { try { crixOpenRoute(CRIX_BOOT_ROUTE); } catch (_) {} finally { window.__crixReady = true; } }, 150); }
+  if (btn) btn.disabled = false;
+};
+window.leaveGuest = function () { location.reload(); };
+
+/* ── Configuración ── */
+window.openSettings = function () {
+  const box = document.getElementById('set-account');
+  if (GUEST) {
+    box.innerHTML = '<div class="set-note">Estás en modo invitado: podés mirar juegos, videos y foros, pero no crear ni jugar.</div><button class="btn btn-p" onclick="leaveGuest()">🔑 Iniciar sesión o registrarme</button>';
+  } else if (ME) {
+    box.innerHTML = '<div class="set-note"><span>Sesión iniciada como</span> <b></b></div><button class="btn btn-red" onclick="closeModal(\'mo-settings\');logout()">← Cerrar sesión</button>';
+    box.querySelector('b').textContent = ME.username;
+  } else box.innerHTML = '';
+  fillLangSelects();
+  openModal('mo-settings');
+};
+
+/* ── Acceso con Google (necesita GOOGLE_CLIENT_ID en el servidor) ── */
+let gReady = false;
+function renderGoogleButton() {
+  if (!gReady || !window.google || !google.accounts) return;
+  const w = document.getElementById('google-btn-wrap'); if (!w) return;
+  const card = w.closest('.auth-card'), width = Math.min(320, Math.max(200, (card ? card.clientWidth : 340) - 56));
+  w.style.display = 'flex'; w.innerHTML = '';
+  google.accounts.id.renderButton(w, { theme:'filled_black', size:'large', shape:'pill', text:'continue_with', width, locale:GLOC[LANG] || 'es' });
+}
+async function onGoogleCredential(resp) {
+  try {
+    const r = await apiRequest('/api/google', { method:'POST', body:{ credential:resp.credential }, token:'' });
+    loginAs(r.user, r.token, null, '');
+  } catch (e) { authErr(e.message); }
+}
+async function initGoogle() {
+  let cid = '';
+  try { const r = await fetch('/api/config').then(x => x.json()); cid = (r && r.googleClientId) || ''; } catch (_) {}
+  if (!cid) return;
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+  s.onload = () => { try { google.accounts.id.initialize({ client_id:cid, callback:onGoogleCredential }); gReady = true; renderGoogleButton(); } catch (e) { console.warn('[GOOGLE]', e); } };
+  document.head.appendChild(s);
+}
+
+fillLangSelects();
+if (LANG !== 'es') setLang(LANG);
+initGoogle();
+})();
+
 </script>
 </body>
 </html>
