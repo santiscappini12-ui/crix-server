@@ -1,10 +1,10 @@
 // Clasificación de medios (juegos, apps y videos) según el país de quien los sube.
 //
 // Regla de Crix: solo lo ILEGAL está prohibido. Todo lo demás se puede subir, pero hay que decir qué contiene
-// (cuestionario estilo IARC) para que el medio lleve una clasificación por edad en el sistema de tu país.
+// (cuestionario propio de Crix, inspirado en los cuestionarios de edad habituales) para que el medio lleve una clasificación por edad en el sistema de tu país.
 //   1) Bloque legal: si algo es ilegal (en todo el mundo o en tu país) el medio no se sube.
 //   2) Bloque de contenido: violencia, sexo, lenguaje, drogas... → edad mínima + descriptores.
-//   3) La edad se traduce a la etiqueta de tu país (PEGI, ESRB, USK, ClassInd, CERO, GRAC, ACB, etc.).
+//   3) La edad se traduce a la insignia Crix de tu país (Crix AR, Crix EUU, Crix EU, Crix BR, Crix JP...).
 // Se clasifica el medio ENTERO (un video, un juego completo con sus texturas y todo), no cada textura.
 //
 // El servidor recalcula siempre la clasificación a partir de las respuestas: el cliente nunca decide la etiqueta.
@@ -12,26 +12,27 @@ const crypto = require('crypto');
 
 const VERSION = 1;
 const KINDS = ['video', 'game', 'app'];
-const TIERS = [0, 7, 12, 16, 18];   // edades mínimas internas (equivalen a la escala genérica de IARC)
+const TIERS = [0, 7, 12, 16, 18];   // edades mínimas internas (escala genérica de Crix)
 
 // ── Sistemas de clasificación: una etiqueta por tramo de edad [0, 7, 12, 16, 18] ──
-// Son equivalencias orientativas calculadas a partir del cuestionario, no una clasificación oficial.
+// Son sistemas PROPIOS de Crix ("Crix AR", "Crix EUU"...), pensados a partir de las edades que suele usar cada región.
+// No son clasificaciones oficiales ni usan logos, nombres ni sellos de ningún organismo. Si más adelante un organismo
+// autoriza el uso de su sello, se agrega aparte (ver README). El dibujo de cada insignia está en index.html (CLS_SYS);
+// si cambiás nombres o etiquetas acá, actualizá también esa tabla.
 const SYSTEMS = {
-  GENERIC:   { name: 'Genérica (IARC)',           labels: ['Todos', '7+', '12+', '16+', '18+'] },
-  ESRB:      { name: 'ESRB',                      labels: ['E', 'E10+', 'T', 'M 17+', 'AO 18+'] },
-  PEGI:      { name: 'PEGI',                      labels: ['PEGI 3', 'PEGI 7', 'PEGI 12', 'PEGI 16', 'PEGI 18'] },
-  USK:       { name: 'USK',                       labels: ['USK 0', 'USK 6', 'USK 12', 'USK 16', 'USK 18'] },
-  CLASSIND:  { name: 'ClassInd',                  labels: ['L', '10', '12', '16', '18'] },
-  CERO:      { name: 'CERO',                      labels: ['A', 'A', 'B 12+', 'D 17+', 'Z 18+'] },
-  GRAC:      { name: 'GRAC',                      labels: ['ALL', '12', '12', '15', '18'] },
-  // Íconos de la clasificación de publicaciones de Australia: Unrestricted / M / Category 1 / Category 2 (esta última, solo sexo explícito).
-  ACB:       { name: 'ACB',                      labels: ['Unrestricted', 'Unrestricted', 'M', 'M', 'Category 1'], explicit: { label: 'Category 2', icon: 'C' } },
-  // RTC México: "D" es solo para contenido pornográfico (sexo explícito).
-  MX:        { name: 'RTC (México)',              labels: ['A', 'A', 'B', 'B15', 'C'], explicit: { label: 'D', icon: 'D' } },
-  // Régimen INCAA vigente desde 2026 (Res. Conjunta 1/2026): G, SP, R-13, R-17 y C. "C" es solo para contenido pornográfico (sexo explícito).
-  AR:        { name: 'INCAA (Argentina)',         labels: ['G', 'SP', 'R-13', 'R-17', 'R-17'], explicit: { label: 'C', icon: 'C' } },
-  CL:        { name: 'CCC (Chile)',               labels: ['TE', '+8', '+14', '+18', '+18'] },
-  CO:        { name: 'MinCultura (Colombia)',     labels: ['Todos', '7+', '12+', '18+', '18+'] },
+  GENERIC:   { name: 'Crix Global',   labels: ['Todos', '7+', '12+', '16+', '18+'] },
+  ESRB:      { name: 'Crix EUU',      labels: ['Todos', '10+', '13+', '17+', '18+'] },   // EE. UU., Canadá y Puerto Rico
+  PEGI:      { name: 'Crix EU',       labels: ['3+', '7+', '12+', '16+', '18+'] },       // Europa
+  USK:       { name: 'Crix DE',       labels: ['0+', '6+', '12+', '16+', '18+'] },
+  CLASSIND:  { name: 'Crix BR',       labels: ['Livre', '10+', '12+', '16+', '18+'] },
+  CERO:      { name: 'Crix JP',       labels: ['Todos', 'Todos', '12+', '17+', '18+'] },
+  GRAC:      { name: 'Crix KR',       labels: ['Todos', '12+', '12+', '15+', '18+'] },
+  ACB:       { name: 'Crix AU',       labels: ['Todos', 'Todos', '15+', '15+', '18+'],  explicit: { label: '18+ Explícito', icon: 'X' } },
+  // En México, Argentina y Australia el sexo explícito tiene una categoría aparte.
+  MX:        { name: 'Crix MX',       labels: ['Todos', 'Todos', '12+', '15+', '18+'],  explicit: { label: '18+ Explícito', icon: 'X' } },
+  AR:        { name: 'Crix AR',       labels: ['Todos', 'Todos', '13+', '17+', '17+'],  explicit: { label: '18+ Explícito', icon: 'X' } },
+  CL:        { name: 'Crix CL',       labels: ['Todos', '8+', '14+', '18+', '18+'] },
+  CO:        { name: 'Crix CO',       labels: ['Todos', '7+', '12+', '18+', '18+'] },
 };
 
 // código ISO → [nombre, sistema]
@@ -229,7 +230,7 @@ function evaluate(input, lang) {
   const tierIdx = TIERS.indexOf(tier);
   const [countryName, systemId] = COUNTRIES[country];
   const system = SYSTEMS[systemId];
-  const explicitSex = descriptors.has('sexual_explicit');   // algunos sistemas (INCAA: "C") tienen una etiqueta aparte para sexo explícito
+  const explicitSex = descriptors.has('sexual_explicit');   // algunos sistemas (AR, MX, AU) tienen una etiqueta aparte para sexo explícito
   return {
     ok: true,
     result: {

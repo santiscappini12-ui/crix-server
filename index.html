@@ -474,7 +474,9 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 .cls-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px}.cls-chips span{font-size:11px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
 .cls-a0{background:#2f9e5f;color:#fff}.cls-a7{background:#2b9aa8;color:#fff}.cls-a12{background:#e5b22a;color:#1b1b1b}.cls-a16{background:#e8782a;color:#fff}.cls-a18{background:#d93a3a;color:#fff}
 .cls-badge{display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:3px 6px;border-radius:5px;margin-left:6px;vertical-align:middle;white-space:nowrap}
-.cls-icon{height:32px;width:auto;margin-left:6px;vertical-align:middle;border-radius:3px}
+.cls-icon{height:32px;width:29px;margin-left:6px;vertical-align:middle}
+.cls-icon text{fill:#fff;text-anchor:middle;font-family:var(--display),system-ui,sans-serif;font-weight:900}.cls-icon .cc{letter-spacing:.3px;opacity:.9}
+.cls-s0 .sh{fill:#2f9e5f}.cls-s7 .sh{fill:#2b9aa8}.cls-s12 .sh{fill:#e5b22a}.cls-s16 .sh{fill:#e8782a}.cls-s18 .sh{fill:#d93a3a}.cls-s12 text{fill:#1b1b1b}
 .cls-badge.cls-none{background:var(--bg3);color:var(--text3);border:1px dashed var(--border)}
 </style>
 </head>
@@ -1920,7 +1922,7 @@ function clsRender() {
   } else if (c.view === 'result') {
     const r = c.result;
     h += '<div class="cls-result"><div class="cls-big cls-a' + r.age + '">' + esc(r.label) + '</div>' +
-      '<div class="cls-rt">' + esc(clsT('resultIn', { c: r.countryName })) + ' · ' + esc(r.systemName) + '</div>' +
+      '<div class="cls-rt">' + esc(clsT('resultIn', { c: r.countryName })) + ' · ' + esc(clsSysName(r)) + '</div>' +
       '<div class="cls-rt">' + clsT('minAge') + ': <b>' + (r.age ? r.age + '+' : clsT('all')) + '</b></div>' +
       (r.descriptorLabels.length ? '<div class="cls-chips">' + r.descriptorLabels.map(d => '<span>' + esc(d) + '</span>').join('') + '</div>' : '') + '</div>' +
       '<div class="cls-note">' + clsT('approx') + '</div>' +
@@ -1952,15 +1954,51 @@ async function clsSubmit() {
 function clsConfirm() { const c = _cls; if (!c || !c.result) return; try { localStorage.setItem('crix_country', c.result.country); } catch (_) {} clsFinish(c.result); }
 
 // Insignia de clasificación (tarjetas, página del juego, reproductor). El autor ve "Sin clasificar" en lo que todavía no tiene.
+// Insignias propias de Crix: cada país tiene su forma. Son dibujos nuestros (SVG), no logos de ningún organismo.
+// n = nombre, c = código corto, s = forma, l = etiquetas por tramo [0, 7, 12, 16, 18] (mantener igual que SYSTEMS en classification.js).
+const CLS_SHAPES = {
+  circle:  '<circle class="sh" cx="18" cy="20" r="17"/>',
+  ring:    '<circle class="sh" cx="18" cy="20" r="17"/><circle cx="18" cy="20" r="13.5" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.2"/>',
+  shield:  '<path class="sh" d="M18 2 L33 7 V20 C33 30 26 36 18 39 C10 36 3 30 3 20 V7 Z"/>',
+  hexagon: '<path class="sh" d="M18 2 L33 11 V29 L18 38 L3 29 V11 Z"/>',
+  square:  '<rect class="sh" x="3" y="4" width="30" height="32" rx="8"/>',
+  diamond: '<path class="sh" d="M18 1 L35 20 L18 39 L1 20 Z"/>',
+  octagon: '<path class="sh" d="M12 3 H24 L33 12 V28 L24 37 H12 L3 28 V12 Z"/>',
+  pentagon:'<path class="sh" d="M18 2 L34 14 L28 36 H8 L2 14 Z"/>',
+  pill:    '<rect class="sh" x="2" y="6" width="32" height="28" rx="14"/>',
+  banner:  '<path class="sh" d="M4 3 H32 V28 L18 38 L4 28 Z"/>',
+  arch:    '<path class="sh" d="M3 38 V16 Q3 2 18 2 Q33 2 33 16 V38 Z"/>',
+  hex2:    '<path class="sh" d="M10 2 H26 L34 20 L26 38 H10 L2 20 Z"/>'
+};
+const CLS_SYS = {
+  GENERIC:  { n: 'Crix Global', c: 'GL', s: 'circle',   l: ['Todos', '7+', '12+', '16+', '18+'] },
+  ESRB:     { n: 'Crix EUU',    c: 'EUU', s: 'shield',  l: ['Todos', '10+', '13+', '17+', '18+'] },
+  PEGI:     { n: 'Crix EU',     c: 'EU', s: 'hexagon',  l: ['3+', '7+', '12+', '16+', '18+'] },
+  USK:      { n: 'Crix DE',     c: 'DE', s: 'square',   l: ['0+', '6+', '12+', '16+', '18+'] },
+  CLASSIND: { n: 'Crix BR',     c: 'BR', s: 'diamond',  l: ['Livre', '10+', '12+', '16+', '18+'] },
+  CERO:     { n: 'Crix JP',     c: 'JP', s: 'octagon',  l: ['Todos', 'Todos', '12+', '17+', '18+'] },
+  GRAC:     { n: 'Crix KR',     c: 'KR', s: 'pentagon', l: ['Todos', '12+', '12+', '15+', '18+'] },
+  ACB:      { n: 'Crix AU',     c: 'AU', s: 'pill',     l: ['Todos', 'Todos', '15+', '15+', '18+'] },
+  MX:       { n: 'Crix MX',     c: 'MX', s: 'banner',   l: ['Todos', 'Todos', '12+', '15+', '18+'] },
+  AR:       { n: 'Crix AR',     c: 'AR', s: 'ring',     l: ['Todos', 'Todos', '13+', '17+', '17+'] },
+  CL:       { n: 'Crix CL',     c: 'CL', s: 'arch',     l: ['Todos', '8+', '14+', '18+', '18+'] },
+  CO:       { n: 'Crix CO',     c: 'CO', s: 'hex2',     l: ['Todos', '7+', '12+', '18+', '18+'] }
+};
+function clsSysName(c) { return (CLS_SYS[c && c.system] || {}).n || (c && c.systemName) || ''; }
+// Insignia de clasificación (tarjetas, página del juego, reproductor). El autor ve "Sin clasificar" en lo que todavía no tiene.
 function clsBadge(rec, showUnrated) {
   const c = rec && rec.classification;
   if (c && c.label) {
-    const age = Number(c.age) || 0, tip = esc((c.systemName || '') + ' · ' + (c.countryName || '') + ' · ' + c.label);
-    const txt = '<span class="cls-badge cls-a' + age + '" title="' + tip + '">' + esc(c.label) + '</span>';
-    // Ícono oficial del sistema (p. ej. INCAA, PEGI, ESRB) desde /icons/ratings/<SISTEMA>-<edad>.png.
-    // Si el archivo no existe, se cae a la insignia de texto de siempre.
-    if (!c.system || !/^[A-Z]+$/.test(c.system)) return txt;
-    return '<img class="cls-icon" src="/icons/ratings/' + (/^[A-Z]+-(0|7|12|16|18|C|D)$/.test(c.icon || '') ? c.icon : c.system + '-' + age) + '.png" alt="' + esc(c.label) + '" title="' + tip + '" loading="lazy" onerror="this.outerHTML=decodeURIComponent(\'' + encodeURIComponent(txt).replace(/'/g, '%27') + '\')">';
+    const age = Number(c.age) || 0, sys = CLS_SYS[c.system];
+    const explicit = /-X$|-[CD]$/.test(c.icon || '');
+    // Etiqueta propia de Crix según el sistema y el tramo (también para clasificaciones guardadas con etiquetas viejas).
+    const label = explicit ? '18+ Explícito' : (sys ? sys.l[[0, 7, 12, 16, 18].indexOf(age)] : null) || (age ? age + '+' : 'Todos');
+    const tip = esc(clsSysName(c) + ' · ' + (c.countryName || '') + ' · ' + label);
+    if (!sys) return '<span class="cls-badge cls-a' + age + '" title="' + tip + '">' + esc(label) + '</span>';
+    const num = explicit ? '18' : ((label.match(/\d+/) || [])[0] || (label === 'Livre' ? 'L' : 'T'));
+    return '<svg class="cls-icon cls-s' + age + '" viewBox="0 0 36 40" width="29" height="32" role="img" aria-label="' + tip + '"><title>' + tip + '</title>' +
+      CLS_SHAPES[sys.s] + '<text x="18" y="12.5" font-size="7" class="cc">' + sys.c + '</text><text x="18" y="29" font-size="' + (num.length > 1 ? 15 : 17) + '" class="nn">' + num + '</text>' +
+      (explicit ? '<text x="18" y="36" font-size="6" class="cc">XXX</text>' : '') + '</svg>';
   }
   return showUnrated ? '<span class="cls-badge cls-none">' + clsT('unrated') + '</span>' : '';
 }
@@ -1982,7 +2020,7 @@ async function clsReclassify(id) {
   showToast(clsT('saved', { l: c.label }));
 }
 // Línea de clasificación dentro de la ventana de publicar juego.
-function pubClsRefresh() { const el = document.getElementById('pub-cls-badge'); if (!el) return; el.innerHTML = pubClass ? clsBadge({ classification: pubClass }) + ' <span style="color:var(--text2)">' + esc(pubClass.systemName + ' · ' + pubClass.countryName) + '</span>' : esc(clsT('pending')); }
+function pubClsRefresh() { const el = document.getElementById('pub-cls-badge'); if (!el) return; el.innerHTML = pubClass ? clsBadge({ classification: pubClass }) + ' <span style="color:var(--text2)">' + esc(clsSysName(pubClass) + ' · ' + pubClass.countryName) + '</span>' : esc(clsT('pending')); }
 async function pubClassify() { const m = getMaps()[stMapId]; const c = await classifyMedia(m && m.kind === 'app' ? 'app' : 'game', pubClass); if (c) { pubClass = c; pubClsRefresh(); } }
 
 async function uploadMapWithRetry(id) {

@@ -60,14 +60,14 @@ Sin estas variables Crix funciona como antes, solo con disco local.
 
 ## Clasificación de medios por país
 
-Crix solo prohíbe lo **ilegal**. Antes de subir un video, un juego o una app hay que completar un cuestionario (estilo IARC) para que el medio lleve la clasificación por edad del sistema de **tu país** (PEGI, ESRB, USK, ClassInd, CERO, GRAC, ACB, RTC, INCAA, etc.). Se clasifica el medio **entero** (un video, o un juego completo con sus texturas y sonidos), nunca cada textura o archivo suelto.
+Crix solo prohíbe lo **ilegal**. Antes de subir un video, un juego o una app hay que completar un cuestionario propio de Crix para que el medio lleve la insignia de edad de **tu país**: Crix AR, Crix EUU, Crix EU, Crix DE, Crix BR, Crix JP, Crix KR, Crix AU, Crix MX, Crix CL, Crix CO, o Crix Global para el resto. Cada una tiene su propia forma y código. Se clasifica el medio **entero** (un video, o un juego completo con sus texturas y sonidos), nunca cada textura o archivo suelto.
 
 - **Legalidad:** si se responde "sí" a algo ilegal (contenido sexual con menores, imágenes íntimas sin consentimiento, terrorismo, amenazas/doxxing, malware) o "no" a "tengo los derechos", el medio **no se sube**. Algunos países agregan preguntas propias (p. ej. símbolos nazis y negación del Holocausto en Alemania/Austria).
 - **Contenido:** violencia, miedo, sexo y desnudez, lenguaje, discriminación, drogas, apuestas, compras con dinero real, interacción entre usuarios y público infantil. La edad mínima sale de la respuesta más alta (0, 7, 12, 16, 18). Lo explícito para adultos se permite, pero queda como **18+** y pide confirmar la mayoría de edad al abrirlo.
 - **País:** se detecta con las cabeceras del hosting (`CF-IPCountry`, `X-Vercel-IP-Country`, `X-AppEngine-Country`…) y, si no hay, con APIs públicas de geolocalización por IP (`ipwho.is`, `ipapi.co`, `country.is`, con caché de 24 h). La persona puede cambiarlo.
 - **APIs:** `GET /api/classification/config` (preguntas y países, `?kind=video|game|app&lang=es|en`), `GET /api/classification/geo` y `POST /api/classification/evaluate` (calcula la etiqueta o responde `422` si es ilegal).
 - **Obligatorio en el servidor:** `POST /api/videos` rechaza un video nuevo sin clasificación válida; `POST /api/maps` recalcula siempre la clasificación desde las respuestas (el cliente nunca decide la etiqueta). Un juego o app **nuevo** sin clasificar queda como borrador oculto (solo lo ven su autor, colaboradores y admins) hasta que se clasifique con 🏷️. Lo publicado antes de esta función sigue visible y se puede clasificar cuando su autor quiera.
-- Las etiquetas son equivalencias **orientativas** calculadas con el cuestionario, no una clasificación oficial. Las preguntas están en español e inglés (los demás idiomas usan inglés). Para agregar países, sistemas o preguntas, editá `classification.js`.
+- Las insignias son **propias de Crix**: dibujos nuestros (SVG, en `index.html`, tabla `CLS_SYS`), sin logos, sellos ni nombres de organismos de clasificación. No son una clasificación oficial ni dicen serlo. Si un organismo autoriza el uso de su sello, se agrega aparte. Las preguntas están en español e inglés (los demás idiomas usan inglés). Para agregar países, sistemas o preguntas, editá `classification.js` (y `CLS_SYS` en `index.html` para el dibujo).
 
 ## Notificaciones (PWA)
 
