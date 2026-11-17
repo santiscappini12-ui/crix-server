@@ -9,6 +9,7 @@
 //
 // El servidor recalcula siempre la clasificación a partir de las respuestas: el cliente nunca decide la etiqueta.
 const crypto = require('crypto');
+const I18N = require('./classification-i18n');   // traducciones a pt, fr, de, it
 
 const VERSION = 1;
 const KINDS = ['video', 'game', 'app'];
@@ -163,8 +164,16 @@ const DESCRIPTORS = {
   kids:             T('Para niños', 'For children'),
 };
 
-const pick = (obj, lang) => (lang === 'es' ? obj.es : obj.en);
-const langOf = l => (String(l || '').toLowerCase().startsWith('es') ? 'es' : 'en');
+// Idiomas: es y en están escritos en este archivo; pt, fr, de, it vienen de classification-i18n.js (si falta una traducción, inglés).
+const LANGS = ['es', 'en', ...I18N.LANGS];
+const langOf = l => { const c = String(l || '').toLowerCase().slice(0, 2); return LANGS.includes(c) ? c : 'en'; };
+const tr = (table, en, lang) => (table[en] && table[en][I18N.LANGS.indexOf(lang)]) || en;
+const pick = (obj, lang) => (lang === 'es' ? obj.es : lang === 'en' ? obj.en : tr(I18N.TR, obj.en, lang));
+const countryLabel = (code, name, lang) => {
+  if (lang === 'es') return name;
+  if (code === 'ZZ') return I18N.OTHER_COUNTRY[lang];
+  try { return new Intl.DisplayNames([lang], { type: 'region' }).of(code) || name; } catch { return name; }
+};
 
 function legalFor(country) { return [...LEGAL_COMMON, ...(LEGAL_EXTRA[country] || [])]; }
 function questionsFor(kind) { return CONTENT.filter(q => !q.only || q.only.includes(kind)); }
@@ -175,8 +184,8 @@ function publicConfig(kind, lang) {
   const k = KINDS.includes(kind) ? kind : 'game';
   return {
     version: VERSION,
-    countries: Object.entries(COUNTRIES).map(([code, [name, system]]) => ({ code, name, system, systemName: SYSTEMS[system].name }))
-      .sort((a, b) => (a.code === 'ZZ') - (b.code === 'ZZ') || a.name.localeCompare(b.name, 'es')),
+    countries: Object.entries(COUNTRIES).map(([code, [name, system]]) => ({ code, name: countryLabel(code, name, l), system, systemName: SYSTEMS[system].name }))
+      .sort((a, b) => (a.code === 'ZZ') - (b.code === 'ZZ') || a.name.localeCompare(b.name, l)),
     legalCommon: LEGAL_COMMON.map(x => ({ id: x.id, text: pick(x.text, l) })),
     legalExtra: Object.fromEntries(Object.entries(LEGAL_EXTRA).map(([c, list]) => [c, list.map(x => ({ id: x.id, text: pick(x.text, l) }))])),
     rights: { id: LEGAL_RIGHTS.id, text: pick(LEGAL_RIGHTS.text, l) },
@@ -189,7 +198,7 @@ function publicConfig(kind, lang) {
 // Devuelve { ok:true, result } o { ok:false, code, err, reasons? }.
 function evaluate(input, lang) {
   const l = langOf(lang);
-  const msg = (es, en) => (l === 'es' ? es : en);
+  const msg = (es, en) => (l === 'es' ? es : l === 'en' ? en : tr(I18N.MSG, en, l));
   const fail = (code, es, en, reasons) => ({ ok: false, code, err: msg(es, en), reasons });
   if (!input || typeof input !== 'object') return fail('CLASSIFICATION_REQUIRED', 'Falta completar el cuestionario de clasificación.', 'The classification questionnaire is required.');
   const kind = KINDS.includes(input.kind) ? input.kind : null;
@@ -230,7 +239,8 @@ function evaluate(input, lang) {
   }
   const tier = TIERS.find(t => t >= age) ?? 18;
   const tierIdx = TIERS.indexOf(tier);
-  const [countryName, systemId] = COUNTRIES[country];
+  const [countryNameEs, systemId] = COUNTRIES[country];
+  const countryName = countryLabel(country, countryNameEs, l);
   const system = SYSTEMS[systemId];
   const explicitSex = descriptors.has('sexual_explicit');   // algunos sistemas (AR, MX, AU) tienen una etiqueta aparte para sexo explícito
   return {

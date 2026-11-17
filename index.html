@@ -1845,7 +1845,7 @@ const CLS_UI = {
     decl:'Declaro que mis respuestas son verdaderas y que este contenido es legal en {c}.', approx:'Es una equivalencia orientativa que sale de tus respuestas; no reemplaza una clasificación oficial.',
     resultIn:'Clasificación en {c}', minAge:'Edad mínima', all:'Todo público', blockedTitle:'No se puede subir', missing:'Respondé todas las preguntas.', needCountry:'Elegí tu país.', needDecl:'Marcá la declaración para continuar.',
     loading:'Cargando cuestionario…', loadFail:'No se pudo cargar el cuestionario', calcFail:'No se pudo calcular la clasificación', needBefore:'Hace falta completar la clasificación para subirlo.',
-    draft:'Queda como borrador: nadie más lo ve hasta que lo clasifiques (🏷️).', adultGate:'Este contenido está clasificado {l} (solo adultos). ¿Confirmás que sos mayor de edad?', unrated:'Sin clasificar', classify:'Clasificar', classified:'Clasificación: {l}', pending:'Pendiente: se te pedirá al publicar', saved:'🏷️ Clasificación guardada: {l}', rejected:'No se pudo subir', adult:'Adultos' },
+    draft:'Queda como borrador: nadie más lo ve hasta que lo clasifiques (🏷️).', adultGate:'Este contenido está clasificado {l} (solo adultos). ¿Confirmás que sos mayor de edad?', unrated:'Sin clasificar', classify:'Clasificar', classified:'Clasificación: {l}', pending:'Pendiente: se te pedirá al publicar', saved:'🏷️ Clasificación guardada: {l}', rejected:'No se pudo subir', adult:'Adultos', explicit:'Explícito' },
   en: { title:'🏷️ Content rating', kind_video:'video', kind_game:'game', kind_app:'app',
     intro:'Crix only prohibits what is illegal. Answer this questionnaire so your {k} gets the rating used in your country. The whole item is rated (not each texture or loose file).',
     country:'Your country', detected:'Detected automatically: {c}', pick:'Choose…', legalTitle:'1. Legality', legalIntro:'If any of this is illegal in {c}, it cannot be uploaded.',
@@ -1853,9 +1853,41 @@ const CLS_UI = {
     decl:'I declare my answers are true and this content is legal in {c}.', approx:'This is an indicative equivalent based on your answers; it is not an official rating.',
     resultIn:'Rating in {c}', minAge:'Minimum age', all:'Everyone', blockedTitle:'It cannot be uploaded', missing:'Answer all the questions.', needCountry:'Choose your country.', needDecl:'Tick the declaration to continue.',
     loading:'Loading questionnaire…', loadFail:'Could not load the questionnaire', calcFail:'Could not calculate the rating', needBefore:'The rating questionnaire is required to upload it.',
-    draft:'It stays as a draft: nobody else sees it until you rate it (🏷️).', adultGate:'This content is rated {l} (adults only). Do you confirm you are of legal age?', unrated:'Unrated', classify:'Rate', classified:'Rating: {l}', pending:'Pending: you will be asked when publishing', saved:'🏷️ Rating saved: {l}', rejected:'Could not upload', adult:'Adults' },
+    draft:'It stays as a draft: nobody else sees it until you rate it (🏷️).', adultGate:'This content is rated {l} (adults only). Do you confirm you are of legal age?', unrated:'Unrated', classify:'Rate', classified:'Rating: {l}', pending:'Pending: you will be asked when publishing', saved:'🏷️ Rating saved: {l}', rejected:'Could not upload', adult:'Adults', explicit:'Explicit' },
+  pt: { title:'🏷️ Classificação do conteúdo', kind_video:'vídeo', kind_game:'jogo', kind_app:'app',
+    intro:'O Crix só proíbe o que é ilegal. Responda a este questionário para que o seu {k} receba a classificação usada no seu país. O item é classificado por inteiro (não cada textura ou arquivo solto).',
+    country:'Seu país', detected:'Detectado automaticamente: {c}', pick:'Escolha…', legalTitle:'1. Legalidade', legalIntro:'Se algo disso for ilegal em {c}, não pode ser enviado.',
+    contentTitle:'2. Conteúdo', yes:'Sim', no:'Não', calc:'Calcular classificação', cancel:'Cancelar', back:'← Corrigir', confirm:'Confirmar e continuar', close:'Fechar',
+    decl:'Declaro que minhas respostas são verdadeiras e que este conteúdo é legal em {c}.', approx:'É uma equivalência indicativa baseada nas suas respostas; não substitui uma classificação oficial.',
+    resultIn:'Classificação em {c}', minAge:'Idade mínima', all:'Livre', blockedTitle:'Não pode ser enviado', missing:'Responda a todas as perguntas.', needCountry:'Escolha o seu país.', needDecl:'Marque a declaração para continuar.',
+    loading:'Carregando questionário…', loadFail:'Não foi possível carregar o questionário', calcFail:'Não foi possível calcular a classificação', needBefore:'É preciso preencher a classificação para enviar.',
+    draft:'Fica como rascunho: ninguém mais vê até você classificar (🏷️).', adultGate:'Este conteúdo está classificado {l} (somente adultos). Você confirma que é maior de idade?', unrated:'Sem classificação', classify:'Classificar', classified:'Classificação: {l}', pending:'Pendente: será pedido ao publicar', saved:'🏷️ Classificação salva: {l}', rejected:'Não foi possível enviar', adult:'Adultos', explicit:'Explícito' },
+  fr: { title:'🏷️ Classification du contenu', kind_video:'vidéo', kind_game:'jeu', kind_app:'app',
+    intro:'Crix n’interdit que ce qui est illégal. Répondez à ce questionnaire pour que votre {k} reçoive la classification utilisée dans votre pays. L’élément est classé dans son ensemble (pas chaque texture ou fichier isolé).',
+    country:'Votre pays', detected:'Détecté automatiquement : {c}', pick:'Choisir…', legalTitle:'1. Légalité', legalIntro:'Si l’un de ces points est illégal en {c}, il ne peut pas être envoyé.',
+    contentTitle:'2. Contenu', yes:'Oui', no:'Non', calc:'Calculer la classification', cancel:'Annuler', back:'← Corriger', confirm:'Confirmer et continuer', close:'Fermer',
+    decl:'Je déclare que mes réponses sont véridiques et que ce contenu est légal en {c}.', approx:'Il s’agit d’une équivalence indicative basée sur vos réponses ; elle ne remplace pas une classification officielle.',
+    resultIn:'Classification en {c}', minAge:'Âge minimum', all:'Tout public', blockedTitle:'Impossible à envoyer', missing:'Répondez à toutes les questions.', needCountry:'Choisissez votre pays.', needDecl:'Cochez la déclaration pour continuer.',
+    loading:'Chargement du questionnaire…', loadFail:'Impossible de charger le questionnaire', calcFail:'Impossible de calculer la classification', needBefore:'La classification est nécessaire pour l’envoyer.',
+    draft:'Il reste en brouillon : personne d’autre ne le voit tant que vous ne l’avez pas classé (🏷️).', adultGate:'Ce contenu est classé {l} (adultes uniquement). Confirmez-vous être majeur ?', unrated:'Non classé', classify:'Classer', classified:'Classification : {l}', pending:'En attente : demandé lors de la publication', saved:'🏷️ Classification enregistrée : {l}', rejected:'Envoi impossible', adult:'Adultes', explicit:'Explicite' },
+  de: { title:'🏷️ Inhaltseinstufung', kind_video:'Video', kind_game:'Spiel', kind_app:'App',
+    intro:'Crix verbietet nur, was illegal ist. Beantworten Sie diesen Fragebogen, damit Ihr(e) {k} die in Ihrem Land übliche Einstufung erhält. Eingestuft wird das Ganze (nicht jede Textur oder Einzeldatei).',
+    country:'Ihr Land', detected:'Automatisch erkannt: {c}', pick:'Auswählen…', legalTitle:'1. Rechtmäßigkeit', legalIntro:'Wenn etwas davon in {c} illegal ist, kann es nicht hochgeladen werden.',
+    contentTitle:'2. Inhalt', yes:'Ja', no:'Nein', calc:'Einstufung berechnen', cancel:'Abbrechen', back:'← Korrigieren', confirm:'Bestätigen und fortfahren', close:'Schließen',
+    decl:'Ich erkläre, dass meine Antworten wahr sind und dieser Inhalt in {c} legal ist.', approx:'Dies ist eine unverbindliche Entsprechung auf Grundlage Ihrer Antworten; sie ersetzt keine offizielle Einstufung.',
+    resultIn:'Einstufung in {c}', minAge:'Mindestalter', all:'Für alle', blockedTitle:'Kann nicht hochgeladen werden', missing:'Beantworten Sie alle Fragen.', needCountry:'Wählen Sie Ihr Land.', needDecl:'Setzen Sie den Haken bei der Erklärung, um fortzufahren.',
+    loading:'Fragebogen wird geladen…', loadFail:'Der Fragebogen konnte nicht geladen werden', calcFail:'Die Einstufung konnte nicht berechnet werden', needBefore:'Zum Hochladen muss die Einstufung ausgefüllt werden.',
+    draft:'Es bleibt ein Entwurf: Niemand sonst sieht es, bis Sie es einstufen (🏷️).', adultGate:'Dieser Inhalt ist {l} eingestuft (nur Erwachsene). Bestätigen Sie, dass Sie volljährig sind?', unrated:'Nicht eingestuft', classify:'Einstufen', classified:'Einstufung: {l}', pending:'Ausstehend: wird beim Veröffentlichen abgefragt', saved:'🏷️ Einstufung gespeichert: {l}', rejected:'Hochladen nicht möglich', adult:'Erwachsene', explicit:'Explizit' },
+  it: { title:'🏷️ Classificazione del contenuto', kind_video:'video', kind_game:'gioco', kind_app:'app',
+    intro:'Crix vieta solo ciò che è illegale. Rispondi a questo questionario perché il tuo {k} riceva la classificazione usata nel tuo paese. Viene classificato l’intero elemento (non ogni texture o file singolo).',
+    country:'Il tuo paese', detected:'Rilevato automaticamente: {c}', pick:'Scegli…', legalTitle:'1. Legalità', legalIntro:'Se qualcosa di questo è illegale in {c}, non può essere caricato.',
+    contentTitle:'2. Contenuto', yes:'Sì', no:'No', calc:'Calcola classificazione', cancel:'Annulla', back:'← Correggi', confirm:'Conferma e continua', close:'Chiudi',
+    decl:'Dichiaro che le mie risposte sono veritiere e che questo contenuto è legale in {c}.', approx:'È un’equivalenza indicativa basata sulle tue risposte; non sostituisce una classificazione ufficiale.',
+    resultIn:'Classificazione in {c}', minAge:'Età minima', all:'Per tutti', blockedTitle:'Non può essere caricato', missing:'Rispondi a tutte le domande.', needCountry:'Scegli il tuo paese.', needDecl:'Spunta la dichiarazione per continuare.',
+    loading:'Caricamento del questionario…', loadFail:'Impossibile caricare il questionario', calcFail:'Impossibile calcolare la classificazione', needBefore:'Serve completare la classificazione per caricarlo.',
+    draft:'Resta una bozza: nessun altro lo vede finché non lo classifichi (🏷️).', adultGate:'Questo contenuto è classificato {l} (solo adulti). Confermi di essere maggiorenne?', unrated:'Non classificato', classify:'Classifica', classified:'Classificazione: {l}', pending:'In sospeso: verrà richiesto alla pubblicazione', saved:'🏷️ Classificazione salvata: {l}', rejected:'Impossibile caricare', adult:'Adulti', explicit:'Esplicito' },
 };
-const clsL = () => ((window.__crixLang || 'es') === 'es' ? 'es' : 'en');   // LANG vive dentro del IIFE de idiomas: antes esto lanzaba ReferenceError y rompía Publicar y la clasificación
+const clsL = () => { const l = String(window.__crixLang || 'es').slice(0, 2); return CLS_UI[l] ? l : 'en'; };   // LANG vive dentro del IIFE de idiomas: antes esto lanzaba ReferenceError y rompía Publicar y la clasificación
 function clsT(key, vars) { let s = (CLS_UI[clsL()][key] ?? CLS_UI.es[key] ?? key); if (vars) for (const k in vars) s = s.split('{' + k + '}').join(vars[k]); return s; }
 let _clsCfgCache = {}, _clsGeoP = null, _cls = null, pubClass = null, _uvCls = null;
 const _clsAdultOk = new Set();
@@ -1992,10 +2024,12 @@ function clsBadge(rec, showUnrated) {
     const age = Number(c.age) || 0, sys = CLS_SYS[c.system];
     const explicit = /-X$|-[CD]$/.test(c.icon || '');
     // Etiqueta propia de Crix según el sistema y el tramo (también para clasificaciones guardadas con etiquetas viejas).
-    const label = explicit ? '18+ Explícito' : (sys ? sys.l[[0, 7, 12, 16, 18].indexOf(age)] : null) || (age ? age + '+' : 'Todos');
+    let label = explicit ? '18+ ' + clsT('explicit') : (sys ? sys.l[[0, 7, 12, 16, 18].indexOf(age)] : null) || (age ? age + '+' : 'Todos');
+    const numTxt = label;   // el número/letra del dibujo sale de la etiqueta base, antes de traducirla
+    if (label === 'Todos' || label === 'Livre') label = clsT('all');
     const tip = esc(clsSysName(c) + ' · ' + (c.countryName || '') + ' · ' + label);
     if (!sys) return '<span class="cls-badge cls-a' + age + '" title="' + tip + '">' + esc(label) + '</span>';
-    const num = explicit ? '18' : ((label.match(/\d+/) || [])[0] || (label === 'Livre' ? 'L' : 'T'));
+    const num = explicit ? '18' : ((numTxt.match(/\d+/) || [])[0] || (numTxt === 'Livre' ? 'L' : 'T'));
     return '<svg class="cls-icon cls-s' + age + '" viewBox="0 0 36 40" width="29" height="32" role="img" aria-label="' + tip + '"><title>' + tip + '</title>' +
       CLS_SHAPES[sys.s] + '<text x="18" y="12.5" font-size="7" class="cc">' + sys.c + '</text><text x="18" y="29" font-size="' + (num.length > 1 ? 15 : 17) + '" class="nn">' + num + '</text>' +
       (explicit ? '<text x="18" y="36" font-size="6" class="cc">XXX</text>' : '') + '</svg>';
@@ -8509,7 +8543,7 @@ function stuAddSound(folderId) {
 <div class="mo-overlay" id="mo-cls-api">
 <div class="mo-box" style="max-width:560px">
   <h3>🔑 API de clasificación</h3>
-  <div class="set-note">Usá el cuestionario y las insignias de Crix en tu propio sitio, juego o app. Cada vez que tocás el botón se crea una clave distinta, sin límite de cantidad. Cada una se muestra <b>una sola vez</b>, así que guardala. Si se filtra, borrala y creá otra.</div>
+  <div class="set-note">Usá el cuestionario y las insignias de Crix en tu propio sitio, juego o app. Cada vez que tocás el botón se crea una clave distinta, sin límite de cantidad. Cada una se muestra una sola vez, así que guardala. Si se filtra, borrala y creá otra.</div>
   <div id="cls-api-new"></div>
   <div id="cls-api-list" class="set-note" style="max-height:240px;overflow:auto"></div>
   <div class="mo-btns"><button class="btn btn-p" id="cls-api-btn" onclick="clsApiCreate()">➕ Conseguir una API</button><button class="btn btn-g" onclick="closeModal('mo-cls-api')">Cerrar</button></div>
@@ -8643,6 +8677,16 @@ const ROWS = [
   ["🔒 Privado","🔒 Private","🔒 Privado","🔒 Privé","🔒 Privat","🔒 Privato"],
   // generales
   ["Cancelar","Cancel","Cancelar","Annuler","Abbrechen","Annulla"],
+  ["🔑 Conseguir API de clasificación","🔑 Get classification API","🔑 Obter API de classificação","🔑 Obtenir l’API de classification","🔑 Klassifizierungs-API holen","🔑 Ottieni l’API di classificazione"],
+  ["🔑 API de clasificación","🔑 Classification API","🔑 API de classificação","🔑 API de classification","🔑 Klassifizierungs-API","🔑 API di classificazione"],
+  ["Usá el cuestionario y las insignias de Crix en tu propio sitio, juego o app. Cada vez que tocás el botón se crea una clave distinta, sin límite de cantidad. Cada una se muestra una sola vez, así que guardala. Si se filtra, borrala y creá otra.","Use Crix’s questionnaire and badges on your own site, game or app. Each time you tap the button a different key is created, with no limit on how many. Each one is shown only once, so save it. If it leaks, delete it and create another.","Use o questionário e os selos do Crix no seu próprio site, jogo ou app. Cada vez que você toca no botão, uma chave diferente é criada, sem limite de quantidade. Cada uma aparece uma única vez, então guarde-a. Se vazar, apague-a e crie outra.","Utilisez le questionnaire et les badges de Crix sur votre propre site, jeu ou app. Chaque fois que vous appuyez sur le bouton, une clé différente est créée, sans limite de nombre. Chacune n’est affichée qu’une seule fois, alors conservez-la. En cas de fuite, supprimez-la et créez-en une autre.","Nutzen Sie den Fragebogen und die Abzeichen von Crix auf Ihrer eigenen Website, in Ihrem Spiel oder Ihrer App. Jedes Mal, wenn Sie auf die Schaltfläche tippen, wird ein neuer Schlüssel erstellt, ohne Mengenbegrenzung. Jeder wird nur einmal angezeigt, speichern Sie ihn also. Wenn er durchsickert, löschen Sie ihn und erstellen Sie einen neuen.","Usa il questionario e i badge di Crix sul tuo sito, gioco o app. Ogni volta che tocchi il pulsante viene creata una chiave diversa, senza limite di quantità. Ognuna viene mostrata una sola volta, quindi salvala. Se viene diffusa, eliminala e creane un’altra."],
+  ["➕ Conseguir una API","➕ Get an API key","➕ Obter uma API","➕ Obtenir une API","➕ API-Schlüssel holen","➕ Ottieni una API"],
+  ["Cómo se usa","How to use it","Como usar","Comment l’utiliser","So wird es verwendet","Come si usa"],
+  ["Límite: 120 pedidos por minuto por clave. Las insignias son propias de Crix, no una clasificación oficial.","Limit: 120 requests per minute per key. The badges are Crix’s own, not an official rating.","Limite: 120 pedidos por minuto por chave. Os selos são próprios do Crix, não uma classificação oficial.","Limite : 120 requêtes par minute et par clé. Les badges sont propres à Crix, pas une classification officielle.","Limit: 120 Anfragen pro Minute und Schlüssel. Die Abzeichen sind Crix-eigen, keine offizielle Einstufung.","Limite: 120 richieste al minuto per chiave. I badge sono propri di Crix, non una classificazione ufficiale."],
+  ["Todavía no tenés ninguna clave.","You don’t have any keys yet.","Você ainda não tem nenhuma chave.","Vous n’avez encore aucune clé.","Sie haben noch keinen Schlüssel.","Non hai ancora nessuna chiave."],
+  ["Borrar","Delete","Apagar","Supprimer","Löschen","Elimina"],
+  ["Copiar","Copy","Copiar","Copier","Kopieren","Copia"],
+  ["Tu clave (guardala ahora, no se vuelve a mostrar):","Your key (save it now, it won’t be shown again):","Sua chave (guarde-a agora, ela não será mostrada de novo):","Votre clé (conservez-la maintenant, elle ne sera plus affichée) :","Ihr Schlüssel (jetzt speichern, er wird nicht erneut angezeigt):","La tua chiave (salvala ora, non verrà mostrata di nuovo):"],
   ["Cerrar","Close","Fechar","Fermer","Schließen","Chiudi"],
   ["Enviar","Send","Enviar","Envoyer","Senden","Invia"],
   ["Agregar","Add","Adicionar","Ajouter","Hinzufügen","Aggiungi"],
@@ -8819,26 +8863,35 @@ window.leaveGuest = function () { location.reload(); };
 
 
 /* ── API de clasificación (claves de usuario) ── */
+const CLS_API = {
+  es: { used:'usada', unused:'sin usar', confirm:'¿Borrar esta clave? Lo que la use dejará de funcionar.', name:'Clave', copied:'Copiada' },
+  en: { used:'used', unused:'unused', confirm:'Delete this key? Anything using it will stop working.', name:'Key', copied:'Copied' },
+  pt: { used:'usada', unused:'não usada', confirm:'Apagar esta chave? Tudo o que a usa vai deixar de funcionar.', name:'Chave', copied:'Copiada' },
+  fr: { used:'utilisée', unused:'inutilisée', confirm:'Supprimer cette clé ? Tout ce qui l’utilise cessera de fonctionner.', name:'Clé', copied:'Copiée' },
+  de: { used:'verwendet', unused:'unbenutzt', confirm:'Diesen Schlüssel löschen? Alles, was ihn verwendet, funktioniert nicht mehr.', name:'Schlüssel', copied:'Kopiert' },
+  it: { used:'usata', unused:'mai usata', confirm:'Eliminare questa chiave? Tutto ciò che la usa smetterà di funzionare.', name:'Chiave', copied:'Copiata' },
+};
+const clsA = k => (CLS_API[clsL()] || CLS_API.en)[k];
 window.openClsApi = async function () { if (!ME) return; document.getElementById('cls-api-new').innerHTML = ''; openModal('mo-cls-api'); clsApiLoad(); };
 async function clsApiLoad() {
   const box = document.getElementById('cls-api-list');
   try {
     const r = await apiRequest('/api/classification/keys');
     box.innerHTML = r.keys.length ? r.keys.map(k => '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><code>' + esc(k.prefix) + '…</code><span style="flex:1">' + esc(k.name) + ' · ' + new Date(k.createdAt).toLocaleDateString() +
-      (k.lastUsed ? ' · usada ' + new Date(k.lastUsed).toLocaleDateString() : ' · sin usar') + '</span><button class="btn btn-g" style="font-size:11px" onclick="clsApiDelete(\'' + k.id + '\')">Borrar</button></div>').join('') : 'Todavía no tenés ninguna clave.';
+      (k.lastUsed ? ' · ' + clsA('used') + ' ' + new Date(k.lastUsed).toLocaleDateString() : ' · ' + clsA('unused')) + '</span><button class="btn btn-g" style="font-size:11px" onclick="clsApiDelete(\'' + k.id + '\')">Borrar</button></div>').join('') : 'Todavía no tenés ninguna clave.';
   } catch (e) { box.textContent = e.message; }
 }
 window.clsApiCreate = async function () {
   try {
-    const r = await apiRequest('/api/classification/keys', { method: 'POST', body: { name: 'Clave ' + new Date().toLocaleDateString() } });
+    const r = await apiRequest('/api/classification/keys', { method: 'POST', body: { name: clsA('name') + ' ' + new Date().toLocaleDateString() } });
     const el = document.getElementById('cls-api-new');
-    el.innerHTML = '<div class="set-note"><b>Tu clave (guardala ahora, no se vuelve a mostrar):</b><br><code id="cls-api-key" style="word-break:break-all;user-select:all"></code> <button class="btn btn-g" style="font-size:11px" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById(\'cls-api-key\').textContent);showToast(\'Copiada\')">Copiar</button></div>';
+    el.innerHTML = '<div class="set-note"><b>Tu clave (guardala ahora, no se vuelve a mostrar):</b><br><code id="cls-api-key" style="word-break:break-all;user-select:all"></code> <button class="btn btn-g" style="font-size:11px" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById(\'cls-api-key\').textContent);showToast(clsA(\'copied\'))">Copiar</button></div>';
     document.getElementById('cls-api-key').textContent = r.key;
     clsApiLoad();
   } catch (e) { showToast(e.message); }
 };
 window.clsApiDelete = async function (id) {
-  if (!confirm('¿Borrar esta clave? Lo que la use dejará de funcionar.')) return;
+  if (!confirm(clsA('confirm'))) return;
   try { await apiRequest('/api/classification/keys/' + id, { method: 'DELETE' }); clsApiLoad(); } catch (e) { showToast(e.message); }
 };
 
