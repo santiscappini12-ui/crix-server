@@ -339,4 +339,4 @@ function badgeSvg(systemId, age, explicit, size) {
     (explicit && sys.explicit ? '<text x="18" y="36" font-size="6">XXX</text>' : '') + '</svg>';
 }
 
-module.exports = { badgeSvg, evaluate, isValid, publicConfig, detectCountry, countryOf, COUNTRIES, SYSTEMS, KINDS, VERSION, langOf };
+module.exports = { badgeSvg, evaluate, isValid, publicConfig, detectCountry, countryOf, clientIp, COUNTRIES, SYSTEMS, KINDS, VERSION, langOf };

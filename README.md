@@ -63,7 +63,7 @@ Sin estas variables Crix funciona como antes, solo con disco local.
 Crix solo prohíbe lo **ilegal**. Antes de subir un video, un juego o una app hay que completar un cuestionario propio de Crix para que el medio lleve la insignia de edad de **tu país**: Crix AR, Crix EUU, Crix EU, Crix DE, Crix BR, Crix JP, Crix KR, Crix AU, Crix MX, Crix CL, Crix CO, o Crix Global para el resto. Cada una tiene su propia forma y código. Se clasifica el medio **entero** (un video, o un juego completo con sus texturas y sonidos), nunca cada textura o archivo suelto.
 
 - **Legalidad:** si se responde "sí" a algo ilegal (contenido sexual con menores, imágenes íntimas sin consentimiento, terrorismo, amenazas/doxxing, malware) o "no" a "tengo los derechos", el medio **no se sube**. Algunos países agregan preguntas propias (p. ej. símbolos nazis y negación del Holocausto en Alemania/Austria).
-- **Contenido:** violencia, miedo, sexo y desnudez, lenguaje, discriminación, drogas, apuestas, compras con dinero real, interacción entre usuarios y público infantil. La edad mínima sale de la respuesta más alta (0, 7, 12, 16, 18). Lo explícito para adultos se permite, pero queda como **18+** y pide confirmar la mayoría de edad al abrirlo.
+- **Contenido:** violencia, miedo, sexo y desnudez, lenguaje, discriminación, drogas, apuestas, compras con dinero real, interacción entre usuarios y público infantil. La edad mínima sale de la respuesta más alta (0, 7, 12, 16, 18). Lo explícito para adultos se permite, pero queda como **18+** y para abrirlo hay que tener la edad verificada (ver *Contenido +18* más abajo).
 - **País:** se detecta con las cabeceras del hosting (`CF-IPCountry`, `X-Vercel-IP-Country`, `X-AppEngine-Country`…) y, si no hay, con APIs públicas de geolocalización por IP (`ipwho.is`, `ipapi.co`, `country.is`, con caché de 24 h). La persona puede cambiarlo.
 - **APIs:** `GET /api/classification/config` (preguntas y países, `?kind=video|game|app&lang=es|en`), `GET /api/classification/geo` y `POST /api/classification/evaluate` (calcula la etiqueta o responde `422` si es ilegal).
 - **Obligatorio en el servidor:** `POST /api/videos` rechaza un video nuevo sin clasificación válida; `POST /api/maps` recalcula siempre la clasificación desde las respuestas (el cliente nunca decide la etiqueta). Un juego o app **nuevo** sin clasificar queda como borrador oculto (solo lo ven su autor, colaboradores y admins) hasta que se clasifique con 🏷️. Lo publicado antes de esta función sigue visible y se puede clasificar cuando su autor quiera.
@@ -79,6 +79,16 @@ Cualquier usuario con sesión puede conseguir sus propias claves desde **⚙️ 
 - La clave va en la cabecera `X-Crix-Key`. Hay CORS abierto en `/api/v1`, y el límite por defecto es de 120 pedidos por minuto por clave (`429` si se pasa); se cambia con la variable `CRIX_API_RATE` (`0` = sin límite).
 - Para probarla desde el navegador, abrí `/probar-api` en tu Crix (pega la clave y calcula).
 - Las insignias son propias de Crix, no una clasificación oficial. Quien use la API es responsable de la veracidad de las respuestas que envía.
+
+### Contenido +18 (verificación de edad)
+
+Un juego, app o video clasificado como **18+** (`classification.adult`) solo se abre con la edad verificada. Lo decide **el servidor**: a una cuenta sin verificar no le entrega el juego (`GET /api/maps/:id`, texturas, sonidos, salas, `join_game`, `play`) ni el video (`/data`, `/stream`); responde `403` con `code: "AGE_REQUIRED"`. En los listados la tarjeta con su insignia se sigue viendo, pero sin el contenido. El autor y los colaboradores siempre abren lo suyo. Hay dos caminos:
+
+1. **ageefy.com** (estimación de edad por selfie, gratis y sin cuentas). `POST /api/age/start` crea la sesión en ageefy (`minAge: 18`, `internalId` = id de la cuenta) y devuelve la `url` a la que se manda a la persona. Al volver a `/?age=done&id=…` el cliente llama a `POST /api/age/complete`: el servidor **consulta él mismo** `POST /api/verification/check` y solo marca la cuenta si la sesión es la que esa cuenta abrió, está `completed` y la edad estimada es ≥ 18. No se usa el webhook (ageefy no lo firma). De ageefy solo se guarda método, fecha e id de sesión; no la edad estimada. `GET /api/age/status` dice si ya está verificada.
+2. **Un admin te conoce**: `POST /api/admin/users/:id/adult` con `{ "adult": true }` (o `false` para quitarlo). Un admin también puede marcarse a sí mismo; sin marcarse, un admin no entra a contenido +18. En la app: botón **🔞 Marcar +18** en el perfil y en el panel de admin.
+
+Variables opcionales: `CRIX_PUBLIC_URL` (URL pública, por si hay un proxy que oculta el dominio real) y `AGEEFY_BASE` (por defecto `https://www.ageefy.com`). La edad estimada por cámara es aproximada: ageefy puede dejar pasar a alguien cercano a los 18.
+
 
 ## Notificaciones (PWA)
 

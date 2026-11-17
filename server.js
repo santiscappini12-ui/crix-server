@@ -541,7 +541,7 @@ function emitPresence(userId) {
 function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,...s}=u; return s; }
 function publicUser(u) {
   if (!u) return null;
-  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ...profile } = u;
+  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ageVerified:_________, ageCheck:__________, ...profile } = u;
   return profile;
 }
 
@@ -602,6 +602,25 @@ function canReadMap(map, user) {
   if (privacy === 'assigned') return (map.assignedPlayers || []).includes(user.username);
   return false;
 }
+
+// ═══ CONTENIDO +18 ("categoría C") ═══
+// Un juego, app o video clasificado como solo para adultos (classification.adult, 18+) solo se abre si la cuenta tiene la edad
+// verificada. Hay dos caminos, y el servidor es quien decide (el cliente solo muestra el aviso):
+//   1) ageefy.com: estimación de edad por selfie (POST /api/age/start → ageefy → POST /api/age/complete).
+//   2) Un admin que te conoce te marca como +18 (POST /api/admin/users/:id/adult). Un admin también puede marcarse a sí mismo.
+// user.ageVerified = { method:'ageefy'|'admin', at, verificationId? | by?, byName? }
+const AGE_MIN = 18;
+const AGEEFY_BASE = String(process.env.AGEEFY_BASE || 'https://www.ageefy.com').replace(/\/+$/, '');
+function isAdultContent(rec) { const c = rec && rec.classification; return !!c && (c.adult === true || Number(c.age) >= AGE_MIN); }
+function isAgeVerified(user) { const a = user && user.ageVerified; return !!a && (a.method === 'ageefy' || a.method === 'admin'); }
+// El autor (y quienes editan el proyecto) siempre pueden abrir lo suyo; todos los demás necesitan la edad verificada.
+function canEnterAdult(rec, user) {
+  if (!isAdultContent(rec)) return true;
+  if (user && (rec.authorId === user.id || (Array.isArray(rec.collaborators) && rec.collaborators.includes(user.id)))) return true;
+  return isAgeVerified(user);
+}
+const AGE_REQUIRED_MSG = 'Este contenido es solo para mayores de 18. Verificá tu edad para entrar.';
+function ageRequired(res) { return res.status(403).json({ ok:false, code:'AGE_REQUIRED', err:AGE_REQUIRED_MSG }); }
 
 // ═══ MODO EQUIPO: colaboradores y co-edición en vivo ═══
 // map.collaborators = ids de cuentas que pueden editar el proyecto (lo administra solo el creador o un admin).
@@ -1120,6 +1139,88 @@ app.post('/api/user/:id', (req, res) => {
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
 
+// ═══ VERIFICACIÓN DE EDAD (+18) ═══
+// Camino 1 · ageefy.com (https://www.ageefy.com/docs). El servidor crea la sesión, manda a la persona a ageefy y, cuando vuelve,
+// CONSULTA el resultado él mismo (POST /api/verification/check). Nunca se confía en lo que diga el navegador ni en el webhook
+// (ageefy no lo firma): la sesión tiene que ser la que esta cuenta abrió, haber terminado y con edad estimada >= 18.
+function publicOrigin(req) {
+  const fixed = String(process.env.CRIX_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(fixed)) return fixed;
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
+  return proto + '://' + req.get('host');
+}
+const ageefyPost = (route, body) => fetchJson(AGEEFY_BASE + route, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(body) }, 10000);
+const AGEEFY_HOST_RE = /(^|\.)ageefy\.(com|app)$/i;
+const AGE_START_COOLDOWN_MS = 15 * 1000, AGE_SESSION_TTL_MS = 24 * 3600 * 1000;
+
+app.get('/api/age/status', requireAuth, (req, res) => {
+  const a = req.user.ageVerified;
+  res.json({ ok:true, verified:isAgeVerified(req.user), method:a?.method || null, at:a?.at || null, pending:!!req.user.ageCheck });
+});
+
+app.post('/api/age/start', requireAuth, async (req, res) => {
+  try {
+    const user = req.user;
+    if (isAgeVerified(user)) return res.json({ ok:true, verified:true });
+    if (user.ageCheck && Date.now() - (user.ageCheck.startedAt || 0) < AGE_START_COOLDOWN_MS)
+      return res.status(429).json({ ok:false, err:'Esperá unos segundos antes de reintentar.' });
+    const created = await ageefyPost('/api/verification/new', {
+      internalId: user.id,
+      redirectUrl: publicOrigin(req) + '/?age=done&id=%verificationId%',
+      ip: classification.clientIp(req) || '0.0.0.0',
+      minAge: AGE_MIN,
+    });
+    let url; try { url = new URL(String(created?.verificationUrl || '')); } catch { url = null; }
+    if (!created?.id || !url || url.protocol !== 'https:' || !AGEEFY_HOST_RE.test(url.hostname))
+      return res.status(502).json({ ok:false, err:'ageefy devolvió una respuesta inválida. Probá de nuevo más tarde.' });
+    user.ageCheck = { id:String(created.id), startedAt:Date.now() };
+    saveDB();
+    res.json({ ok:true, verified:false, url:url.href });
+  } catch (e) { res.status(502).json({ ok:false, err:'No se pudo conectar con ageefy. Probá de nuevo más tarde.' }); }
+});
+
+app.post('/api/age/complete', requireAuth, async (req, res) => {
+  try {
+    const user = req.user;
+    if (isAgeVerified(user)) return res.json({ ok:true, verified:true });
+    const pending = user.ageCheck;
+    if (!pending?.id) return res.status(409).json({ ok:false, code:'AGE_NO_SESSION', err:'No hay una verificación en curso. Empezá una nueva.' });
+    const id = String(req.body?.id || pending.id);
+    if (id !== pending.id) return res.status(403).json({ ok:false, code:'AGE_SESSION_MISMATCH', err:'Esa verificación no es de tu cuenta.' });
+    if (Date.now() - (pending.startedAt || 0) > AGE_SESSION_TTL_MS) { delete user.ageCheck; saveDB(); return res.status(410).json({ ok:false, code:'AGE_SESSION_EXPIRED', err:'La verificación venció. Empezá una nueva.' }); }
+    let r; try { r = await ageefyPost('/api/verification/check', { id }); } catch { return res.status(502).json({ ok:false, err:'No se pudo consultar a ageefy. Probá de nuevo en un momento.' }); }
+    if (!r || String(r.id) !== id || String(r.internalId) !== String(user.id))
+      return res.status(403).json({ ok:false, code:'AGE_SESSION_MISMATCH', err:'Esa verificación no es de tu cuenta.' });
+    if (r.status !== 'completed' || !Number.isFinite(Number(r.detectedAge)))
+      return res.json({ ok:true, verified:false, pending:true });   // todavía no terminó (o se cerró la ventana a mitad)
+    if (Number(r.detectedAge) < AGE_MIN) {
+      delete user.ageCheck; saveDB();
+      return res.status(403).json({ ok:false, code:'AGE_TOO_YOUNG', err:'ageefy no pudo confirmar que seas mayor de 18.' });
+    }
+    // Se guarda lo mínimo: método, fecha e id de la sesión. No se conserva la edad estimada.
+    user.ageVerified = { method:'ageefy', at:new Date().toISOString(), verificationId:id };
+    delete user.ageCheck;
+    saveDB();
+    toUser(user.id).emit('user_updated', { userId:user.id });
+    res.json({ ok:true, verified:true });
+  } catch (e) { res.status(500).json({ ok:false, err:'No se pudo completar la verificación.' }); }
+});
+
+// Camino 2 · un admin marca (o desmarca) a una cuenta como +18. Puede marcarse a sí mismo.
+app.post('/api/admin/users/:id/adult', requireAuth, requireAdmin, (req, res) => {
+  const target = DB.users[req.params.id];
+  if (!target) return res.status(404).json({ ok:false, err:'Usuario no encontrado' });
+  if (typeof req.body?.adult !== 'boolean') return res.status(400).json({ ok:false, err:'Falta indicar si es +18 (adult: true/false)' });
+  if (req.body.adult) target.ageVerified = { method:'admin', at:new Date().toISOString(), by:req.user.id, byName:req.user.username };
+  else delete target.ageVerified;
+  delete target.ageCheck;
+  saveDB();
+  toUser(target.id).emit('user_updated', { userId:target.id });
+  io.emit('user_updated', { userId:target.id });
+  console.log(`[AGE] ${req.user.username} ${req.body.adult ? 'marcó como +18 a' : 'quitó el +18 de'} ${target.username}${target.id === req.user.id ? ' (él mismo)' : ''}`);
+  res.json({ ok:true, userId:target.id, adult:!!req.body.adult });
+});
+
 // ── GET todos los usuarios (sin pw) ──
 app.get('/api/users', (req, res) => {
   const viewer = readSession(req);
@@ -1354,6 +1455,7 @@ app.post('/api/join-user/:id', requireAuth, (req, res) => {
   if (!presence.mapId || !presence.instanceId) return res.status(409).json({ ok:false, err:'Esa persona no está jugando ahora.' });
   const map = DB.maps[presence.mapId];
   if (!map || !canReadMap(map, req.user)) return res.status(403).json({ ok:false, err:'No tenés acceso al juego que está jugando.' });
+  if (!canEnterAdult(map, req.user)) return ageRequired(res);
   const count = roomPlayerCount(presence.mapId, presence.instanceId);
   if (count >= maxPlayersFor(map)) return res.status(409).json({ ok:false, err:'Ese servidor está lleno.' });
   res.json({ ok:true, mapId:presence.mapId, instanceId:presence.instanceId, gameName:map.name || presence.mapId, players:count });
@@ -1386,6 +1488,8 @@ function summarizeMap(id, m) {
   }
   return out;
 }
+// Ficha de un juego +18 para quien todavía no verificó su edad: se ve la tarjeta y la insignia, pero no el contenido.
+function lockedMapSummary(id, m) { const out = summarizeMap(id, m); delete out.htmlContent; out.locked = true; return out; }
 // ── Clasificación por país ──
 // config: preguntas y países (textos en es/en) · geo: país detectado por cabeceras del hosting o por APIs de geolocalización IP
 // evaluate: calcula la clasificación (o rechaza si es ilegal) para mostrarla antes de subir. Las rutas de subida la vuelven a calcular.
@@ -1464,7 +1568,7 @@ app.get('/api/maps', (req, res) => {
   for (const [id, m] of Object.entries(DB.maps)) {
     if (!canReadMap(m, uObj)) continue;
     const mine = uObj && (m.authorId === uObj.id || (Array.isArray(m.collaborators) && m.collaborators.includes(uObj.id)));
-    if (wantFull) { out[id] = publicMapRecord(m); continue; }
+    if (wantFull) { out[id] = canEnterAdult(m, uObj) ? publicMapRecord(m) : lockedMapSummary(id, m); continue; }
     if (mine && used < MAP_LIST_FULL_BUDGET) {
       const rec = publicMapRecord(m);
       used += (typeof m.htmlContent === 'string' ? m.htmlContent.length : 0) + (Array.isArray(m.parts) ? m.parts.length * 400 : 0) + (typeof m.thumb === 'string' ? m.thumb.length : 0) + 2000;
@@ -1476,7 +1580,9 @@ app.get('/api/maps', (req, res) => {
 // Un juego completo (lo pide el cliente al abrirlo, jugarlo o editarlo).
 app.get('/api/maps/:id', (req, res) => {
   const m = DB.maps[req.params.id];
-  if (!m || !canReadMap(m, readSession(req))) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  const viewer = readSession(req);
+  if (!m || !canReadMap(m, viewer)) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  if (!canEnterAdult(m, viewer)) return ageRequired(res);
   res.json({ ok:true, map: publicMapRecord(m) });
 });
 // Miniatura como imagen real (solo juegos públicos): así el catálogo no lleva cientos de KB en base64 por juego.
@@ -1511,6 +1617,7 @@ app.get('/api/maps/:id/instances', (req, res) => {
 app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
   const map = DB.maps[req.params.id];
   if (!map || !canReadMap(map, req.user)) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  if (!canEnterAdult(map, req.user)) return ageRequired(res);
   const instanceId = cluster.nodeId + '-' + crypto.randomUUID();   // el prefijo dice qué instancia del servidor es dueña de la sala
   const room = getRoom(req.params.id, instanceId);
   res.status(201).json({ ok:true, instance:{ id:room.instanceId, mapId:room.mapId, startedAt:room.createdAt } });
@@ -1565,6 +1672,7 @@ app.post('/api/maps/:id/textures', requireAuth, async (req, res) => {
 app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
+  if (!canEnterAdult(map, user)) return res.status(403).end();
   const file = texFile(assetId(req.params.id), req.params.tid) || await persist.fetchTexture(assetId(req.params.id), req.params.tid); if (!file) return res.status(404).end();
   res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': mapIsPublic(map) ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
@@ -1623,6 +1731,7 @@ app.put('/api/maps/:id/sounds/:sid', requireAuth, async (req, res) => {
 app.get('/api/maps/:id/sounds/:sid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !SND_ID_RE.test(req.params.sid) || !canReadMap(map, user)) return res.status(404).end();
+  if (!canEnterAdult(map, user)) return res.status(403).end();
   const file = soundFile(assetId(req.params.id), req.params.sid) || await persist.fetchSound(assetId(req.params.id), req.params.sid); if (!file) return res.status(404).end();
   res.set({ 'Content-Type': SND_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': mapIsPublic(map) ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { acceptRanges:true, dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
@@ -1728,8 +1837,9 @@ app.post('/api/maps/:id/like', requireAuth, (req, res) => {
 });
 
 app.post('/api/maps/:id/play', (req, res) => {
-  const map = DB.maps[req.params.id];
-  if (!map || !canReadMap(map, readSession(req))) return res.status(404).json({ ok:false });
+  const map = DB.maps[req.params.id], viewer = readSession(req);
+  if (!map || !canReadMap(map, viewer)) return res.status(404).json({ ok:false });
+  if (!canEnterAdult(map, viewer)) return ageRequired(res);
   map.plays = (map.plays || 0) + 1;
   saveDB();
   io.emit('map_stats', { mapId:map.id, likes:map.likes || 0, plays:map.plays });
@@ -1908,8 +2018,9 @@ app.get('/api/videos', (req, res) => {
 
 // Compatibilidad con clientes viejos: devuelve el archivo como data URL (solo videos chicos).
 app.get('/api/videos/:id/data', async (req, res) => {
-  const v = await findVideoReady(req.params.id);
-  if (!v || !canReadVideo(v, readSession(req))) return res.status(404).json({ ok: false });
+  const v = await findVideoReady(req.params.id), viewer = readSession(req);
+  if (!v || !canReadVideo(v, viewer)) return res.status(404).json({ ok: false });
+  if (!canEnterAdult(v, viewer)) return ageRequired(res);
   const file = await videoLocalFile(v);
   if (!file) return res.status(404).json({ ok:false, err:'El archivo del video no está disponible' });
   if (v.size > 25 * 1024 * 1024) return res.status(413).json({ ok:false, err:'Usá /stream para videos grandes', stream:`/api/videos/${v.id}/stream` });
@@ -1922,6 +2033,7 @@ app.get('/api/videos/:id/stream', async (req, res) => {
   const v = await findVideoReady(req.params.id);
   const user = readSession(req) || userFromToken(req.query.t);
   if (!v || !canReadVideo(v, user)) return res.status(404).end();
+  if (!canEnterAdult(v, user)) return res.status(403).end();
   const file = await videoLocalFile(v);
   if (!file) return res.status(404).end();
   res.set({ 'Content-Type': v.mime || 'video/mp4', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': (v.privacy || 'public') === 'public' ? 'public, max-age=3600' : 'private, max-age=600' });
@@ -2431,6 +2543,10 @@ G('join_game', (socket, data) => {
     const storedMap = DB.maps[mapId];
     if (!mapId || !instanceId || !storedMap || !canReadMap(storedMap, user)) {
       socket.emit('join_error', { message:'No tenés acceso a esta partida o ya no existe.' });
+      return;
+    }
+    if (!canEnterAdult(storedMap, user)) {
+      socket.emit('join_error', { code:'AGE_REQUIRED', message:AGE_REQUIRED_MSG });
       return;
     }
     const userId = user?.id || socket.id;
