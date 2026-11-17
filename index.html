@@ -474,6 +474,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 .cls-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px}.cls-chips span{font-size:11px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
 .cls-a0{background:#2f9e5f;color:#fff}.cls-a7{background:#2b9aa8;color:#fff}.cls-a12{background:#e5b22a;color:#1b1b1b}.cls-a16{background:#e8782a;color:#fff}.cls-a18{background:#d93a3a;color:#fff}
 .cls-badge{display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:3px 6px;border-radius:5px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+.cls-icon{height:22px;width:auto;margin-left:6px;vertical-align:middle;border-radius:3px}
 .cls-badge.cls-none{background:var(--bg3);color:var(--text3);border:1px dashed var(--border)}
 </style>
 </head>
@@ -1953,7 +1954,14 @@ function clsConfirm() { const c = _cls; if (!c || !c.result) return; try { local
 // Insignia de clasificación (tarjetas, página del juego, reproductor). El autor ve "Sin clasificar" en lo que todavía no tiene.
 function clsBadge(rec, showUnrated) {
   const c = rec && rec.classification;
-  if (c && c.label) return '<span class="cls-badge cls-a' + (Number(c.age) || 0) + '" title="' + esc((c.systemName || '') + ' · ' + (c.countryName || '')) + '">' + esc(c.label) + '</span>';
+  if (c && c.label) {
+    const age = Number(c.age) || 0, tip = esc((c.systemName || '') + ' · ' + (c.countryName || '') + ' · ' + c.label);
+    const txt = '<span class="cls-badge cls-a' + age + '" title="' + tip + '">' + esc(c.label) + '</span>';
+    // Ícono oficial del sistema (p. ej. INCAA, PEGI, ESRB) desde /icons/ratings/<SISTEMA>-<edad>.png.
+    // Si el archivo no existe, se cae a la insignia de texto de siempre.
+    if (!c.system || !/^[A-Z]+$/.test(c.system)) return txt;
+    return '<img class="cls-icon" src="/icons/ratings/' + c.system + '-' + age + '.png" alt="' + esc(c.label) + '" title="' + tip + '" loading="lazy" onerror="this.outerHTML=decodeURIComponent(\'' + encodeURIComponent(txt).replace(/'/g, '%27') + '\')">';
+  }
   return showUnrated ? '<span class="cls-badge cls-none">' + clsT('unrated') + '</span>' : '';
 }
 // Contenido para adultos: se pide confirmar la mayoría de edad antes de abrirlo (no al propio autor).

@@ -895,6 +895,11 @@ app.get('/juego/:id/manifest.webmanifest', (req, res) => {
 });
 app.get(['/juego/:id', '/juego/:id/:slug'], sharePage('juego'));
 app.get(['/video/:id', '/video/:id/:slug'], sharePage('video'));
+// Íconos oficiales de clasificación por edad (INCAA, PEGI, ESRB...): /icons/ratings/<SISTEMA>-<0|7|12|16|18>.png
+app.get(/^\/icons\/ratings\/[A-Z]+-(0|7|12|16|18)\.png$/, (req, res) => {
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.sendFile(path.join(__dirname, req.path), err => { if (err && !res.headersSent) res.status(404).end(); });
+});
 app.get('/u/:username', sharePage('u'));
 app.get(PUBLIC_FILES, (req, res) => {
   // El service worker y el manifiesto no deben quedar en caché para que las actualizaciones lleguen rápido.

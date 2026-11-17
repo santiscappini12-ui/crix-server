@@ -127,6 +127,12 @@ const CONTENT = [
     O('Cada persona usa el medio por separado', 'Each person uses it on their own', 0),
     O('Hay chat, multijugador o contenido creado por usuarios', 'Chat, multiplayer, or user-generated content', 0, 'online'),
   ], ['game', 'app']),
+  // El contenido que suben los usuarios dentro del medio NO cuenta para la edad: se clasifica solo lo que subís vos.
+  // Se muestra un aviso en la etiqueta (como el "Users Interact" de ESRB), pero no sube la edad.
+  Q('ugc', T('Contenido de otros usuarios', 'Other users’ content'), [
+    O('Los usuarios no pueden subir ni crear contenido dentro', 'Users cannot upload or create content inside it', 0),
+    O('Los usuarios pueden subir o crear contenido propio (puede ser de cualquier intensidad; no se cuenta en esta clasificación)', 'Users can upload or create their own content (any intensity; not counted in this rating)', 0, 'ugc'),
+  ], ['game', 'app']),
   Q('kids', T('¿Está pensado principalmente para menores de 13 años?', 'Is it mainly intended for children under 13?'), [
     O('No', 'No', 0),
     O('Sí, es para niños', 'Yes, it is for children', 0, 'kids'),
@@ -147,6 +153,7 @@ const DESCRIPTORS = {
   purchases:        T('Compras con dinero real', 'In-app purchases'),
   loot:             T('Cajas sorpresa pagas', 'Paid random rewards'),
   online:           T('Interacción entre usuarios', 'Users interact'),
+  ugc:              T('Incluye contenido de usuarios (no clasificado)', 'Includes user-generated content (not rated)'),
   kids:             T('Para niños', 'For children'),
 };
 
