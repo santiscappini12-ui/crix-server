@@ -171,7 +171,7 @@ const userRoom = id => 'user:' + id;
 function toUser(id) { return io.to(userRoom(id)); }
 // Un video privado solo lo ve su autor: sus avisos no se difunden al resto.
 function emitVideoEvent(video, event, payload) {
-  if (!video || (video.privacy || 'public') === 'public') io.emit(event, payload);
+  if (!video || videoIsPublic(video)) io.emit(event, payload);
   else toUser(video.authorId).emit(event, payload);
 }
 function emitMembers(convId, event, payload) { String(convId).split('_').forEach(uid => toUser(uid).emit(event, payload)); }
@@ -184,7 +184,7 @@ function broadcastRemote(events) {
       else if (kind === 'updated') io.emit('map_updated', { mapId:id });
       else if (kind === 'deleted') io.emit('map_deleted', { mapId:id });
     } else if (col === 'videos') {
-      if (kind === 'new' && rec.ready !== false && (rec.privacy || 'public') === 'public') io.emit('video_new', { id, title:rec.title, authorId:rec.authorId, authorName:rec.authorName, cat:rec.cat, thumb:rec.thumb, created:rec.created, privacy:rec.privacy });
+      if (kind === 'new' && rec.ready !== false && videoIsPublic(rec)) io.emit('video_new', { id, title:rec.title, authorId:rec.authorId, authorName:rec.authorName, cat:rec.cat, thumb:rec.thumb, created:rec.created, privacy:rec.privacy });
       else if (kind === 'new') io.emit('video_updated', { id, refetch:true });   // borrador o privado: cada cliente pide lo que puede ver
       else if (kind === 'updated') io.emit('video_updated', { id, refetch:true });   // likes, vistas, comentarios, título, privacidad
       else if (kind === 'deleted') io.emit('video_deleted', { id });
@@ -765,7 +765,7 @@ function dataUrlToBuffer(value) {
 }
 function publicVideo(video) {
   const { data, file, ...rest } = video;
-  return { ...rest, data: video.ready !== false ? '[data]' : null, ready: video.ready !== false };
+  return { ...rest, data: video.ready !== false ? '[data]' : null, ready: video.ready !== false, unrated: !video.classification };
 }
 // Migración: videos viejos guardados como base64 dentro de la base → archivos.
 (function migrateVideos() {
@@ -785,9 +785,13 @@ function userFromToken(token) {
   return user && !user.banned ? user : null;
 }
 
+// Igual que los juegos: un video sin clasificar (cuestionario sin completar) es un borrador que solo ven su autor y los admins.
+function videoIsPublic(video) { return !!video && (video.privacy || 'public') === 'public' && !!video.classification; }
 function canReadVideo(video, user) {
+  const owner = !!user && (video.authorId === user.id || user.isAdmin);
+  if (!video.classification) return owner;
   if ((video.privacy || 'public') === 'public') return true;
-  return !!user && (video.authorId === user.id || user.isAdmin);
+  return owner;
 }
 
 io.use(async (socket, next) => {
@@ -1906,8 +1910,8 @@ app.post('/api/videos', async (req, res) => {
     if (idx >= 0) DB.videos[idx] = saved; else DB.videos.push(saved);
     saveDB();
     if (!old && persist.enabled) { try { await persist.flush(8000); } catch {} }   // que otra instancia ya pueda ver el video cuando llegue el PUT del archivo
-    const becamePublic = !!old && old.privacy !== 'public' && saved.privacy === 'public';
-    if (saved.ready && (!wasReady || becamePublic) && saved.privacy === 'public') io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
+    const becamePublic = !!old && (old.privacy !== 'public' || !old.classification) && saved.privacy === 'public' && !!saved.classification;
+    if (saved.ready && (!wasReady || becamePublic) && videoIsPublic(saved)) io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
     else if (old) io.emit('video_updated', { id: saved.id, refetch:true });   // título, descripción, miniatura o privacidad (si pasó a privado, el resto lo deja de ver)
     else toUser(saved.authorId).emit('video_updated', { id: saved.id, refetch:true });   // borrador: sus otros dispositivos lo ven mientras sube
     res.json({ ok: true, ready: !!saved.ready });
@@ -1951,7 +1955,7 @@ async function finalizeVideoUpload(video, tmp, size) {
     video.file = file; video.mime = mime; video.size = size; video.ready = true; delete video.data;
     await settleUpload(persist.putFile('videos/' + file, path.join(VIDEO_DIR, file)));
     saveDB();
-    if (!wasReady && video.privacy === 'public') io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
+    if (!wasReady && videoIsPublic(video)) io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
     else emitVideoEvent(video, 'video_updated', { id: video.id, refetch:true });   // privado: aparece en los dispositivos del autor; archivo reemplazado: todos
     return { ok:true, size:video.size, mime:video.mime };
   } catch (e) { try { if (fs.existsSync(tmp)) fs.rmSync(tmp, { force:true }); } catch {} throw e; }
