@@ -1796,7 +1796,11 @@ async function apiRequest(url, options = {}) {
   const response = await fetch(url, init);
   let data = {};
   try { data = await response.json(); } catch {}
-  if (!response.ok || data.ok === false) { const err = new Error(data.err || 'No se pudo conectar con Crix'); err.status = response.status; err.payload = data; throw err; }
+  if (!response.ok || data.ok === false) {
+    const err = new Error(data.err || 'No se pudo conectar con Crix'); err.status = response.status; err.payload = data;
+    if (response.status === 401 && token && options.token === undefined) sessionLost(token);
+    throw err;
+  }
   return data;
 }
 function getUsers()  { return DB.get('users')  || {}; }
@@ -2217,16 +2221,50 @@ function loginAs(user, token, legacyId, password) {
   syncCloudData();
 }
 function trySession() { const sid = DB.get('session'); if (!DB.get('token') || !sid) return false; const u = getUsers()[sid]; if (u) { ME = u; return true; } return false; }
+// Pantalla de acceso limpia: antes solo se activaba #s-auth y quedaban encima la barra, las ventanas y las pantallas de la app.
+function showAuthScreen() {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.mo-overlay.open, #code-overlay.open, #gui-overlay.open, #ai-win.open').forEach(el => el.classList.remove('open'));
+  document.getElementById('ban-screen')?.remove();
+  const nav = document.getElementById('nav'); if (nav) nav.style.display = 'none';
+  document.body.classList.remove('is-guest', 'nav-hidden');
+  document.getElementById('s-auth').classList.add('active');
+}
+function forceRelogin(msg) {
+  try { if (socket) { socket.auth = {}; socket.disconnect(); } } catch (_) {}
+  try { CHAT_PRIVATE_KEY = null; CHAT_PUBLIC_KEY = null; CHAT_PUBLIC_KEYS.clear(); setChatKeyStatus(false); } catch (_) {}
+  DB.del('session'); DB.del('token'); ME = null; CLOUD_READY = false; _pushedFor = null; _syncRetry = 0;
+  showAuthScreen(); swapForm('login');
+  if (msg) authErr(msg);
+}
+// Un 401 no siempre significa sesión muerta (otra instancia puede ir atrasada, o el servidor reiniciando): se confirma con /api/session.
+let _sessionCheck = null;
+function sessionLost(failedToken) {
+  if (_sessionCheck) return _sessionCheck;
+  _sessionCheck = (async () => {
+    try {
+      if (!ME || ME.guest || DB.get('token') !== failedToken) return;
+      let r; try { r = await fetch('/api/session', { headers:{ Authorization:'Bearer ' + failedToken } }); } catch (_) { return; }
+      if (r.status !== 401) return;
+      forceRelogin('Tu sesión venció. Iniciá sesión de nuevo (tus juegos guardados en este dispositivo se conservan).');
+    } finally { setTimeout(() => { _sessionCheck = null; }, 3000); }
+  })();
+  return _sessionCheck;
+}
 async function restoreSession() {
-  try {
-    const result = await apiRequest('/api/session');
-    ME = result.user;
-    const users = getUsers(); users[ME.id] = ME; DB.set('users', users); DB.set('session', ME.id);
-    bootApp(); await syncCloudData();
-  } catch {
-    DB.del('token'); DB.del('session'); ME = null;
-    document.getElementById('s-auth').classList.add('active');
+  let result;
+  try { result = await apiRequest('/api/session', { token: DB.get('token') }); }
+  catch (err) {
+    if (err && err.status === 401) { forceRelogin('Tu sesión venció. Iniciá sesión de nuevo.'); return; }
+    // Servidor reiniciando o sin conexión: NO se cierra la sesión; se entra con los datos locales y se reintenta solo.
+    if (!ME) { showAuthScreen(); return; }
+    showToast('No se pudo conectar con el servidor. Reintentando…', 4000);
+    bootApp(); syncCloudData();
+    return;
   }
+  ME = result.user;
+  const users = getUsers(); users[ME.id] = ME; DB.set('users', users); DB.set('session', ME.id);
+  bootApp(); await syncCloudData();
 }
 let _syncBusy = false, _syncRetry = 0, _pushedFor = null;
 // Juegos creados con el contador viejo (1001, 1002…): se les asigna un id único. El servidor mueve todo
@@ -2388,16 +2426,17 @@ function bootApp() {
   document.getElementById('nav').style.display = 'flex';
   updateOwnAvatar();
   // Boton admin si es Crix
+  document.querySelectorAll('.nav-tabs .nav-admin-btn').forEach(b => b.remove());
   if (ME.isAdmin) {
     const adminBtn = document.createElement('button');
-    adminBtn.className = 'nav-tab';
+    adminBtn.className = 'nav-tab nav-admin-btn';
     adminBtn.innerHTML = '⚡ Admin';
     adminBtn.style.color = '#f59e0b';
     adminBtn.onclick = () => openAdminPanel();
     document.querySelector('.nav-tabs').appendChild(adminBtn);
   }
   ME.onlineAt = Date.now(); saveMe();
-  window.addEventListener('beforeunload', () => { if(ME){ME.onlineAt=null;saveMe();} });
+  if (!window.__crixUnloadHook) { window.__crixUnloadHook = true; window.addEventListener('beforeunload', () => { if(ME){ME.onlineAt=null;saveMe();} }); }
   goTab('home'); checkNotifs();
   initBrowserNotifs();
   if (!window.__crixRouteDone) { window.__crixRouteDone = true; setTimeout(() => { try { crixOpenRoute(CRIX_BOOT_ROUTE); } finally { window.__crixReady = true; } }, 150); }
@@ -2719,9 +2758,8 @@ function logout() {
   if (socket) { socket.auth = {}; socket.disconnect(); }
   CHAT_PRIVATE_KEY = null; CHAT_PUBLIC_KEY = null; CHAT_PUBLIC_KEYS.clear(); setChatKeyStatus(false);
   DB.del('session'); DB.del('token'); ME = null; CLOUD_READY = false;
-  document.getElementById('nav').style.display = 'none';
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById('s-auth').classList.add('active');
+  _pushedFor = null; _syncRetry = 0;
+  showAuthScreen(); swapForm('login');
   document.getElementById('a-u').value = '';
   document.getElementById('a-p').value = '';
 }
@@ -4054,7 +4092,13 @@ function netConnect() {
   catch(error){console.warn('[NET] Socket.IO no disponible — modo offline');return;}
   socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
   socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();});
-  socket.on('connect_error',()=>{netConnected=false;updateNetPill('🟡','Sin servidor');});
+  socket.on('connect_error',(err)=>{
+    netConnected=false;updateNetPill('🟡','Sin servidor');
+    if(err&&err.message==='Sesión inválida'&&ME&&!ME.guest){
+      const t=DB.get('token');
+      sessionLost(t).then(()=>{ if(ME&&DB.get('token')===t&&socket&&!socket.connected) setTimeout(()=>{ try{ socket.auth={token:t}; socket.connect(); }catch(_){} },3000); });
+    }
+  });
   socket.on('room_state',({players=[],avatars={},chat=[],runtimeParts=[],worldChanges=[],removedParts=[],collectedParts=[],scriptRuntime})=>{
     clearRemotePlayers();players.forEach(player=>spawnRemote(player));try{for(const key of Object.keys(avatars||{}))applyAvatarDiff(key,avatars[key]);}catch(_){}
     if(chat.length)chat.forEach(message=>addGMsg(`${message.username}: ${message.text}`,'chat'));
