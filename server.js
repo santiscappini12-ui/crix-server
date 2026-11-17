@@ -50,7 +50,7 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'videos-2026-11-16c';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'guest-i18n-google-2026-11-16';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
@@ -527,10 +527,10 @@ function emitPresence(userId) {
   io.emit('presence_update', { userId, username:user.username, color:user.color, ...presenceInfo(userId) });
 }
 
-function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,...s}=u; return s; }
+function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,...s}=u; return s; }
 function publicUser(u) {
   if (!u) return null;
-  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, ...profile } = u;
+  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ...profile } = u;
   return profile;
 }
 
@@ -968,6 +968,57 @@ app.post('/api/login', (req, res) => {
     log('LOGIN', username);
     res.json({ ok:true, user: safeUser(user), token: issueSession(user) });
   } catch(e) { res.json({ ok:false, err:e.message }); }
+});
+
+
+// ── Acceso con Google ──
+// Se activa definiendo GOOGLE_CLIENT_ID (ID de cliente OAuth "Web" de Google Cloud). Sin esa variable el botón no aparece.
+app.get('/api/config', (req, res) => res.json({ ok:true, googleClientId: process.env.GOOGLE_CLIENT_ID || '' }));
+function uniqueUsername(base) {
+  let name = String(base || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 18);
+  if (name.length < 3) name = 'user' + name;
+  if (name.toLowerCase() === 'crix') name = 'crix_user';
+  const taken = n => Object.values(DB.users).some(u => u.username.toLowerCase() === n.toLowerCase());
+  let candidate = name;
+  while (taken(candidate)) candidate = name + Math.floor(1000 + Math.random() * 9000);
+  return candidate;
+}
+app.post('/api/google', async (req, res) => {
+  if (authLimited(req, res)) return;
+  try {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) return res.status(503).json({ ok:false, err:'El acceso con Google no está configurado en este servidor' });
+    const credential = req.body && req.body.credential;
+    if (typeof credential !== 'string' || credential.length < 20 || credential.length > 4096)
+      return res.status(400).json({ ok:false, err:'Credencial de Google inválida' });
+    const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential), { signal: AbortSignal.timeout(8000) });
+    const info = await r.json().catch(() => ({}));
+    const issuerOk = info.iss === 'accounts.google.com' || info.iss === 'https://accounts.google.com';
+    if (!r.ok || info.aud !== clientId || !issuerOk || !info.sub || Number(info.exp) * 1000 < Date.now() || String(info.email_verified) !== 'true')
+      return res.status(401).json({ ok:false, err:'No se pudo verificar tu cuenta de Google' });
+    let user = Object.values(DB.users).find(u => u.googleSub === info.sub);
+    let isNew = false;
+    if (!user) {
+      isNew = true;
+      const uid = `u${crypto.randomUUID()}`;
+      const username = uniqueUsername(info.given_name || info.name || String(info.email || '').split('@')[0]);
+      const palette = ['#5b8def', '#8b5cf6', '#ec4899', '#22d3a6', '#f59e0b', '#ef4444', '#f97316', '#38bdf8'];
+      user = {
+        id: uid, username, pw: hashPassword(crypto.randomBytes(32).toString('hex')),   // sin contraseña utilizable: entra solo con Google
+        color: palette[Math.floor(Math.random() * palette.length)], created: new Date().toISOString(),
+        friends:[], games:[], visits:0, bio:'', following:[], liked:[], isAdmin:false, googleSub: info.sub,
+      };
+      DB.users[uid] = user;
+      io.emit('user_new', { userId: uid, username, color: user.color });
+    }
+    if (user.banned) {
+      const until = user.banned.until ? new Date(user.banned.until) : null;
+      if (user.banned.permanent || (until && until > new Date())) return res.status(403).json({ ok:false, err:'Esta cuenta está suspendida.', banned: user.banned });
+      delete user.banned; saveDB();
+    }
+    log('GOOGLE', user.username);
+    res.json({ ok:true, user: safeUser(user), token: issueSession(user), isNew });
+  } catch (e) { res.status(500).json({ ok:false, err:'No se pudo iniciar sesión con Google' }); }
 });
 
 app.get('/api/session', requireAuth, (req, res) => res.json({ ok:true, user:safeUser(req.user) }));
