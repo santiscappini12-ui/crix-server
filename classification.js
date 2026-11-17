@@ -26,7 +26,8 @@ const SYSTEMS = {
   GRAC:      { name: 'GRAC',                      labels: ['ALL', '12', '12', '15', '18'] },
   ACB:       { name: 'ACB',                       labels: ['G', 'PG', 'M', 'MA 15+', 'R 18+'] },
   MX:        { name: 'RTC (México)',              labels: ['A', 'A', 'B', 'B15', 'C'] },
-  AR:        { name: 'INCAA (Argentina)',         labels: ['ATP', 'ATP', '+13', '+16', '+18'] },
+  // Régimen INCAA vigente desde 2026 (Res. Conjunta 1/2026): G, SP, R-13, R-17 y C. "C" es solo para contenido pornográfico (sexo explícito).
+  AR:        { name: 'INCAA (Argentina)',         labels: ['G', 'SP', 'R-13', 'R-17', 'R-17'], explicit: { label: 'C', icon: 'C' } },
   CL:        { name: 'CCC (Chile)',               labels: ['TE', 'TE+7', '+14', '+18', '+18'] },
   CO:        { name: 'MinCultura (Colombia)',     labels: ['Todos', '7+', '12+', '18+', '18+'] },
 };
@@ -226,11 +227,13 @@ function evaluate(input, lang) {
   const tierIdx = TIERS.indexOf(tier);
   const [countryName, systemId] = COUNTRIES[country];
   const system = SYSTEMS[systemId];
+  const explicitSex = descriptors.has('sexual_explicit');   // algunos sistemas (INCAA: "C") tienen una etiqueta aparte para sexo explícito
   return {
     ok: true,
     result: {
       v: VERSION, kind, country, countryName, system: systemId, systemName: system.name,
-      label: system.labels[tierIdx], age: tier, adult: tier >= 18,
+      label: explicitSex && system.explicit ? system.explicit.label : system.labels[tierIdx], age: tier, adult: tier >= 18,
+      icon: systemId + '-' + (explicitSex && system.explicit ? system.explicit.icon : tier),
       descriptors: [...descriptors],
       descriptorLabels: [...descriptors].map(d => pick(DESCRIPTORS[d], l)),
       answers: clean,
