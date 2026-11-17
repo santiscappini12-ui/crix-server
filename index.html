@@ -1960,7 +1960,7 @@ function clsBadge(rec, showUnrated) {
     // Ícono oficial del sistema (p. ej. INCAA, PEGI, ESRB) desde /icons/ratings/<SISTEMA>-<edad>.png.
     // Si el archivo no existe, se cae a la insignia de texto de siempre.
     if (!c.system || !/^[A-Z]+$/.test(c.system)) return txt;
-    return '<img class="cls-icon" src="/icons/ratings/' + (/^[A-Z]+-(0|7|12|16|18|C)$/.test(c.icon || '') ? c.icon : c.system + '-' + age) + '.png" alt="' + esc(c.label) + '" title="' + tip + '" loading="lazy" onerror="this.outerHTML=decodeURIComponent(\'' + encodeURIComponent(txt).replace(/'/g, '%27') + '\')">';
+    return '<img class="cls-icon" src="/icons/ratings/' + (/^[A-Z]+-(0|7|12|16|18|C|D)$/.test(c.icon || '') ? c.icon : c.system + '-' + age) + '.png" alt="' + esc(c.label) + '" title="' + tip + '" loading="lazy" onerror="this.outerHTML=decodeURIComponent(\'' + encodeURIComponent(txt).replace(/'/g, '%27') + '\')">';
   }
   return showUnrated ? '<span class="cls-badge cls-none">' + clsT('unrated') + '</span>' : '';
 }

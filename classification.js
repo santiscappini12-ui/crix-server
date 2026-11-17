@@ -24,11 +24,13 @@ const SYSTEMS = {
   CLASSIND:  { name: 'ClassInd',                  labels: ['L', '10', '12', '16', '18'] },
   CERO:      { name: 'CERO',                      labels: ['A', 'A', 'B 12+', 'D 17+', 'Z 18+'] },
   GRAC:      { name: 'GRAC',                      labels: ['ALL', '12', '12', '15', '18'] },
-  ACB:       { name: 'ACB',                       labels: ['G', 'PG', 'M', 'MA 15+', 'R 18+'] },
-  MX:        { name: 'RTC (México)',              labels: ['A', 'A', 'B', 'B15', 'C'] },
+  // Íconos de la clasificación de publicaciones de Australia: Unrestricted / M / Category 1 / Category 2 (esta última, solo sexo explícito).
+  ACB:       { name: 'ACB',                      labels: ['Unrestricted', 'Unrestricted', 'M', 'M', 'Category 1'], explicit: { label: 'Category 2', icon: 'C' } },
+  // RTC México: "D" es solo para contenido pornográfico (sexo explícito).
+  MX:        { name: 'RTC (México)',              labels: ['A', 'A', 'B', 'B15', 'C'], explicit: { label: 'D', icon: 'D' } },
   // Régimen INCAA vigente desde 2026 (Res. Conjunta 1/2026): G, SP, R-13, R-17 y C. "C" es solo para contenido pornográfico (sexo explícito).
   AR:        { name: 'INCAA (Argentina)',         labels: ['G', 'SP', 'R-13', 'R-17', 'R-17'], explicit: { label: 'C', icon: 'C' } },
-  CL:        { name: 'CCC (Chile)',               labels: ['TE', 'TE+7', '+14', '+18', '+18'] },
+  CL:        { name: 'CCC (Chile)',               labels: ['TE', '+8', '+14', '+18', '+18'] },
   CO:        { name: 'MinCultura (Colombia)',     labels: ['Todos', '7+', '12+', '18+', '18+'] },
 };
 
