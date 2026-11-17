@@ -51,7 +51,7 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'session-sync-fix-2026-11-16';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'publish-lang-fix-2026-11-16';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
@@ -815,7 +815,7 @@ app.use((req, res, next) => {
 // (server.js, package.json, script-runner.js...).
 const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });   // sin caché: así un deploy nuevo se ve enseguida
 
 // ── Enlaces compartibles ──────────────────────────────────────────────────────────────────────
 //   /juego/<id>/<nombre>   /video/<id>/<nombre>   /u/<usuario>
