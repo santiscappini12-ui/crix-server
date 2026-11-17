@@ -397,3 +397,9 @@ Solo se publican los archivos del cliente (`index.html`, `service-worker.js`, `m
 ## Acceso directo de un juego
 
 En la ficha de cada juego público hay un botón **📌 Acceso directo**: agrega el juego a la pantalla de inicio (o al escritorio) con su nombre y su propio ícono, y al tocarlo abre ese juego. En **Publicar** el creador elige el **ícono del acceso directo** (se recorta cuadrado); si no elige ninguno se usa la miniatura. Cada juego tiene su manifiesto en `/juego/<id>/manifest.webmanifest` y su ícono en `/juego/<id>/icon.png`. En iPhone/iPad el botón explica el paso *Compartir → Agregar a inicio*. Los juegos que no son públicos no exponen nombre ni ícono.
+
+## Modo invitado, idiomas y acceso con Google
+
+- **Entrar sin cuenta (solo ver):** botón en la pantalla de acceso. El invitado puede mirar juegos, videos, foros y perfiles, pero no jugar, crear, comentar, dar me gusta, seguir ni chatear (aparece un aviso para iniciar sesión). Sus datos viven solo en memoria.
+- **Idiomas:** ⚙️ Configuración → Idioma (español, English, Português, Français, Deutsch, Italiano). También hay un selector en la pantalla de acceso. Para sumar textos, agregá una fila a `ROWS` en el script final de `index.html`.
+- **Acceso con Google:** definí la variable de entorno `GOOGLE_CLIENT_ID` (ID de cliente OAuth tipo "Web" de Google Cloud, con tu dominio en "Orígenes de JavaScript autorizados"). Sin la variable, el botón no aparece.
