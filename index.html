@@ -4713,6 +4713,7 @@ function renderVideos() {
       (canDel ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="deleteVideo(\'' + v.id + '\')" title="Borrar">🗑</button>' : '') +
       '</div>' +
       '<div class="video-meta"><span>👁 ' + views + '</span><span>❤️ ' + likes + '</span></div>' +
+      (ME && v.authorId === ME.id && !v.classification ? '<button class="btn btn-p" style="font-size:12px;width:100%;margin:6px 0" onclick="event.stopPropagation();clsReclassifyVideo(\'' + v.id + '\')">🏷️ Clasificar (borrador)</button>' : '') +
       '<div class="video-author" onclick="goTab(\'profile\',\'' + v.authorId + '\')">' + esc(v.authorName) + '</div>' +
       '</div></div>';
   }).join('');
