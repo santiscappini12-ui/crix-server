@@ -51,11 +51,21 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'guest-i18n-google-2026-11-16';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'session-sync-fix-2026-11-16';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
   if (req.method === 'GET') { try { await persist.pullFresh(2000, 2500); } catch {} }
+  next();
+});
+// Sesión creada en OTRA instancia: si el token todavía no está en la copia local de la base, se sincroniza antes de
+// responder 401 (antes solo lo hacía el socket, y el HTTP devolvía "Iniciá sesión" a alguien que sí la tenía).
+app.use('/api', async (req, res, next) => {
+  try {
+    const h = req.get('authorization') || '';
+    const tk = h.startsWith('Bearer ') ? h.slice(7) : '';
+    if (tk && persist.enabled && !DB.sessions[tokenHash(tk)]) await persist.pullFresh(0, 3000);
+  } catch {}
   next();
 });
 app.get('/api/instance', (req, res) => res.json({ ok:true, build:CRIX_BUILD, instance:INSTANCE_TAG, uptime:Math.round(process.uptime()), maps:Object.keys(DB.maps).length, users:Object.keys(DB.users).length, persist:persist.enabled }));
@@ -784,7 +794,7 @@ io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) { socket.data.user = null; return next(); }
   let session = DB.sessions[tokenHash(token)];
-  if (!session && persist.enabled) { try { await persist.pullFresh(2000, 2500); } catch {} session = DB.sessions[tokenHash(token)]; }
+  if (!session && persist.enabled) { try { await persist.pullFresh(0, 3000); } catch {} session = DB.sessions[tokenHash(token)]; }
   const user = session && session.expiresAt > Date.now() ? DB.users[session.userId] : null;
   if (!user || user.banned) return next(new Error('Sesión inválida'));
   socket.data.user = user;
