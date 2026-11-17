@@ -57,18 +57,18 @@ const countryOf = code => COUNTRIES[String(code || '').toUpperCase()] ? String(c
 // Cada "sí" bloquea la subida. Las comunes valen en todo el mundo; las extras dependen del país.
 const T = (es, en) => ({ es, en });
 const LEGAL_COMMON = [
-  { id: 'csam',      text: T('¿Contiene contenido sexual que involucre a menores de edad o los represente de forma sexualizada?', 'Does it contain sexual content involving minors, or sexualized depictions of minors?') },
-  { id: 'ncii',      text: T('¿Muestra imágenes íntimas o sexuales de personas reales sin su consentimiento?', 'Does it show intimate or sexual images of real people without their consent?') },
-  { id: 'terror',    text: T('¿Incita a la violencia o al terrorismo, o hace propaganda o da instrucciones para cometer atentados?', 'Does it incite violence or terrorism, or provide propaganda or instructions for attacks?') },
-  { id: 'threats',   text: T('¿Contiene amenazas reales, acoso dirigido o datos privados de otras personas publicados sin permiso?', 'Does it contain real threats, targeted harassment, or other people’s private data shared without permission?') },
-  { id: 'malware',   text: T('¿Es malware, phishing, una estafa o sirve para robar cuentas o datos?', 'Is it malware, phishing, a scam, or used to steal accounts or data?') },
+  { id: 'csam',      text: T('¿Contiene contenido sexual que involucre a menores de edad o los represente de forma sexualizada? (Cuenta también si es dibujo, ficción, humor o hecho con IA.)', 'Does it contain sexual content involving minors, or sexualized depictions of minors? (This includes drawings, fiction, humor, or AI-generated content.)') },
+  { id: 'ncii',      text: T('¿Muestra imágenes íntimas o sexuales de personas reales sin su consentimiento? (Cuenta también si es parodia, humor o un montaje hecho con IA.)', 'Does it show intimate or sexual images of real people without their consent? (This includes parody, humor, or AI-generated fakes.)') },
+  { id: 'terror',    text: T('¿Incita a la violencia o al terrorismo, o hace propaganda o da instrucciones para cometer atentados? (La violencia de ficción, los juegos y el humor negro que claramente no incitan a nada real no cuentan.)', 'Does it incite violence or terrorism, or provide propaganda or instructions for attacks? (Fictional violence, games, and dark humor that clearly do not incite anything real do not count.)') },
+  { id: 'threats',   text: T('¿Contiene amenazas reales, acoso dirigido o datos privados de otras personas publicados sin permiso? (La parodia o sátira de figuras públicas sin amenazas ni acoso no cuenta; una "broma" que acosa o expone a una persona sí.)', 'Does it contain real threats, targeted harassment, or other people’s private data shared without permission? (Parody or satire of public figures without threats or harassment does not count; a "joke" that harasses or exposes a person does.)') },
+  { id: 'malware',   text: T('¿Es malware, phishing, una estafa o sirve para robar cuentas o datos? (Una broma inofensiva que no roba, daña ni bloquea nada no cuenta.)', 'Is it malware, phishing, a scam, or used to steal accounts or data? (A harmless prank that steals, damages, or locks nothing does not count.)') },
 ];
 // Obligatoria con respuesta "sí" (si dice "no", no se puede subir).
 const LEGAL_RIGHTS = { id: 'rights', text: T('¿Tenés los derechos o el permiso para publicar todo lo que incluye (imágenes, música, videos, código, modelos)?', 'Do you own the rights or have permission to publish everything it includes (images, music, videos, code, models)?') };
 // Solo se pregunta en países donde la ley prohíbe estos símbolos (en la mayoría del mundo no es delito mostrarlos, ni siquiera por humor).
 // Educativo, histórico, informativo, arte o sátira que claramente RECHAZA esas ideas → "no". Humor que los muestra sin ese rechazo → "sí".
 const NAZI_SYMBOLS = { id: 'nazi_symbols', text: T('¿Muestra símbolos o propaganda de organizaciones nazis o inconstitucionales? Respondé "no" si es educativo, histórico, informativo, o arte o sátira que claramente rechaza esas ideas. Si es humor (incluido el absurdo) que los muestra sin rechazarlos, respondé "sí": en este país la ley puede prohibirlo aunque sea un chiste.', 'Does it show symbols or propaganda of Nazi or unconstitutional organizations? Answer "no" if it is educational, historical, informational, or art or satire that clearly rejects those ideas. If it is humor (including absurd humor) that shows them without rejecting them, answer "yes": in this country the law may prohibit it even as a joke.') };
-const HOLOCAUST = { id: 'holocaust_denial', text: T('¿Niega, minimiza o justifica el Holocausto o genocidios reconocidos?', 'Does it deny, trivialize, or justify the Holocaust or recognized genocides?') };
+const HOLOCAUST = { id: 'holocaust_denial', text: T('¿Niega, minimiza o justifica el Holocausto o genocidios reconocidos, también en tono de broma? (Una sátira que critica a quienes lo niegan no cuenta.)', 'Does it deny, trivialize, or justify the Holocaust or recognized genocides, including as a joke? (Satire that criticizes those who deny it does not count.)') };
 // Extras por país (solo donde la ley las prohíbe de forma específica). Fácil de ampliar.
 const LEGAL_EXTRA = {
   DE: [NAZI_SYMBOLS, HOLOCAUST], AT: [NAZI_SYMBOLS, HOLOCAUST], FR: [HOLOCAUST], BE: [HOLOCAUST], CH: [HOLOCAUST], PL: [NAZI_SYMBOLS, HOLOCAUST],
@@ -106,7 +106,7 @@ const CONTENT = [
     O('Groserías moderadas', 'Moderate profanity', 12, 'language'),
     O('Groserías fuertes o frecuentes', 'Strong or frequent profanity', 16, 'language'),
   ]),
-  Q('discrimination', T('Discriminación (que no llegue a incitar a la violencia: eso es ilegal)', 'Discrimination (short of inciting violence, which is illegal)'), [
+  Q('discrimination', T('Discriminación, también en chistes, humor negro o sátira (que no llegue a incitar a la violencia: eso es ilegal)', 'Discrimination, including jokes, dark humor, or satire (short of inciting violence, which is illegal)'), [
     O('Ninguna', 'None', 0),
     O('Estereotipos o chistes leves', 'Mild stereotypes or jokes', 12, 'discrimination'),
     O('Lenguaje discriminatorio presente', 'Discriminatory language present', 16, 'discrimination'),
