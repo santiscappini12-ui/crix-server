@@ -459,6 +459,22 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 body.is-guest .nav-tabs .nav-tab:nth-child(n+5){display:none;}
 body.is-guest .notif-wrap{display:none;}
 body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"],body.is-guest [onclick*="openUploadVideo"]{display:none!important;}
+/* ═══ Clasificación de medios ═══ */
+.cls-note{font-size:12px;color:var(--text2);line-height:1.5;margin:6px 0 12px}
+.cls-hint{font-size:11px;color:var(--text3);margin-top:4px}
+.cls-sec{font-family:var(--display);font-weight:800;font-size:14px;margin:16px 0 6px;padding-top:10px;border-top:1px solid var(--border)}
+.cls-q{margin:10px 0}.cls-qt{font-size:13px;line-height:1.4;margin-bottom:6px}
+.cls-yn{display:flex;gap:18px;font-size:13px}.cls-yn label,.cls-decl{cursor:pointer;display:flex;align-items:center;gap:6px}
+.cls-decl{font-size:12px;margin:16px 0 4px;line-height:1.4;align-items:flex-start}
+.cls-block{background:rgba(239,68,68,.12);border:1px solid var(--red);border-radius:10px;padding:12px;font-size:13px;line-height:1.5;margin:10px 0}
+.cls-block-t{font-weight:800;color:var(--red);margin-bottom:6px}.cls-block ul{margin:8px 0 0 18px;padding:0}
+.cls-result{text-align:center;padding:14px 0}
+.cls-big{display:inline-block;font-family:var(--display);font-size:34px;font-weight:900;padding:10px 22px;border-radius:12px;margin-bottom:10px}
+.cls-rt{font-size:13px;color:var(--text2);margin:3px 0}
+.cls-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px}.cls-chips span{font-size:11px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
+.cls-a0{background:#2f9e5f;color:#fff}.cls-a7{background:#2b9aa8;color:#fff}.cls-a12{background:#e5b22a;color:#1b1b1b}.cls-a16{background:#e8782a;color:#fff}.cls-a18{background:#d93a3a;color:#fff}
+.cls-badge{display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:3px 6px;border-radius:5px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+.cls-badge.cls-none{background:var(--bg3);color:var(--text3);border:1px dashed var(--border)}
 </style>
 </head>
 <body>
@@ -1079,10 +1095,21 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
     <img id="pub-icon-preview" alt="" style="display:none;margin-top:8px;width:72px;height:72px;border-radius:16px;border:1px solid var(--border);object-fit:cover">
     <div style="color:var(--text3);font-size:10px;margin-top:4px">Es el ícono que aparece cuando alguien agrega tu juego a su pantalla de inicio. Se recorta cuadrado.</div>
   </div>
+  <div class="field-grp">
+    <label class="field-lbl">Clasificación por país</label>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span id="pub-cls-badge" class="no-i18n" style="font-size:12px"></span><button class="btn btn-g" style="font-size:12px" onclick="pubClassify()">🏷️ Cuestionario</button></div>
+    <div style="color:var(--text3);font-size:10px;margin-top:4px">Antes de subirlo hay que clasificarlo según tu país. Crix solo prohíbe lo ilegal.</div>
+  </div>
   <div class="mo-btns">
     <button class="btn btn-g" onclick="closeModal('mo-publish')">Cancelar</button>
     <button class="btn btn-p" onclick="confirmPublish()">🚀 Publicar</button>
   </div>
+</div>
+</div>
+<!-- ═══ CLASIFICACIÓN DE MEDIOS ═══ -->
+<div class="mo-overlay" id="mo-classify">
+<div class="mo-box" style="max-width:560px">
+  <div id="cls-body" class="no-i18n" style="max-height:78vh;overflow-y:auto;padding-right:4px"></div>
 </div>
 </div>
 <!-- ═══ CALL OVERLAY ═══ -->
@@ -1797,12 +1824,162 @@ async function ensureFullMap(id) {
   }).finally(() => { delete _fullMapLoads[id]; });
   return _fullMapLoads[id];
 }
+// ═══════════════════════════════════════════════════════════════════
+// CLASIFICACIÓN DE MEDIOS: cuestionario por país antes de subir un video, juego o app ENTERO
+// Crix solo prohíbe lo ilegal; el resto se sube con la clasificación que sale de las respuestas.
+// APIs: GET /api/classification/config · GET /api/classification/geo · POST /api/classification/evaluate
+// (las rutas de subida /api/maps y /api/videos vuelven a calcular todo en el servidor).
+// ═══════════════════════════════════════════════════════════════════
+const CLS_UI = {
+  es: { title:'🏷️ Clasificación del contenido', kind_video:'video', kind_game:'juego', kind_app:'app',
+    intro:'Crix solo prohíbe lo que es ilegal. Respondé este cuestionario para que tu {k} lleve la clasificación de tu país. Se clasifica el medio completo (no cada textura o archivo suelto).',
+    country:'Tu país', detected:'Detectado automáticamente: {c}', pick:'Elegí…', legalTitle:'1. Legalidad', legalIntro:'Si algo de esto es ilegal en {c}, no se puede subir.',
+    contentTitle:'2. Contenido', yes:'Sí', no:'No', calc:'Calcular clasificación', cancel:'Cancelar', back:'← Corregir', confirm:'Confirmar y continuar', close:'Cerrar',
+    decl:'Declaro que mis respuestas son verdaderas y que este contenido es legal en {c}.', approx:'Es una equivalencia orientativa que sale de tus respuestas; no reemplaza una clasificación oficial.',
+    resultIn:'Clasificación en {c}', minAge:'Edad mínima', all:'Todo público', blockedTitle:'No se puede subir', missing:'Respondé todas las preguntas.', needCountry:'Elegí tu país.', needDecl:'Marcá la declaración para continuar.',
+    loading:'Cargando cuestionario…', loadFail:'No se pudo cargar el cuestionario', calcFail:'No se pudo calcular la clasificación', needBefore:'Hace falta completar la clasificación para subirlo.',
+    draft:'Queda como borrador: nadie más lo ve hasta que lo clasifiques (🏷️).', adultGate:'Este contenido está clasificado {l} (solo adultos). ¿Confirmás que sos mayor de edad?', unrated:'Sin clasificar', classify:'Clasificar', classified:'Clasificación: {l}', pending:'Pendiente: se te pedirá al publicar', saved:'🏷️ Clasificación guardada: {l}', rejected:'No se pudo subir', adult:'Adultos' },
+  en: { title:'🏷️ Content rating', kind_video:'video', kind_game:'game', kind_app:'app',
+    intro:'Crix only prohibits what is illegal. Answer this questionnaire so your {k} gets the rating used in your country. The whole item is rated (not each texture or loose file).',
+    country:'Your country', detected:'Detected automatically: {c}', pick:'Choose…', legalTitle:'1. Legality', legalIntro:'If any of this is illegal in {c}, it cannot be uploaded.',
+    contentTitle:'2. Content', yes:'Yes', no:'No', calc:'Calculate rating', cancel:'Cancel', back:'← Edit answers', confirm:'Confirm and continue', close:'Close',
+    decl:'I declare my answers are true and this content is legal in {c}.', approx:'This is an indicative equivalent based on your answers; it is not an official rating.',
+    resultIn:'Rating in {c}', minAge:'Minimum age', all:'Everyone', blockedTitle:'It cannot be uploaded', missing:'Answer all the questions.', needCountry:'Choose your country.', needDecl:'Tick the declaration to continue.',
+    loading:'Loading questionnaire…', loadFail:'Could not load the questionnaire', calcFail:'Could not calculate the rating', needBefore:'The rating questionnaire is required to upload it.',
+    draft:'It stays as a draft: nobody else sees it until you rate it (🏷️).', adultGate:'This content is rated {l} (adults only). Do you confirm you are of legal age?', unrated:'Unrated', classify:'Rate', classified:'Rating: {l}', pending:'Pending: you will be asked when publishing', saved:'🏷️ Rating saved: {l}', rejected:'Could not upload', adult:'Adults' },
+};
+const clsL = () => (LANG === 'es' ? 'es' : 'en');
+function clsT(key, vars) { let s = (CLS_UI[clsL()][key] ?? CLS_UI.es[key] ?? key); if (vars) for (const k in vars) s = s.split('{' + k + '}').join(vars[k]); return s; }
+let _clsCfgCache = {}, _clsGeoP = null, _cls = null, pubClass = null, _uvCls = null;
+const _clsAdultOk = new Set();
+function clsConfig(kind) { const key = kind + '|' + clsL(); return _clsCfgCache[key] || (_clsCfgCache[key] = apiRequest('/api/classification/config?kind=' + kind + '&lang=' + clsL()).catch(e => { delete _clsCfgCache[key]; throw e; })); }
+function clsGeo() { return _clsGeoP || (_clsGeoP = apiRequest('/api/classification/geo').then(r => r.country || null).catch(() => null)); }
+const clsCountryName = code => { const x = _cls && _cls.cfg && _cls.cfg.countries.find(c => c.code === code); return x ? x.name : code; };
+
+// Abre el cuestionario. Devuelve la clasificación confirmada (el resultado del servidor) o null si se cancela.
+function classifyMedia(kind, prev) {
+  if (_cls) return Promise.resolve(null);
+  kind = ['video', 'game', 'app'].includes(kind) ? kind : 'game';
+  return new Promise(resolve => {
+    const p = prev && prev.kind === kind ? prev : null;
+    _cls = { kind, resolve, cfg:null, country: p ? p.country : '', detected:null, answers: p ? { ...p.answers } : {}, legal: p ? { ...p.legal } : {}, view:'loading', result:null, declared:false, busy:false, blocked:null };
+    openModal('mo-classify'); clsRender();
+    Promise.all([clsConfig(kind), clsGeo()]).then(([cfg, geo]) => {
+      if (!_cls || _cls.resolve !== resolve) return;
+      _cls.cfg = cfg; _cls.detected = geo;
+      if (!_cls.country) { let saved = ''; try { saved = localStorage.getItem('crix_country') || ''; } catch (_) {} _cls.country = saved || geo || ''; }
+      if (_cls.country && !cfg.countries.some(c => c.code === _cls.country)) _cls.country = '';
+      _cls.view = 'form'; clsRender();
+    }).catch(err => { clsFinish(null); showToast(clsT('loadFail') + (err && err.message ? ': ' + err.message : '')); });
+  });
+}
+function clsFinish(value) { const c = _cls; _cls = null; closeModal('mo-classify'); if (c) c.resolve(value); }
+function clsCancel() { clsFinish(null); }
+function clsSetCountry(v) { if (!_cls) return; _cls.country = v; clsRender(); }
+function clsSetLegal(id, v) { if (_cls) _cls.legal[id] = v; }
+function clsSetAnswer(id, v) { if (_cls) { if (v === '') delete _cls.answers[id]; else _cls.answers[id] = Number(v); } }
+function clsBack() { if (_cls) { _cls.view = 'form'; _cls.blocked = null; clsRender(); } }
+function clsLegalList() { const c = _cls; return [...c.cfg.legalCommon, ...(c.cfg.legalExtra[c.country] || []), c.cfg.rights]; }
+
+function clsRender() {
+  const box = document.getElementById('cls-body'); if (!box || !_cls) return;
+  const c = _cls; let h = '<h3>' + clsT('title') + '</h3>';
+  if (c.view === 'loading') { box.innerHTML = h + '<div class="cls-note">' + clsT('loading') + '</div><div class="mo-btns"><button class="btn btn-g" onclick="clsCancel()">' + clsT('cancel') + '</button></div>'; return; }
+  const cfg = c.cfg;
+  if (c.view === 'form') {
+    h += '<div class="cls-note">' + esc(clsT('intro', { k: clsT('kind_' + c.kind) })) + '</div>';
+    h += '<div class="field-grp"><label class="field-lbl">' + clsT('country') + '</label><select class="inp" onchange="clsSetCountry(this.value)"><option value="">' + clsT('pick') + '</option>' +
+      cfg.countries.map(x => '<option value="' + x.code + '"' + (x.code === c.country ? ' selected' : '') + '>' + esc(x.name) + ' · ' + esc(x.systemName) + '</option>').join('') + '</select>' +
+      (c.detected ? '<div class="cls-hint">' + esc(clsT('detected', { c: clsCountryName(c.detected) })) + '</div>' : '') + '</div>';
+    if (c.country) {
+      h += '<div class="cls-sec">' + clsT('legalTitle') + '</div><div class="cls-note">' + esc(clsT('legalIntro', { c: clsCountryName(c.country) })) + '</div>';
+      for (const q of clsLegalList()) {
+        const v = c.legal[q.id];
+        h += '<div class="cls-q"><div class="cls-qt">' + esc(q.text) + '</div><div class="cls-yn">' +
+          '<label><input type="radio" name="cls_l_' + q.id + '" ' + (v === true ? 'checked ' : '') + 'onchange="clsSetLegal(\'' + q.id + '\',true)"> ' + clsT('yes') + '</label>' +
+          '<label><input type="radio" name="cls_l_' + q.id + '" ' + (v === false ? 'checked ' : '') + 'onchange="clsSetLegal(\'' + q.id + '\',false)"> ' + clsT('no') + '</label></div></div>';
+      }
+      h += '<div class="cls-sec">' + clsT('contentTitle') + '</div>';
+      for (const q of cfg.questions) {
+        h += '<div class="cls-q"><div class="cls-qt">' + esc(q.text) + '</div><select class="inp" onchange="clsSetAnswer(\'' + q.id + '\',this.value)"><option value="">' + clsT('pick') + '</option>' +
+          q.options.map((o, i) => '<option value="' + i + '"' + (c.answers[q.id] === i ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select></div>';
+      }
+      h += '<label class="cls-decl"><input type="checkbox" id="cls-decl" ' + (c.declared ? 'checked ' : '') + 'onchange="_cls.declared=this.checked"> ' + esc(clsT('decl', { c: clsCountryName(c.country) })) + '</label>';
+    }
+    h += '<div class="mo-btns"><button class="btn btn-g" onclick="clsCancel()">' + clsT('cancel') + '</button>' + (c.country ? '<button class="btn btn-p" id="cls-go" onclick="clsSubmit()"' + (c.busy ? ' disabled' : '') + '>' + clsT('calc') + '</button>' : '') + '</div>';
+  } else if (c.view === 'blocked') {
+    const texts = Object.fromEntries(clsLegalList().map(q => [q.id, q.text]));
+    h += '<div class="cls-block"><div class="cls-block-t">⛔ ' + clsT('blockedTitle') + '</div><div>' + esc(c.blocked.err) + '</div>' +
+      ((c.blocked.reasons || []).length ? '<ul>' + c.blocked.reasons.map(id => '<li>' + esc(texts[id] || id) + '</li>').join('') + '</ul>' : '') + '</div>' +
+      '<div class="mo-btns"><button class="btn btn-g" onclick="clsCancel()">' + clsT('close') + '</button><button class="btn btn-p" onclick="clsBack()">' + clsT('back') + '</button></div>';
+  } else if (c.view === 'result') {
+    const r = c.result;
+    h += '<div class="cls-result"><div class="cls-big cls-a' + r.age + '">' + esc(r.label) + '</div>' +
+      '<div class="cls-rt">' + esc(clsT('resultIn', { c: r.countryName })) + ' · ' + esc(r.systemName) + '</div>' +
+      '<div class="cls-rt">' + clsT('minAge') + ': <b>' + (r.age ? r.age + '+' : clsT('all')) + '</b></div>' +
+      (r.descriptorLabels.length ? '<div class="cls-chips">' + r.descriptorLabels.map(d => '<span>' + esc(d) + '</span>').join('') + '</div>' : '') + '</div>' +
+      '<div class="cls-note">' + clsT('approx') + '</div>' +
+      '<div class="mo-btns"><button class="btn btn-g" onclick="clsBack()">' + clsT('back') + '</button><button class="btn btn-p" onclick="clsConfirm()">' + clsT('confirm') + '</button></div>';
+  }
+  const keepScroll = box.scrollTop; box.innerHTML = h; box.scrollTop = keepScroll;
+}
+
+async function clsSubmit() {
+  const c = _cls; if (!c || c.busy) return;
+  if (!c.country) { showToast(clsT('needCountry')); return; }
+  if (clsLegalList().some(q => typeof c.legal[q.id] !== 'boolean') || c.cfg.questions.some(q => !Number.isInteger(c.answers[q.id]))) { showToast(clsT('missing')); return; }
+  if (!c.declared) { showToast(clsT('needDecl')); return; }
+  // Solo viajan las respuestas de las preguntas que aplican a este país y tipo de medio.
+  const legal = Object.fromEntries(clsLegalList().map(q => [q.id, c.legal[q.id]]));
+  const answers = Object.fromEntries(c.cfg.questions.map(q => [q.id, c.answers[q.id]]));
+  c.busy = true; const btn = document.getElementById('cls-go'); if (btn) btn.disabled = true;
+  try {
+    const r = await apiRequest('/api/classification/evaluate?lang=' + clsL(), { method:'POST', body:{ kind:c.kind, country:c.country, answers, legal, declared:true } });
+    if (_cls !== c) return;
+    c.result = r.result; c.view = 'result';
+  } catch (err) {
+    if (_cls !== c) return;
+    if (err && err.status === 422 && err.payload && (err.payload.code === 'ILLEGAL_CONTENT' || err.payload.code === 'KIDS_CONFLICT')) { c.blocked = { err: err.message, reasons: err.payload.reasons || [] }; c.view = 'blocked'; }
+    else showToast(clsT('calcFail') + (err && err.message ? ': ' + err.message : ''));
+  }
+  c.busy = false; if (_cls === c) clsRender();
+}
+function clsConfirm() { const c = _cls; if (!c || !c.result) return; try { localStorage.setItem('crix_country', c.result.country); } catch (_) {} clsFinish(c.result); }
+
+// Insignia de clasificación (tarjetas, página del juego, reproductor). El autor ve "Sin clasificar" en lo que todavía no tiene.
+function clsBadge(rec, showUnrated) {
+  const c = rec && rec.classification;
+  if (c && c.label) return '<span class="cls-badge cls-a' + (Number(c.age) || 0) + '" title="' + esc((c.systemName || '') + ' · ' + (c.countryName || '')) + '">' + esc(c.label) + '</span>';
+  return showUnrated ? '<span class="cls-badge cls-none">' + clsT('unrated') + '</span>' : '';
+}
+// Contenido para adultos: se pide confirmar la mayoría de edad antes de abrirlo (no al propio autor).
+function clsAdultGate(rec) {
+  const c = rec && rec.classification; if (!c || !c.adult) return true;
+  if (ME && rec.authorId === ME.id) return true;
+  if (_clsAdultOk.has(rec.id)) return true;
+  if (!confirm(clsT('adultGate', { l: c.label }))) return false;
+  _clsAdultOk.add(rec.id); return true;
+}
+// Clasificar (o reclasificar) un juego/app propio desde su tarjeta.
+async function clsReclassify(id) {
+  event && event.stopPropagation && event.stopPropagation();
+  const maps = getMaps(), m = maps[id]; if (!m) return;
+  const c = await classifyMedia(m.kind === 'app' ? 'app' : 'game', m.classification); if (!c) return;
+  const fresh = getMaps(); if (!fresh[id]) return;
+  fresh[id].classification = c; setMaps(fresh); renderHome();
+  showToast(clsT('saved', { l: c.label }));
+}
+// Línea de clasificación dentro de la ventana de publicar juego.
+function pubClsRefresh() { const el = document.getElementById('pub-cls-badge'); if (!el) return; el.innerHTML = pubClass ? clsBadge({ classification: pubClass }) + ' <span style="color:var(--text2)">' + esc(pubClass.systemName + ' · ' + pubClass.countryName) + '</span>' : esc(clsT('pending')); }
+async function pubClassify() { const m = getMaps()[stMapId]; const c = await classifyMedia(m && m.kind === 'app' ? 'app' : 'game', pubClass); if (c) { pubClass = c; pubClsRefresh(); } }
+
 async function uploadMapWithRetry(id) {
   for (let n = 1; n <= 3; n++) {
     const map = getMaps()[id];   // siempre la versión más reciente
     if (!map || map.partial || !teamCanEdit(map)) { UNSYNCED_MAPS.delete(id); return { ok:true, skipped:true }; }
     try { await apiRequest('/api/maps', { method:'POST', body:map }); UNSYNCED_MAPS.delete(id); return { ok:true, id }; }
     catch (err) {
+      if (err && err.status === 422) { UNSYNCED_MAPS.delete(id); const ms = getMaps(); if (ms[id]) { delete ms[id].classification; DB.set('maps', ms); } return { ok:false, err:(err.message || clsT('rejected')) }; }
       if (err && err.status === 403 && ME && map.authorId === ME.id) { const nid = reIdMap(id); if (nid) { id = nid; continue; } }
       if (n === 3 || (err && (err.status === 401 || err.status === 403))) { UNSYNCED_MAPS.add(id); return { ok:false, err:(err && err.message) || 'sin conexión' }; }
       await new Promise(r => setTimeout(r, 2000 * n));
@@ -2258,14 +2435,13 @@ function defaultParts() { return [ {id:'ground',type:'Block',name:'Suelo',x:0,y:
 const THUMB_ICONS = ['🏝️','🌋','🏙️','🌌','🏔️','🌊','🏰','🛸','⚔️','🎮','🌃','🗺️'];
 const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt-teal'];
 function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine');   renderOnlineNow(); }
-function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${m.thumb ? `<img src="${m.thumb}">` : `<span class="thumb-icon">${THUMB_ICONS[i%THUMB_ICONS.length]}</span>`}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
+function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${m.thumb ? `<img src="${m.thumb}">` : `<span class="thumb-icon">${THUMB_ICONS[i%THUMB_ICONS.length]}</span>`}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="clsReclassify('${m.id}')" title="${clsT('classify')}">🏷️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}${clsBadge(m, isOwner)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
 async function editMap(id) { try { await ensureFullMap(id); } catch (err) { showToast('No se pudo abrir el juego: ' + err.message); return; } const item = getMaps()[id]; if (item?.isHtmlGame) { openAppEditor(id); return; } stMapId = id; initStudio(); goTab('studio'); }
 function handleUpload(e) {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
-  reader.onload = ev => {
-    const maps = getMaps();
+  reader.onload = async ev => {
     const id = newMapId();
     const isImg = file.type.startsWith('image/');
     const isHtml = file.name.toLowerCase().endsWith('.html') || file.type === 'text/html';
@@ -2292,9 +2468,13 @@ function handleUpload(e) {
         if (p.scripts) mapData.scripts = p.scripts;
       } catch {}
     }
+    // El juego importado se sube entero: primero se clasifica; si se cancela queda como borrador oculto.
+    const cls = await classifyMedia('game');
+    if (cls) mapData.classification = cls;
+    const maps = getMaps();
     maps[id] = mapData; setMaps(maps);
     ME.games = ME.games || []; ME.games.push(id); saveMe();
-    showToast('✅ Importado: ' + mapData.name); renderHome();
+    showToast('✅ Importado: ' + mapData.name + (cls ? '' : ' · ' + clsT('draft')), cls ? 3000 : 5000); renderHome();
   };
   if (file.type.startsWith('image/')) reader.readAsDataURL(file);
   else reader.readAsText(file);
@@ -2335,16 +2515,22 @@ function openAppEditor(id) {
   document.getElementById('app-privacy').value = app.privacy === 'private' ? 'private' : 'public';
   openModal('mo-app-editor');
 }
-function saveAppSource() {
-  const maps = getMaps(); const app = maps[stMapId];
+async function saveAppSource() {
+  let maps = getMaps(); let app = maps[stMapId];
   if (!app || !teamCanEdit(app)) { showToast('No podés editar esta app'); return; }
   const source = document.getElementById('app-source').value;
   if (!source.trim()) { showToast('La app necesita código HTML'); return; }
+  const name = document.getElementById('app-name').value.trim().slice(0,80) || 'Mi App';
+  const privacy = document.getElementById('app-privacy').value === 'private' ? 'private' : 'public';
+  // Antes de subir la app entera hay que clasificarla; si se cancela queda como borrador oculto.
+  let cls = app.classification || null, draft = false;
+  if (!cls) { cls = await classifyMedia('app'); if (!cls) draft = true; }
+  maps = getMaps(); app = maps[stMapId]; if (!app) return;
   app.kind = 'app'; app.isHtmlGame = true; app.htmlContent = source;
-  app.name = document.getElementById('app-name').value.trim().slice(0,80) || 'Mi App';
-  app.privacy = document.getElementById('app-privacy').value === 'private' ? 'private' : 'public';
+  app.name = name; app.privacy = privacy;
+  if (cls) app.classification = cls;
   app.updated = new Date().toISOString();
-  setMaps(maps); closeModal('mo-app-editor'); renderHome(); showToast('✅ App guardada');
+  setMaps(maps); closeModal('mo-app-editor'); renderHome(); showToast(draft ? '📝 App guardada. ' + clsT('draft') : '✅ App guardada', draft ? 5000 : 3000);
 }
 function exitIframe() {
   crixApp.active = false; try { if (typeof netLeaveGame === 'function') netLeaveGame(); } catch {}
@@ -2993,7 +3179,7 @@ function previewIcon(e) {
   };
   r.readAsDataURL(f);
 }
-function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; pubIconData = null; document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; const hasIc = !!(m && (m.icon || m.hasIcon)); document.getElementById('pub-icon-name').textContent = hasIc ? 'Ícono actual (elegí otro para cambiarlo)' : 'Se usa la miniatura'; const ipv = document.getElementById('pub-icon-preview'); if (hasIc) { ipv.src = m.icon || ('/juego/' + encodeURIComponent(m.id) + '/icon.png?t=' + Date.now()); ipv.style.display = 'block'; } else ipv.style.display = 'none'; openModal('mo-publish'); }
+function openPublish() { stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; } pubThumbData = null; pubIconData = null; pubClass = (m && m.classification) || null; pubClsRefresh(); document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; const hasIc = !!(m && (m.icon || m.hasIcon)); document.getElementById('pub-icon-name').textContent = hasIc ? 'Ícono actual (elegí otro para cambiarlo)' : 'Se usa la miniatura'; const ipv = document.getElementById('pub-icon-preview'); if (hasIc) { ipv.src = m.icon || ('/juego/' + encodeURIComponent(m.id) + '/icon.png?t=' + Date.now()); ipv.style.display = 'block'; } else ipv.style.display = 'none'; openModal('mo-publish'); }
 function previewThumb(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { pubThumbData = ev.target.result; document.getElementById('pub-thumb-name').textContent = f.name; const canvas = document.getElementById('pub-thumb-preview'); const img = new Image(); img.onload = () => { canvas.style.display='block'; canvas.getContext('2d').drawImage(img,0,0,canvas.width=canvas.clientWidth,canvas.height=canvas.clientWidth*9/16); }; img.src = pubThumbData; }; r.readAsDataURL(f); }
 async function confirmPublish() {
   const name = document.getElementById('pub-name').value.trim();
@@ -3003,6 +3189,8 @@ async function confirmPublish() {
   const assignedRaw = (document.getElementById('pub-assigned')||{}).value || '';
   if (!name) { showToast('Poné un nombre'); return; }
   const maps = getMaps(); const m = maps[stMapId]; if (!m) return;
+  if (!pubClass) { pubClass = await classifyMedia(m.kind === 'app' ? 'app' : 'game', m.classification); pubClsRefresh(); if (!pubClass) { showToast(clsT('needBefore')); return; } }
+  m.classification = pubClass;
   m.name = name; m.desc = desc; m.genre = genre;
   m.privacy = privacy;
   m.assignedPlayers = privacy === 'assigned' ? assignedRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
@@ -4437,7 +4625,7 @@ function renderVideos() {
       '</div>' +
       '<div class="video-info">' +
       '<div style="display:flex;align-items:flex-start;gap:6px">' +
-      '<div class="video-title" style="flex:1" onclick="openVideoPlayer(\'' + v.id + '\')">' + esc(v.title) + '</div>' +
+      '<div class="video-title" style="flex:1" onclick="openVideoPlayer(\'' + v.id + '\')">' + esc(v.title) + clsBadge(v, false) + '</div>' +
       (canDel ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="deleteVideo(\'' + v.id + '\')" title="Borrar">🗑</button>' : '') +
       '</div>' +
       '<div class="video-meta"><span>👁 ' + views + '</span><span>❤️ ' + likes + '</span></div>' +
@@ -4448,6 +4636,7 @@ function renderVideos() {
 async function openVideoPlayer(vid) {
   const vids = getVideos();
   const v = vids.find(x => x.id === vid); if (!v) return;
+  if (!clsAdultGate(v)) return;
   v.views = (v.views || 0) + 1;
   saveVideos(vids);
   apiRequest('/api/videos/' + encodeURIComponent(vid) + '/view', { method:'POST', body:{} }).then(result => { v.views = result.views; }).catch(() => {});
@@ -4472,7 +4661,7 @@ async function openVideoPlayer(vid) {
     '</div>' +
     '<div style="font-family:var(--display);font-size:20px;font-weight:800;margin-bottom:8px">' + esc(v.title) + '</div>' +
     '<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-bottom:12px">' +
-    '<span id="vp-views">👁 ' + v.views + ' vistas</span><span id="vp-likes">❤️ ' + (v.likes||[]).length + '</span><span>🕒 ' + dateStr(v.created) + '</span>' +
+    '<span id="vp-views">👁 ' + v.views + ' vistas</span><span id="vp-likes">❤️ ' + (v.likes||[]).length + '</span><span>🕒 ' + dateStr(v.created) + '</span>' + clsBadge(v, false) +
     '</div>' +
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">' +
     '<div style="width:38px;height:38px;border-radius:50%;background:' + ((getUsers()[v.authorId]||{}).color||'#5b8def') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + v.authorName[0].toUpperCase() + '</div>' +
@@ -4540,7 +4729,7 @@ async function deleteVideo(vid) {
   showToast('Video eliminado');
 }
 function openUploadVideo() {
-  _uvFileData = null; _uvFile = null; _uvThumb = null; document.getElementById('uv-file').value = ''; uvProgress(-1);
+  _uvCls = null; _uvFileData = null; _uvFile = null; _uvThumb = null; document.getElementById('uv-file').value = ''; uvProgress(-1);
   document.getElementById('uv-title').value = '';
   document.getElementById('uv-desc').value = '';
   document.getElementById('uv-privacy').value = 'public';
@@ -4561,6 +4750,10 @@ async function confirmUploadVideo() {
   const title = document.getElementById('uv-title').value.trim();
   if (!title) { showToast('Poné un título'); return; }
   if (!_uvFile) { showToast('Seleccioná un video primero'); return; }
+  // El video se clasifica ENTERO antes de subirlo (cuestionario según tu país).
+  const cls = await classifyMedia('video', _uvCls);
+  if (!cls) { showToast(clsT('needBefore')); return; }
+  _uvCls = cls;
   const btn = document.getElementById('uv-submit'); btn.disabled = true;
   const file = _uvFile;
   if (!_uvThumb) _uvThumb = await makeVideoThumb(file);
@@ -4569,7 +4762,7 @@ async function confirmUploadVideo() {
     desc: document.getElementById('uv-desc').value.trim(),
     cat: document.getElementById('uv-cat').value,
     privacy: document.getElementById('uv-privacy').value,
-    thumb: _uvThumb || null, created: new Date().toISOString()
+    thumb: _uvThumb || null, created: new Date().toISOString(), classification: cls
   };
   try {
     await apiRequest('/api/videos', { method:'POST', body:v });
@@ -4756,6 +4949,7 @@ function openGamePage(mapId) {
   const maps = getMaps();
   const m = maps[mapId];
   if (!m) { showToast('Juego no encontrado'); return; }
+  if (!clsAdultGate(m)) return;
   window._gpMapId = mapId;
   // Thumb
   const thumbEl = document.getElementById('gp-thumb');
@@ -4776,7 +4970,7 @@ function openGamePage(mapId) {
     '<span>👁 '+(m.plays||0)+' jugadas</span>'+
     '<span>❤️ '+(m.likes||0)+'</span>'+
     '<span>🕒 '+dateStr(m.created)+'</span>'+
-    '<span>🎮 '+({adventure:'Aventura',building:'Construcción',roleplay:'Rol',shooter:'Shooter',parkour:'Parkour',puzzle:'Puzzle',other:'Otro'}[m.genre]||m.genre||'Otro')+'</span>';
+    '<span>🎮 '+({adventure:'Aventura',building:'Construcción',roleplay:'Rol',shooter:'Shooter',parkour:'Parkour',puzzle:'Puzzle',other:'Otro'}[m.genre]||m.genre||'Otro')+'</span>'+clsBadge(m, m.authorId === ME.id);
   // Privacy badge
   const privBadge = document.getElementById('gp-privacy-badge');
   const privMap = {public:['🌍 Público','var(--green)'],friends:['👥 Amigos','var(--yellow)'],assigned:['🔒 Asignado','var(--acc2)'],private:['🔐 Privado','var(--red)']};
