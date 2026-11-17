@@ -1852,7 +1852,7 @@ const CLS_UI = {
     loading:'Loading questionnaire…', loadFail:'Could not load the questionnaire', calcFail:'Could not calculate the rating', needBefore:'The rating questionnaire is required to upload it.',
     draft:'It stays as a draft: nobody else sees it until you rate it (🏷️).', adultGate:'This content is rated {l} (adults only). Do you confirm you are of legal age?', unrated:'Unrated', classify:'Rate', classified:'Rating: {l}', pending:'Pending: you will be asked when publishing', saved:'🏷️ Rating saved: {l}', rejected:'Could not upload', adult:'Adults' },
 };
-const clsL = () => (LANG === 'es' ? 'es' : 'en');
+const clsL = () => ((window.__crixLang || 'es') === 'es' ? 'es' : 'en');   // LANG vive dentro del IIFE de idiomas: antes esto lanzaba ReferenceError y rompía Publicar y la clasificación
 function clsT(key, vars) { let s = (CLS_UI[clsL()][key] ?? CLS_UI.es[key] ?? key); if (vars) for (const k in vars) s = s.split('{' + k + '}').join(vars[k]); return s; }
 let _clsCfgCache = {}, _clsGeoP = null, _cls = null, pubClass = null, _uvCls = null;
 const _clsAdultOk = new Set();
@@ -2283,10 +2283,27 @@ async function migrateLegacyMapIds() {
     }
   }
 }
+// Si el servidor perdió tu cuenta y te registraste otra vez con el mismo nombre, tus juegos locales quedan con el id de autor viejo.
+// Antes la sincronización los descartaba al reemplazar el catálogo local por el del servidor (así "se borraban todos").
+// Ahora se reasignan a tu cuenta nueva y se vuelven a subir. Los nombres de usuario son únicos, así que no se mezcla con otra persona.
+function claimOrphanMaps() {
+  if (!ME || ME.guest) return 0;
+  const name = String(ME.username || '').toLowerCase(); if (!name) return 0;
+  const maps = getMaps(); let n = 0;
+  Object.values(maps).forEach(m => {
+    if (!m || m.partial || m.authorId === ME.id || String(m.authorName || '').toLowerCase() !== name) return;
+    m.authorId = ME.id; m.authorName = ME.username; UNSYNCED_MAPS.add(m.id);
+    ME.games = ME.games || []; if (!ME.games.includes(m.id)) ME.games.push(m.id);
+    n++;
+  });
+  if (n) { DB.set('maps', maps); try { saveMe(); } catch (_) {} console.warn('[CLOUD] ' + n + ' juego(s) local(es) reasignados a tu cuenta'); }
+  return n;
+}
 async function syncCloudData() {
   if (_syncBusy) return; _syncBusy = true;
   CLOUD_READY = false;
   try { await migrateLegacyMapIds(); } catch (e) { console.warn('[CLOUD] migración de ids:', e.message); }
+  try { claimOrphanMaps(); } catch (e) { console.warn('[CLOUD] reasignación de juegos:', e.message); }
   const localMaps = getMaps();
   const localVideos = getVideos();
   const localPosts = getPosts();
@@ -8586,6 +8603,7 @@ ORDER.slice(1).forEach((l, i) => { const m = new Map(); ROWS.forEach(r => m.set(
 
 let LANG = 'es';
 try { const s = localStorage.getItem('crix_lang'); if (s && LANGS[s]) LANG = s; } catch (_) {}
+window.__crixLang = LANG;
 
 function trStr(src, lang) {
   if (lang === 'es') return src;
@@ -8643,7 +8661,7 @@ function fillLangSelects() {
 }
 function setLang(l) {
   if (!LANGS[l]) return;
-  LANG = l;
+  LANG = l; window.__crixLang = l;
   try { localStorage.setItem('crix_lang', l); } catch (_) {}
   document.documentElement.lang = l;
   observer.disconnect();
