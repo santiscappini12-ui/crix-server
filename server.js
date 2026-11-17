@@ -9,6 +9,7 @@ const crypto   = require('crypto');
 const { fork } = require('node:child_process');
 const persist  = require('./persist');
 const worldPhysics = require('./world-physics');
+const classification = require('./classification');   // cuestionario de clasificación por país (juegos, apps y videos)
 
 if (persist.enabled && !persist.restored) {
   console.error('[PERSIST] Hay almacenamiento externo configurado: arrancá con "npm start" (start.js) para restaurar los datos antes de iniciar el servidor.');
@@ -169,7 +170,7 @@ function emitMembers(convId, event, payload) { String(convId).split('_').forEach
 function broadcastRemote(events) {
   for (const [col, kind, id, rec] of events) {
     if (col === 'maps') {
-      if (kind === 'new') { if ((rec.privacy || 'public') === 'public') io.emit('map_new', { mapId:id, name:rec.name, authorName:rec.authorName }); else io.emit('map_updated', { mapId:id }); }
+      if (kind === 'new') { if (mapIsPublic(rec)) io.emit('map_new', { mapId:id, name:rec.name, authorName:rec.authorName }); else io.emit('map_updated', { mapId:id }); }
       else if (kind === 'updated') io.emit('map_updated', { mapId:id });
       else if (kind === 'deleted') io.emit('map_deleted', { mapId:id });
     } else if (col === 'videos') {
@@ -514,7 +515,7 @@ function presenceInfo(userId, viewer) {
   if (!presence) return { online:false };
   const info = { online:true };
   const map = presence.mapId ? DB.maps[presence.mapId] : null;
-  if (map && presence.instanceId && (viewer === undefined ? (map.privacy || 'public') === 'public' : (viewer?.id === userId || canReadMap(map, viewer)))) {
+  if (map && presence.instanceId && (viewer === undefined ? mapIsPublic(map) : (viewer?.id === userId || canReadMap(map, viewer)))) {
     info.currentGameId = presence.mapId; info.currentInstanceId = presence.instanceId;
     info.currentGameName = map.name || presence.mapId;
     info.currentInstancePlayers = roomPlayerCount(presence.mapId, presence.instanceId) || 1;
@@ -578,8 +579,11 @@ function requireAdmin(req, res, next) {
   if (!req.user?.isAdmin) return res.status(403).json({ ok:false, err:'Se requieren permisos de administración' });
   next();
 }
+// Un juego/app todavía sin clasificar (borrador) no se muestra a nadie más hasta que su autor complete el cuestionario.
+function mapIsPublic(map) { return !!map && (map.privacy || 'public') === 'public' && !map.unrated; }
 function canReadMap(map, user) {
   const privacy = map.privacy || 'public';
+  if (map.unrated && !(user && (map.authorId === user.id || user.isAdmin || (Array.isArray(map.collaborators) && map.collaborators.includes(user.id))))) return false;
   if (privacy === 'public') return true;
   if (!user) return false;
   if (map.authorId === user.id || user.isAdmin) return true;
@@ -821,7 +825,7 @@ function shareMeta(kind, key) {
   try {
     if (kind === 'juego') {
       const map = DB.maps[key];
-      if (map && (map.privacy || 'public') === 'public') return { title: `${map.name || 'Juego'} — Crix`, desc: String(map.desc || `Juega a ${map.name || 'este juego'} en Crix`).slice(0, 200) };
+      if (mapIsPublic(map)) return { title: `${map.name || 'Juego'} — Crix`, desc: String(map.desc || `Juega a ${map.name || 'este juego'} en Crix`).slice(0, 200) };
     } else if (kind === 'video') {
       const video = (DB.videos || []).find(item => item.id === key);
       if (video && (video.privacy || 'public') === 'public' && video.ready !== false) return { title: `${video.title || 'Video'} — Crix`, desc: String(video.desc || video.description || `Mira este video de ${video.authorName || 'Crix'} en Crix`).slice(0, 200) };
@@ -860,7 +864,7 @@ function sharePage(kind) {
 // ── Acceso directo de un juego: manifiesto + ícono propios (ícono elegido por el creador; si no, la miniatura) ──
 const ICON_DATA_RE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+=*)$/;
 const okIconData = v => typeof v === 'string' && v.length <= 600000 && ICON_DATA_RE.test(v);
-function publicMapForShortcut(id) { const m = DB.maps[String(id || '')]; return m && (m.privacy || 'public') === 'public' ? m : null; }
+function publicMapForShortcut(id) { const m = DB.maps[String(id || '')]; return mapIsPublic(m) ? m : null; }
 function gameIconSource(map) { return okIconData(map?.icon) ? map.icon : (typeof map?.thumb === 'string' && map.thumb.length <= 2000000 && ICON_DATA_RE.test(map.thumb) ? map.thumb : null); }
 function gameIconVersion(map) { const src = gameIconSource(map); return src ? crypto.createHash('sha1').update(src).digest('hex').slice(0, 10) : '0'; }
 app.get('/juego/:id/icon.png', (req, res) => {
@@ -1346,7 +1350,7 @@ app.post('/api/join-user/:id', requireAuth, (req, res) => {
 // (`partial:true`) y el juego completo se pide al abrirlo (GET /api/maps/:id). Los propios y los de colaboración van completos
 // hasta un tope de tamaño. `?full=1` devuelve el catálogo completo como antes.
 const MAP_LIST_FULL_BUDGET = 8 * 1024 * 1024;
-const MAP_LIGHT_KEYS = ['likedBy', 'collaborators', 'assignedPlayers', 'textureIds', 'textureNames', 'sounds', 'tags'];
+const MAP_LIGHT_KEYS = ['classification', 'likedBy', 'collaborators', 'assignedPlayers', 'textureIds', 'textureNames', 'sounds', 'tags'];
 function publicMapRecord(m) { if (m.icon) { const { icon, ...rest } = m; return { ...rest, hasIcon:true }; } return m; }
 function summarizeMap(id, m) {
   const out = { partial:true };
@@ -1361,11 +1365,24 @@ function summarizeMap(id, m) {
   if (m.icon) out.hasIcon = true;
   if (typeof m.thumb === 'string' && m.thumb) {
     if (m.thumb.length <= 4096) out.thumb = m.thumb;
-    else if ((m.privacy || 'public') === 'public' && /^data:image\/(jpeg|png|webp|gif);base64,/.test(m.thumb)) out.thumb = `/api/maps/${encodeURIComponent(id)}/thumb?v=${Number(m._u) || 0}`;
+    else if (mapIsPublic(m) && /^data:image\/(jpeg|png|webp|gif);base64,/.test(m.thumb)) out.thumb = `/api/maps/${encodeURIComponent(id)}/thumb?v=${Number(m._u) || 0}`;
     else if (m.thumb.length <= 400000) out.thumb = m.thumb;   // no públicos: sin URL abierta, la miniatura va dentro
   }
   return out;
 }
+// ── Clasificación por país ──
+// config: preguntas y países (textos en es/en) · geo: país detectado por cabeceras del hosting o por APIs de geolocalización IP
+// evaluate: calcula la clasificación (o rechaza si es ilegal) para mostrarla antes de subir. Las rutas de subida la vuelven a calcular.
+app.get('/api/classification/config', (req, res) => res.json({ ok:true, ...classification.publicConfig(req.query.kind, req.query.lang) }));
+app.get('/api/classification/geo', async (req, res) => {
+  try { const g = await classification.detectCountry(req, fetchJson); res.json({ ok:true, country:g.country, source:g.source }); }
+  catch { res.json({ ok:true, country:null, source:'none' }); }
+});
+app.post('/api/classification/evaluate', requireAuth, (req, res) => {
+  const ev = classification.evaluate(req.body, req.query.lang || req.body?.lang);
+  if (!ev.ok) return res.status(422).json({ ok:false, code:ev.code, err:ev.err, reasons:ev.reasons });
+  res.json({ ok:true, result:ev.result });
+});
 app.get('/api/maps', (req, res) => {
   const uObj = readSession(req);
   const out  = {};
@@ -1392,7 +1409,7 @@ app.get('/api/maps/:id', (req, res) => {
 // Miniatura como imagen real (solo juegos públicos): así el catálogo no lleva cientos de KB en base64 por juego.
 app.get('/api/maps/:id/thumb', (req, res) => {
   const m = DB.maps[req.params.id];
-  const match = m && (m.privacy || 'public') === 'public' && typeof m.thumb === 'string' ? /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(m.thumb) : null;
+  const match = m && mapIsPublic(m) && typeof m.thumb === 'string' ? /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(m.thumb) : null;
   if (!match) return res.status(404).end();
   res.set({ 'Content-Type': match[1], 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=86400' });
   res.end(Buffer.from(match[2], 'base64'));
@@ -1476,7 +1493,7 @@ app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
   const file = texFile(assetId(req.params.id), req.params.tid) || await persist.fetchTexture(assetId(req.params.id), req.params.tid); if (!file) return res.status(404).end();
-  res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
+  res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': mapIsPublic(map) ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 
@@ -1534,7 +1551,7 @@ app.get('/api/maps/:id/sounds/:sid', async (req, res) => {
   const map = DB.maps[req.params.id], user = readSession(req) || userFromToken(req.query.t);
   if (!map || !MAP_ID_RE.test(req.params.id) || !SND_ID_RE.test(req.params.sid) || !canReadMap(map, user)) return res.status(404).end();
   const file = soundFile(assetId(req.params.id), req.params.sid) || await persist.fetchSound(assetId(req.params.id), req.params.sid); if (!file) return res.status(404).end();
-  res.set({ 'Content-Type': SND_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': (map.privacy || 'public') === 'public' ? 'public, max-age=86400' : 'private, max-age=600' });
+  res.set({ 'Content-Type': SND_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': mapIsPublic(map) ? 'public, max-age=86400' : 'private, max-age=600' });
   res.sendFile(file, { acceptRanges:true, dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 app.delete('/api/maps/:id/sounds/:sid', requireAuth, (req, res) => {
@@ -1561,16 +1578,28 @@ app.post('/api/maps', (req, res) => {
     const isOwner = !old || old.authorId === user.id || !!user.isAdmin;
     // Quien colabora no cambia la visibilidad ni el equipo; el equipo siempre lo decide el servidor.
     const body = isOwner ? m : { ...m, privacy:old.privacy, assignedPlayers:old.assignedPlayers };
+    // Clasificación: la define solo quien es dueño (o admin); el servidor la recalcula desde las respuestas.
+    const mapKind = (m.kind === 'app' || old?.kind === 'app') ? 'app' : 'game';
+    let cls = old?.classification;
+    if (isOwner && m.classification && typeof m.classification === 'object') {
+      const ev = classification.evaluate({ ...m.classification, kind:mapKind }, 'es');
+      if (ev.ok) cls = ev.result;
+      else if (ev.code === 'ILLEGAL_CONTENT' || ev.code === 'KIDS_CONFLICT') return res.status(422).json({ ok:false, code:ev.code, err:ev.err, reasons:ev.reasons });
+    }
     const next = { ...body, assetsId: old?.assetsId, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [] };
     // En una sesión de equipo activa, las partes/scripts/luces ya llegan por cambios en vivo: un guardado completo no las pisa.
     if (old && teamInSession(m.id, user.id)) for (const k of TEAM_PROTECTED) if (old[k] !== undefined) next[k] = old[k];
     if (okIconData(m.icon)) next.icon = m.icon; else if (okIconData(old?.icon)) next.icon = old.icon; else delete next.icon;
     delete next.hasIcon;
+    delete next.unrated; delete next.classification;
+    if (cls) next.classification = cls;
+    // Sin clasificación válida, un juego/app NUEVO queda como borrador oculto (solo lo ve su autor). Los anteriores a esta función siguen visibles.
+    if (!cls && (!old || old.unrated)) next.unrated = true;
     DB.maps[m.id] = next;
     delete DB.maps[m.id].textures;
     saveDB();
     io.emit('map_updated', { mapId: m.id });
-    if (!old && (DB.maps[m.id].privacy || 'public') === 'public') io.emit('map_new', { mapId:m.id, name:DB.maps[m.id].name, authorName:DB.maps[m.id].authorName });
+    if ((!old || old.unrated) && mapIsPublic(DB.maps[m.id])) io.emit('map_new', { mapId:m.id, name:DB.maps[m.id].name, authorName:DB.maps[m.id].authorName });
     res.json({ ok:true });
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
@@ -1838,11 +1867,18 @@ app.post('/api/videos', async (req, res) => {
     if (idx >= 0 && DB.videos[idx].authorId !== user.id && !user.isAdmin)
       return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
     const old = idx >= 0 ? DB.videos[idx] : null;
+    // Clasificación del video ENTERO: obligatoria para subir uno nuevo. Si el contenido es ilegal, no se sube.
+    let cls = old?.classification;
+    if (!old || (v.classification && typeof v.classification === 'object')) {
+      const ev = classification.evaluate({ ...(v.classification || {}), kind:'video' }, 'es');
+      if (ev.ok) cls = ev.result;
+      else if (!old || ev.code === 'ILLEGAL_CONTENT' || ev.code === 'KIDS_CONFLICT') return res.status(422).json({ ok:false, code:v.classification ? ev.code : 'CLASSIFICATION_REQUIRED', err:v.classification ? ev.err : 'Antes de subir un video tenés que completar el cuestionario de clasificación.', reasons:ev.reasons });
+    }
     const privacy = ['public','private'].includes(v.privacy) ? v.privacy : 'public';
     const thumb = typeof v.thumb === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(v.thumb) && v.thumb.length <= 2000000 ? v.thumb : (old?.thumb || null);
     const saved = {
       ...(old || {}), id:String(v.id), title:String(v.title).slice(0,120), desc:String(v.desc || '').slice(0,2000), cat:String(v.cat || 'otros').slice(0,30),
-      authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb,
+      authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb, ...(cls ? { classification: cls } : {}),
       views: old?.views || 0, likes: old?.likes || [], comments: old?.comments || [], created: old?.created || v.created || new Date().toISOString()
     };
     const wasReady = !!old?.ready;
