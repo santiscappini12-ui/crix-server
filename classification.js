@@ -65,7 +65,9 @@ const LEGAL_COMMON = [
 ];
 // Obligatoria con respuesta "sí" (si dice "no", no se puede subir).
 const LEGAL_RIGHTS = { id: 'rights', text: T('¿Tenés los derechos o el permiso para publicar todo lo que incluye (imágenes, música, videos, código, modelos)?', 'Do you own the rights or have permission to publish everything it includes (images, music, videos, code, models)?') };
-const NAZI_SYMBOLS = { id: 'nazi_symbols', text: T('¿Muestra símbolos o propaganda de organizaciones nazis o inconstitucionales fuera de un contexto educativo, artístico o histórico?', 'Does it show symbols or propaganda of Nazi or unconstitutional organizations outside an educational, artistic, or historical context?') };
+// Solo se pregunta en países donde la ley prohíbe estos símbolos (en la mayoría del mundo no es delito mostrarlos, ni siquiera por humor).
+// Educativo, histórico, informativo, arte o sátira que claramente RECHAZA esas ideas → "no". Humor que los muestra sin ese rechazo → "sí".
+const NAZI_SYMBOLS = { id: 'nazi_symbols', text: T('¿Muestra símbolos o propaganda de organizaciones nazis o inconstitucionales? Respondé "no" si es educativo, histórico, informativo, o arte o sátira que claramente rechaza esas ideas. Si es humor (incluido el absurdo) que los muestra sin rechazarlos, respondé "sí": en este país la ley puede prohibirlo aunque sea un chiste.', 'Does it show symbols or propaganda of Nazi or unconstitutional organizations? Answer "no" if it is educational, historical, informational, or art or satire that clearly rejects those ideas. If it is humor (including absurd humor) that shows them without rejecting them, answer "yes": in this country the law may prohibit it even as a joke.') };
 const HOLOCAUST = { id: 'holocaust_denial', text: T('¿Niega, minimiza o justifica el Holocausto o genocidios reconocidos?', 'Does it deny, trivialize, or justify the Holocaust or recognized genocides?') };
 // Extras por país (solo donde la ley las prohíbe de forma específica). Fácil de ampliar.
 const LEGAL_EXTRA = {

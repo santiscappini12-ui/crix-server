@@ -819,7 +819,9 @@ app.use((req, res, next) => {
 // (server.js, package.json, script-runner.js...).
 const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
-app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });   // sin caché: así un deploy nuevo se ve enseguida
+app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
+// Página para probar la API de clasificación desde el navegador (misma dirección que Crix, sin problemas de CORS): /probar-api
+app.get('/probar-api', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'probar-api.html')); });   // sin caché: así un deploy nuevo se ve enseguida
 
 // ── Enlaces compartibles ──────────────────────────────────────────────────────────────────────
 //   /juego/<id>/<nombre>   /video/<id>/<nombre>   /u/<usuario>

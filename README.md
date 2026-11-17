@@ -77,6 +77,7 @@ Cualquier usuario con sesión puede conseguir sus propias claves desde **⚙️ 
 - `POST /api/v1/rating/evaluate`: cuerpo `{ kind, country, answers, legal, declared }`. Devuelve la insignia Crix del país (`system`, `label`, `age`, `adult`, `descriptors`, `badgeUrl` y `badge` en SVG) o `422` si el contenido es ilegal.
 - `GET /api/v1/rating/badge.svg?system=AR&age=12&size=48` (`explicit=1` para la categoría explícita): dibujo de la insignia. Es público y sin clave, para usarlo en un `<img>`.
 - La clave va en la cabecera `X-Crix-Key`. Hay CORS abierto en `/api/v1`, y el límite por defecto es de 120 pedidos por minuto por clave (`429` si se pasa); se cambia con la variable `CRIX_API_RATE` (`0` = sin límite).
+- Para probarla desde el navegador, abrí `/probar-api` en tu Crix (pega la clave y calcula).
 - Las insignias son propias de Crix, no una clasificación oficial. Quien use la API es responsable de la veracidad de las respuestas que envía.
 
 ## Notificaciones (PWA)

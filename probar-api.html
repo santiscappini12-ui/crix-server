@@ -1,0 +1,23 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Probar API de Crix</title>
+<style>body{font:15px system-ui;max-width:640px;margin:24px auto;padding:0 16px}input,select,button{font:inherit;padding:8px;margin:4px 0;width:100%;box-sizing:border-box}button{cursor:pointer}pre{background:#f2f2f2;padding:10px;overflow:auto;font-size:12px}#b{margin:8px 0}</style>
+<h2>Probar la API de clasificación de Crix</h2>
+<label>Dirección de Crix (ya viene la de esta página)<input id=u></label>
+<label>Tu clave (crxc_…)<input id=k placeholder="crxc_..."></label>
+<label>Tipo<select id=t><option>game</option><option>app</option><option>video</option></select></label>
+<button onclick="cfg()">1) Cargar cuestionario y países</button>
+<label>País<select id=c></select></label>
+<label>Edad más alta de las respuestas<select id=lvl><option value=0>Lo más suave (todas las respuestas en la primera opción)</option><option value=max>Lo más fuerte (última opción de cada pregunta)</option></select></label>
+<button onclick="ev()">2) Calcular clasificación</button>
+<div id=b></div><pre id=o>Esperando…</pre>
+<script>document.getElementById("u").value=location.origin;
+let C=null;const $=i=>document.getElementById(i);
+const H=()=>({'X-Crix-Key':$('k').value.trim(),'Content-Type':'application/json'});
+const show=x=>$('o').textContent=typeof x==='string'?x:JSON.stringify(x,null,2);
+async function cfg(){try{const r=await fetch($('u').value+'/api/v1/rating/config?kind='+$('t').value+'&lang=es',{headers:H()});const j=await r.json();if(!r.ok)return show(j);C=j;
+ $('c').innerHTML=j.countries.map(x=>`<option value="${x.code}">${x.name} · ${x.systemName}</option>`).join('');$('c').value='AR';show('Cargado: '+j.questions.length+' preguntas, '+j.countries.length+' países. Ahora elegí país y calculá.')}catch(e){show('Error de conexión: '+e.message+'\n¿Está corriendo Crix en esa dirección?')}}
+async function ev(){if(!C)return show('Primero cargá el cuestionario (paso 1).');
+ const answers={};for(const q of C.questions)answers[q.id]=$('lvl').value==='max'?q.options.length-1:0;
+ const legal={};for(const q of [...C.legalCommon,...(C.legalExtra[$('c').value]||[])])legal[q.id]=false;legal[C.rights.id]=true;
+ try{const r=await fetch($('u').value+'/api/v1/rating/evaluate',{method:'POST',headers:H(),body:JSON.stringify({kind:$('t').value,country:$('c').value,answers,legal,declared:true})});const j=await r.json();show(j);
+ $('b').innerHTML=j.ok?'<img src="'+j.result.badgeUrl+'" height=64> '+j.result.system+' · '+j.result.label:''}catch(e){show('Error: '+e.message)}}
+</script>
