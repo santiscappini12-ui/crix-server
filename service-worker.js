@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v15';
+const CACHE_NAME = 'crix-shell-v16';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-72.png'];
 const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-72.png';
@@ -73,6 +73,8 @@ function describe(d) {
       return { title: 'Solicitud de amistad', body: name + ' quiere ser tu amigo en Crix', tag: d.tag || 'friend', renotify: true, vibrate: [150, 80, 150] };
     case 'friend_accepted':
       return { title: 'Solicitud aceptada', body: name + ' ahora es tu amigo en Crix', tag: d.tag || 'friend-ok', renotify: true, vibrate: [150, 80, 150] };
+    case 'activity':   // comentarios, me gusta, seguidores, novedades de a quienes seguís, equipo, cuenta...
+      return { title: d.title || 'Crix', body: d.body || '', tag: d.tag || 'act', renotify: true, vibrate: [150, 80, 150] };
     default:
       return { title: d.title || 'Crix', body: d.body || '', tag: d.tag || 'crix', renotify: true };
   }
@@ -89,7 +91,7 @@ self.addEventListener('push', event => {
       open.filter(n => (n.tag || '').startsWith('call-' + (d.from || ''))).forEach(n => n.close());
       if (!d.missed) return;
     }
-    const data = { type: d.type, from: d.from, url: d.url || '/' };
+    const data = { type: d.type, from: d.from, kind: d.kind, id: d.id, url: d.url || '/' };
     try {
       await self.registration.showNotification(info.title, {
         body: info.body, tag: info.tag, renotify: info.renotify, requireInteraction: !!info.requireInteraction,
@@ -111,7 +113,7 @@ self.addEventListener('notificationclick', event => {
   // Una llamada genera varios avisos apilados: al tocar uno se quitan todos los de esa persona.
   if (data.type === 'call') event.waitUntil(self.registration.getNotifications().then(list => list.filter(x => (x.tag || '').startsWith('call-' + (data.from || ''))).forEach(x => x.close())));
   const action = event.action || '';
-  const msg = { crixNotif: true, type: data.type, from: data.from, action };
+  const msg = { crixNotif: true, type: data.type, from: data.from, kind: data.kind, id: data.id, action };
   // Si la app no está abierta, se abre con los datos en la URL y el cliente los procesa al iniciar sesión.
   let target = new URL(data.url || '/', self.location.origin);
   if (action) target.searchParams.set('a', action);

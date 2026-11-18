@@ -244,6 +244,37 @@ function notifyPush(userId, payload, options) {
   if (!userId || !needsPush(userId)) return;
   push.send(userId, payload, { ...(options || {}), excludeEndpoints: visibleEndpoints(userId) }).catch(() => {});
 }
+// ── Novedades como notificación ──
+// Un aviso de actividad (comentario, me gusta, seguidor nuevo, algo nuevo de alguien que seguís...) llega por dos vías:
+// en vivo por socket (toast si la app está abierta) y como push al PWA cuando no está a la vista.
+// `tag` hace que avisos repetidos de lo mismo se reemplacen en vez de apilarse. El push nunca lleva datos privados.
+const clip = (t, n = 110) => { t = String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+function notifyActivity(userId, p, options) {
+  const { noSocket, ...pushOpts } = options || {};
+  if (!userId || !p || !DB.users[userId]) return;
+  if (p.from && String(p.from) === String(userId)) return;   // nunca te avisa de lo que hiciste vos
+  const id = p.id == null ? '' : String(p.id);
+  const payload = { type:'activity', kind:p.kind, id, from:p.from || '', fromName:p.fromName || '', title:clip(p.title, 80), body:clip(p.body, 140),
+    tag:p.tag || ('act-' + p.kind + '-' + id), url:'/?n=open&k=' + encodeURIComponent(p.kind) + '&id=' + encodeURIComponent(id) + (p.kind === 'user' ? '&u=' + encodeURIComponent(id) : '') };
+  if (!noSocket) try { toUser(userId).emit('activity', { kind:payload.kind, id, title:payload.title, body:payload.body, tag:payload.tag }); } catch {}
+  notifyPush(userId, payload, { ttl:3 * 24 * 3600, ...pushOpts });
+}
+// Quién quiere enterarse de lo nuevo de una cuenta: sus seguidores y sus amigos (máx. 1000).
+function audienceOf(authorId) {
+  const author = DB.users[authorId], friends = new Set((author && author.friends) || []), out = [];
+  for (const u of Object.values(DB.users)) {
+    if (!u || u.id === authorId || banActive(u)) continue;
+    if ((Array.isArray(u.following) && u.following.includes(authorId)) || friends.has(u.id)) { out.push(u); if (out.length >= 1000) break; }
+  }
+  return out;
+}
+function announceNew(kind, rec, authorId, authorName, title, body) {
+  for (const u of audienceOf(authorId)) {
+    if ((kind === 'game' || kind === 'video') && !canEnterAdult(rec, u)) continue;   // el contenido +18 solo se anuncia a quien puede abrirlo
+    notifyActivity(u.id, { kind, id:rec.id, from:authorId, fromName:authorName, title, body }, { noSocket:true });
+  }
+}
+const kindWord = m => (m && m.kind === 'app') ? 'app' : 'juego';
 // El chat y las llamadas son solo entre amigos (la amistad es mutua: ambas cuentas se tienen en su lista).
 function areFriends(a, b) {
   const ua = DB.users[a], ub = DB.users[b];
@@ -693,6 +724,7 @@ app.post('/api/maps/:id/team', requireAuth, (req, res) => {
     if (map.collaborators.length >= MAX_COLLABORATORS) return res.status(400).json({ ok:false, err:'El equipo está completo (' + MAX_COLLABORATORS + ')' });
     map.collaborators.push(target.id);
     toUser(target.id).emit('team_invite', { mapId:map.id, mapName:map.name || 'Proyecto', from:req.user.username });
+    notifyActivity(target.id, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'🤝 ' + req.user.username + ' te sumó a su equipo', body:map.name || 'Proyecto', tag:'team-' + map.id });
   } else if (remove) {
     map.collaborators = map.collaborators.filter(id => id !== remove);
     const sess = teamSessions[map.id];
@@ -1149,13 +1181,18 @@ app.post('/api/user/:id', (req, res) => {
     let unbanned = false;
     if (actor.isAdmin && req.body.banned && typeof req.body.banned === 'object') allowed.push('banned');
     else if (actor.isAdmin && 'banned' in req.body && !req.body.banned && u.banned) { delete u.banned; unbanned = true; }
+    const followedBefore = new Set(Array.isArray(u.following) ? u.following : []);
     allowed.forEach(k => { if (req.body[k] !== undefined) u[k] = req.body[k]; });
+    if (actor.id === u.id && Array.isArray(u.following))
+      for (const fid of u.following) if (!followedBefore.has(fid) && DB.users[fid]) notifyActivity(fid, { kind:'user', id:u.id, from:u.id, fromName:u.username, title:'👤 ' + u.username + ' te sigue ahora', body:'Tenés un seguidor nuevo', tag:'follow-' + u.id });
     if (actor.isAdmin && req.body.isAdmin !== undefined) {
       u.isAdmin = !!req.body.isAdmin;
       if (u.isAdmin) u.adminGrantedBy = actor.id; else delete u.adminGrantedBy;
     }
     DB.users[req.params.id] = u;
     saveDB();
+    if (actor.isAdmin && req.body.banned && typeof req.body.banned === 'object') notifyActivity(u.id, { kind:'home', id:'ban', title:'🚫 Tu cuenta fue suspendida', body:clip(req.body.banned.reason || 'Revisá las normas de Crix.'), tag:'ban' });
+    if (unbanned) notifyActivity(u.id, { kind:'home', id:'unban', title:'✅ Tu cuenta fue reactivada', body:'Ya podés volver a usar Crix.', tag:'ban' });
     if (unbanned) { log('UNBAN', req.params.id); const t = onlineUsers[req.params.id]; if (t) io.to(t.socketId).emit('you_are_unbanned'); }
     io.emit('user_updated', { userId: req.params.id });
     res.json({ ok:true });
@@ -1243,7 +1280,8 @@ app.post('/api/admin/users/:id/adult', requireAuth, requireAdmin, (req, res) => 
   saveDB();
   toUser(target.id).emit('user_updated', { userId:target.id });
   io.emit('user_updated', { userId:target.id });
-  toUser(target.id).emit('map_updated', { all:true });   // el catálogo cambia para esa cuenta: los juegos +18 se abren o se bloquean
+  toUser(target.id).emit('map_updated', { all:true });
+  notifyActivity(target.id, { kind:'home', id:'age', title:adult ? '🔞 Tu cuenta ya puede ver contenido +18' : '🔞 Se quitó el acceso a contenido +18', body:adult ? 'Ya podés abrir juegos y videos +18.' : 'Los juegos y videos +18 vuelven a estar bloqueados.', tag:'age-status' });   // el catálogo cambia para esa cuenta: los juegos +18 se abren o se bloquean
   console.log(`[AGE] ${req.user.username} ${adult ? 'marcó como +18 a' : 'quitó el +18 de'} ${target.username}${target.id === req.user.id ? ' (él mismo)' : ''}`);
   res.json({ ok:true, adult });
 });
@@ -1501,7 +1539,8 @@ app.post('/api/join-user/:id', requireAuth, (req, res) => {
 // hasta un tope de tamaño. `?full=1` devuelve el catálogo completo como antes.
 const MAP_LIST_FULL_BUDGET = 8 * 1024 * 1024;
 const MAP_LIGHT_KEYS = ['classification', 'likedBy', 'collaborators', 'assignedPlayers', 'textureIds', 'textureNames', 'sounds', 'tags'];
-function publicMapRecord(m) { const lab = m.thumb ? thumbLabel(m) : {}; if (m.icon) { const { icon, ...rest } = m; return { ...rest, ...lab, hasIcon:true }; } return m.thumb ? { ...m, ...lab } : m; }
+function publicMapRecord(m0) { const { comments, ...m } = m0; m.commentCount = Array.isArray(comments) ? comments.length : 0;   // los comentarios se piden aparte (GET /api/maps/:id/comments)
+  const lab = m.thumb ? thumbLabel(m) : {}; if (m.icon) { const { icon, ...rest } = m; return { ...rest, ...lab, hasIcon:true }; } return m.thumb ? { ...m, ...lab } : m; }
 function summarizeMap(id, m) {
   const out = { partial:true };
   for (const [k, v] of Object.entries(m)) {
@@ -1512,6 +1551,7 @@ function summarizeMap(id, m) {
     else if (MAP_LIGHT_KEYS.includes(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length <= 500) out[k] = v;
   }
   out.id = id;
+  out.commentCount = Array.isArray(m.comments) ? m.comments.length : 0;
   if (m.thumb) Object.assign(out, thumbLabel(m));
   if (m.icon) out.hasIcon = true;
   if (typeof m.thumb === 'string' && m.thumb) {
@@ -1801,7 +1841,7 @@ app.post('/api/maps', (req, res) => {
       if (ev.ok) cls = ev.result;
       else if (ev.code === 'ILLEGAL_CONTENT' || ev.code === 'KIDS_CONFLICT') return res.status(422).json({ ok:false, code:ev.code, err:ev.err, reasons:ev.reasons });
     }
-    const next = { ...body, assetsId: old?.assetsId, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [] };
+    const next = { ...body, assetsId: old?.assetsId, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [], comments: old?.comments || [] };
     // En una sesión de equipo activa, las partes/scripts/luces ya llegan por cambios en vivo: un guardado completo no las pisa.
     if (old && teamInSession(m.id, user.id)) for (const k of TEAM_PROTECTED) if (old[k] !== undefined) next[k] = old[k];
     if (okIconData(m.icon)) next.icon = m.icon; else if (okIconData(old?.icon)) next.icon = old.icon; else delete next.icon;
@@ -1819,7 +1859,11 @@ app.post('/api/maps', (req, res) => {
     delete DB.maps[m.id].textures;
     saveDB();
     io.emit('map_updated', { mapId: m.id });
-    if ((!old || old.unrated) && mapIsPublic(DB.maps[m.id])) io.emit('map_new', { mapId:m.id, name:DB.maps[m.id].name, authorName:DB.maps[m.id].authorName });
+    if ((!old || old.unrated) && mapIsPublic(DB.maps[m.id])) {
+      io.emit('map_new', { mapId:m.id, name:DB.maps[m.id].name, authorName:DB.maps[m.id].authorName });
+      const nm = DB.maps[m.id];
+      announceNew('game', nm, nm.authorId, nm.authorName, '🎮 ' + nm.authorName + ' publicó un ' + kindWord(nm) + ' nuevo', nm.name);
+    }
     res.json({ ok:true });
   } catch(e) { res.json({ ok:false, err:e.message }); }
 });
@@ -1870,8 +1914,51 @@ app.post('/api/maps/:id/like', requireAuth, (req, res) => {
   req.user.liked = liked ? [...new Set([...req.user.liked, map.id])] : req.user.liked.filter(id => id !== map.id);
   saveDB();
   io.emit('map_stats', { mapId:map.id, likes:map.likes, plays:map.plays || 0 });   // liviano: nadie vuelve a bajar el catálogo por un like
+  if (liked) notifyActivity(map.authorId, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'❤️ A ' + req.user.username + ' le gustó tu ' + kindWord(map), body:map.name, tag:'like-' + map.id });
   toUser(req.user.id).emit('user_updated', { userId:req.user.id });               // tus otros dispositivos actualizan tus favoritos
   res.json({ ok:true, liked, likes:map.likes });
+});
+
+// ── Comentarios de juegos y apps ──
+// Se guardan en el propio juego (map.comments). Para leerlos o comentar hay que poder abrir el juego (privacidad y +18).
+const MAX_MAP_COMMENTS = 1000, commentHits = new Map();   // userId → última hora de comentario (anti-spam)
+function commentable(req, res) {
+  const map = DB.maps[req.params.id];
+  if (!map || !canReadMap(map, req.user || null)) { res.status(404).json({ ok:false, err:'Juego no encontrado' }); return null; }
+  if (!canEnterAdult(map, req.user || null)) { ageRequired(res); return null; }
+  return map;
+}
+app.get('/api/maps/:id/comments', (req, res) => {
+  req.user = readSession(req);
+  const map = commentable(req, res); if (!map) return;
+  res.json({ ok:true, comments: Array.isArray(map.comments) ? map.comments : [] });
+});
+app.post('/api/maps/:id/comments', requireAuth, (req, res) => {
+  const map = commentable(req, res); if (!map) return;
+  const text = String(req.body?.text ?? req.body?.comment ?? '').trim().slice(0, 1000);
+  if (!text) return res.status(400).json({ ok:false, err:'El comentario está vacío' });
+  const now = Date.now();
+  if (now - (commentHits.get(req.user.id) || 0) < 1500) return res.status(429).json({ ok:false, err:'Esperá un momento antes de comentar de nuevo' });
+  commentHits.set(req.user.id, now);
+  map.comments = Array.isArray(map.comments) ? map.comments : [];
+  if (map.comments.length >= MAX_MAP_COMMENTS) map.comments.shift();
+  const comment = { id:`c${crypto.randomUUID()}`, authorId:req.user.id, authorName:req.user.username, text, created:new Date().toISOString() };
+  map.comments.push(comment);
+  saveDB();
+  io.emit('map_comment', { mapId:map.id, comment });
+  notifyActivity(map.authorId, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'💬 ' + req.user.username + ' comentó en ' + map.name, body:text, tag:'cmt-' + map.id });
+  res.json({ ok:true, comment });
+});
+app.delete('/api/maps/:id/comments/:cid', requireAuth, (req, res) => {
+  const map = DB.maps[req.params.id];
+  if (!map) return res.status(404).json({ ok:false });
+  const c = (map.comments || []).find(x => x.id === req.params.cid);
+  if (!c) return res.json({ ok:true });
+  if (c.authorId !== req.user.id && map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés borrar este comentario' });
+  map.comments = map.comments.filter(x => x.id !== c.id);
+  saveDB();
+  io.emit('map_comment', { mapId:map.id, removed:c.id });
+  res.json({ ok:true });
 });
 
 app.post('/api/maps/:id/play', (req, res) => {
@@ -2142,6 +2229,7 @@ app.post('/api/videos', async (req, res) => {
     saveDB();
     if (!old && persist.enabled) { try { await persist.flush(8000); } catch {} }   // que otra instancia ya pueda ver el video cuando llegue el PUT del archivo
     const becamePublic = !!old && (old.privacy !== 'public' || !old.classification) && saved.privacy === 'public' && !!saved.classification;
+    if (saved.ready && (!wasReady || becamePublic) && videoIsPublic(saved)) announceNew('video', saved, saved.authorId, saved.authorName, '🎬 ' + saved.authorName + ' subió un video', saved.title);
     if (saved.ready && (!wasReady || becamePublic) && videoIsPublic(saved)) io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, ...thumbLabel(saved), created: saved.created, privacy: saved.privacy });
     else if (old) io.emit('video_updated', { id: saved.id, refetch:true });   // título, descripción, miniatura o privacidad (si pasó a privado, el resto lo deja de ver)
     else toUser(saved.authorId).emit('video_updated', { id: saved.id, refetch:true });   // borrador: sus otros dispositivos lo ven mientras sube
@@ -2186,6 +2274,7 @@ async function finalizeVideoUpload(video, tmp, size) {
     video.file = file; video.mime = mime; video.size = size; video.ready = true; delete video.data;
     await settleUpload(persist.putFile('videos/' + file, path.join(VIDEO_DIR, file)));
     saveDB();
+    if (!wasReady && videoIsPublic(video)) announceNew('video', video, video.authorId, video.authorName, '🎬 ' + video.authorName + ' subió un video', video.title);
     if (!wasReady && videoIsPublic(video)) io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, ...thumbLabel(video), created: video.created, privacy: video.privacy });
     else emitVideoEvent(video, 'video_updated', { id: video.id, refetch:true });   // privado: aparece en los dispositivos del autor; archivo reemplazado: todos
     return { ok:true, size:video.size, mime:video.mime };
@@ -2249,6 +2338,7 @@ app.post('/api/videos/:id/like', (req, res) => {
   if (liked) v.likes.push(user.id); else v.likes.splice(idx, 1);
   saveDB();
   emitVideoEvent(v, 'video_updated', { id:v.id, likes:v.likes });
+  if (liked) notifyActivity(v.authorId, { kind:'video', id:v.id, from:user.id, fromName:user.username, title:'❤️ A ' + user.username + ' le gustó tu video', body:v.title, tag:'like-' + v.id });
   res.json({ ok: true, liked, likes: v.likes.length });
 });
 
@@ -2273,7 +2363,21 @@ app.post('/api/videos/:id/comment', (req, res) => {
   v.comments.push(comment);
   saveDB();
   emitVideoEvent(v, 'video_updated', { id:v.id, comment });
+  notifyActivity(v.authorId, { kind:'video', id:v.id, from:user.id, fromName:user.username, title:'💬 ' + user.username + ' comentó tu video', body:text, tag:'cmt-' + v.id });
   res.json({ ok: true, comment });
+});
+app.delete('/api/videos/:id/comments/:cid', (req, res) => {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  if (!v) return res.status(404).json({ ok:false });
+  const c = (v.comments || []).find(x => x.id === req.params.cid);
+  if (!c) return res.json({ ok:true });
+  if (c.authorId !== user.id && v.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés borrar este comentario' });
+  v.comments = v.comments.filter(x => x.id !== c.id);
+  saveDB();
+  emitVideoEvent(v, 'video_updated', { id:v.id, refetch:true });
+  res.json({ ok:true });
 });
 
 app.delete('/api/videos/:id', (req, res) => {
@@ -2310,7 +2414,10 @@ app.post('/api/posts', (req, res) => {
     if (index >= 0) DB.posts[index] = savedPost; else DB.posts.unshift(savedPost);
     saveDB();
     if (previous) io.emit('post_updated', { id: savedPost.id, refetch:true });   // edición: sin aviso de "nuevo post"
-    else io.emit('new_post', { id: savedPost.id, authorId: savedPost.authorId, authorName: savedPost.authorName, text: (savedPost.text||'').substring(0,100) });
+    else {
+      io.emit('new_post', { id: savedPost.id, authorId: savedPost.authorId, authorName: savedPost.authorName, text: (savedPost.text||'').substring(0,100) });
+      for (const u of audienceOf(savedPost.authorId)) notifyActivity(u.id, { kind:'post', id:savedPost.id, from:savedPost.authorId, fromName:savedPost.authorName, title:'📝 ' + savedPost.authorName + ' publicó en el foro', body:savedPost.text || savedPost.title }, { noSocket:true });
+    }
     res.json({ ok: true });
   } catch(e) { res.json({ ok: false, err: e.message }); }
 });
@@ -2338,6 +2445,7 @@ app.post('/api/posts/:id/like', (req, res) => {
   if (liked) p.likes.push(user.id); else p.likes.splice(idx, 1);
   saveDB();
   io.emit('post_updated', { id:p.id, likes:p.likes });
+  if (liked) notifyActivity(p.authorId, { kind:'post', id:p.id, from:user.id, fromName:user.username, title:'❤️ A ' + user.username + ' le gustó tu publicación', body:p.text || p.title, tag:'like-' + p.id });
   res.json({ ok: true, liked, likes: p.likes.length });
 });
 
@@ -2353,7 +2461,23 @@ app.post('/api/posts/:id/reply', (req, res) => {
   p.replies.push(reply);
   saveDB();
   io.emit('post_updated', { id:p.id, reply });
+  // Avisa a quien publicó y a quienes ya habían respondido en el hilo.
+  const people = new Set([p.authorId, ...p.replies.map(r => r.authorId)]);
+  for (const uid of people) notifyActivity(uid, { kind:'post', id:p.id, from:user.id, fromName:user.username, title:'💬 ' + user.username + (uid === p.authorId ? ' respondió tu publicación' : ' también respondió en una publicación'), body:text, tag:'cmt-' + p.id });
   res.json({ ok: true, reply });
+});
+app.delete('/api/posts/:id/replies/:rid', (req, res) => {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para continuar' });
+  const p = (DB.posts || []).find(x => x.id === req.params.id);
+  if (!p) return res.status(404).json({ ok:false });
+  const r = (p.replies || []).find(x => x.id === req.params.rid);
+  if (!r) return res.json({ ok:true });
+  if (r.authorId !== user.id && p.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés borrar esta respuesta' });
+  p.replies = p.replies.filter(x => x.id !== r.id);
+  saveDB();
+  io.emit('post_updated', { id:p.id, refetch:true });
+  res.json({ ok:true });
 });
 
 // ── STATUS ──

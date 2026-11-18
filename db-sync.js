@@ -113,13 +113,14 @@ module.exports = function createDbSync({ getDB, onRemoteChange }) {
         const plays = col === 'maps' ? Math.max(Number(l.plays) || 0, Number(r.plays) || 0) : 0;   // las reproducciones solo crecen
         // Comentarios, respuestas y vistas nunca se pierden: si dos instancias los cambiaron a la vez, se unen por id
         // (antes ganaba el registro entero más reciente y el comentario de la otra instancia desaparecía).
-        const additive = (col === 'videos' || col === 'posts') ? mergeAdditive(l, r) : null;
+        const additive = (col === 'videos' || col === 'posts' || col === 'maps') ? mergeAdditive(l, r) : null;
         if (ru > lu) {
           if (col === 'maps') r.plays = plays;
           if (additive) Object.assign(r, additive);
           put(DB, col, id, r); remember(col, id, r); events.push([col, 'updated', id, r]); changed = true;
         } else if (col === 'maps' && plays > (Number(l.plays) || 0)) {
-          l.plays = plays; cache.set('maps:' + id, { sig: sigOf(l), u: lu }); changed = true;   // sin cambiar `_u`
+          if (additive && additiveDiffers(l, additive)) { Object.assign(l, additive); events.push([col, 'updated', id, l]); changed = true; }   // comentarios de otra instancia: se unen (reconcile los estampa)
+          else { l.plays = plays; cache.set('maps:' + id, { sig: sigOf(l), u: lu }); changed = true; }   // sin cambiar `_u`
         } else if (additive && additiveDiffers(l, additive)) {
           Object.assign(l, additive); changed = true;   // `reconcile()` estampa el cambio y se propaga a las demás instancias
           events.push([col, 'updated', id, l]);

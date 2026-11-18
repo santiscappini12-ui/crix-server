@@ -5007,8 +5007,17 @@ function renderVideoComments(v) {
     '<div style="width:32px;height:32px;border-radius:50%;background:#5b8def;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">' + (c.authorName||'?')[0].toUpperCase() + '</div>' +
     '<div><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
     '<div style="font-size:13px;margin-top:2px">' + esc(c.text) + '</div>' +
-    '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : (c.time||'')) + '</div></div></div>'
+    '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : (c.time||'')) + '</div></div>' +
+    (ME && c.id && (c.authorId === ME.id || v.authorId === ME.id || isAdmin()) ? '<button class="btn btn-g" style="font-size:11px;padding:2px 8px;align-self:flex-start;margin-left:auto" title="Borrar" onclick="deleteVideoComment(\'' + c.id + '\')">🗑</button>' : '') + '</div>'
   ).join('') : '<div style="color:var(--text3);font-size:13px;padding:12px 0">Sin comentarios todavía.</div>';
+}
+async function deleteVideoComment(cid) {
+  if (!_activeVideoId || !confirm('¿Borrar este comentario?')) return;
+  try {
+    await apiRequest('/api/videos/' + encodeURIComponent(_activeVideoId) + '/comments/' + encodeURIComponent(cid), { method:'DELETE' });
+    const vids = getVideos(), v = vids.find(x => x.id === _activeVideoId);
+    if (v) { v.comments = (v.comments || []).filter(c => c.id !== cid); saveVideos(vids); renderVideoComments(v); }
+  } catch (e) { showToast((e && e.message) || 'No se pudo borrar', 3500); }
 }
 async function submitVideoComment() {
   const inp = document.getElementById('vp-comment-inp');
@@ -5326,6 +5335,50 @@ function initForums() {
   if (av) { av.innerHTML = avatarInnerHtml(ME); av.style.background = profileAvatarSrc(ME) ? 'transparent' : ME.color; av.style.overflow = 'hidden'; }
   renderForums();
 }
+// ── Comentarios de juegos y apps ──
+let _gcmt = { id:null, list:[], err:'' };
+async function loadGameComments(mapId) {
+  _gcmt = { id:mapId, list:[], err:'' };
+  const form = document.getElementById('gp-cmt-form'); if (form) form.style.display = (ME && !ME.guest) ? 'flex' : 'none';
+  renderGameComments();
+  try {
+    const r = await apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/comments');
+    if (_gcmt.id !== mapId) return;
+    _gcmt.list = r.comments || [];
+  } catch (e) { if (_gcmt.id !== mapId) return; _gcmt.err = (e && e.status === 404) ? 'Los comentarios estarán disponibles cuando el juego esté subido al servidor.' : ((e && e.message) || ''); }
+  renderGameComments();
+}
+function renderGameComments() {
+  const el = document.getElementById('gp-comments'); if (!el) return;
+  const t = document.getElementById('gp-cmt-title'); if (t) t.textContent = '💬 Comentarios' + (_gcmt.list.length ? ' (' + _gcmt.list.length + ')' : '');
+  if (_gcmt.err) { el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">' + esc(_gcmt.err) + '</div>'; return; }
+  const m = getMaps()[_gcmt.id], list = _gcmt.list.slice().reverse();
+  el.innerHTML = list.length ? list.map(c => {
+    const canDel = ME && (c.authorId === ME.id || (m && m.authorId === ME.id) || isAdmin());
+    return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="width:30px;height:30px;border-radius:50%;background:#5b8def;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">' + esc((c.authorName || '?')[0].toUpperCase()) + '</div>' +
+      '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
+      '<div style="font-size:13px;margin-top:2px;white-space:pre-wrap;word-break:break-word">' + esc(c.text) + '</div>' +
+      '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : '') + '</div></div>' +
+      (canDel ? '<button class="btn btn-g" style="font-size:11px;padding:2px 8px;align-self:flex-start" title="Borrar" onclick="deleteGameComment(\'' + c.id + '\')">🗑</button>' : '') + '</div>';
+  }).join('') : '<div style="color:var(--text3);font-size:13px;padding:8px 0">Sin comentarios todavía. ¡Sé el primero!</div>';
+}
+async function submitGameComment() {
+  const inp = document.getElementById('gp-cmt-inp'), id = _gcmt.id;
+  const text = (inp && inp.value || '').trim(); if (!text || !id) return;
+  try {
+    const r = await apiRequest('/api/maps/' + encodeURIComponent(id) + '/comments', { method:'POST', body:{ text } });
+    inp.value = '';
+    if (_gcmt.id === id && !_gcmt.list.some(c => c.id === r.comment.id)) { _gcmt.list.push(r.comment); _gcmt.err = ''; renderGameComments(); }
+  } catch (e) { showToast((e && e.message) || 'No se pudo comentar', 3500); }
+}
+async function deleteGameComment(cid) {
+  const id = _gcmt.id; if (!id || !confirm('¿Borrar este comentario?')) return;
+  try {
+    await apiRequest('/api/maps/' + encodeURIComponent(id) + '/comments/' + encodeURIComponent(cid), { method:'DELETE' });
+    if (_gcmt.id === id) { _gcmt.list = _gcmt.list.filter(c => c.id !== cid); renderGameComments(); }
+  } catch (e) { showToast((e && e.message) || 'No se pudo borrar', 3500); }
+}
 async function openGamePage(mapId) {
   const maps = getMaps();
   const m = maps[mapId];
@@ -5377,6 +5430,7 @@ async function openGamePage(mapId) {
     (isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');deleteMap(\''+mapId+'\')">🗑️ Borrar</button>' : '')+
     (isAdmin() && !isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');banUser(\''+m.authorId+'\')">🚫 Banear autor</button>' : '');
   openModal('mo-game-page');
+  loadGameComments(mapId);
 }
 function startCallFromMsg(type) {
   if (!window._activeChatUserId) { showToast('Abrí una conversación primero'); return; }
@@ -5693,7 +5747,7 @@ window.addEventListener('pagehide', () => { try { socket && socket.emit('app_vis
 // ── Abrir la app desde una notificación ──
 (function parseLaunch() {
   const q = new URLSearchParams(location.search), n = q.get('n'); if (!n) return;
-  _pendingNotif = { type: n, from: q.get('u') || '', action: q.get('a') || '' };
+  _pendingNotif = { type: n, from: q.get('u') || '', action: q.get('a') || '', kind: q.get('k') || '', id: q.get('id') || '' };
   try { history.replaceState(null, '', location.pathname + location.hash); } catch {}
 })();
 function handleNotifAction(m) {
@@ -5708,6 +5762,17 @@ function handleNotifAction(m) {
     } else _pendingCall = { from, action: m.action || '', exp: Date.now() + 50000 };
   } else if ((m.type === 'message' || m.type === 'missed') && from) openConvWith(from);
   else if (m.type === 'friend_request' || m.type === 'friend_accepted') goTab('msg');
+  else if (m.type === 'activity' || m.type === 'open') openActivityTarget(m.kind, m.id || m.from);
+}
+// Abre lo que anunciaba la notificación: el juego, el video, el foro o el perfil.
+async function openActivityTarget(kind, id) {
+  try {
+    if (kind === 'game' && id) { if (!getMaps()[id]) await refreshLive('maps'); if (getMaps()[id]) openGamePage(id); else goTab('home'); }
+    else if (kind === 'video' && id) { if (!getVideos().some(v => v.id === id)) await refreshLive('videos'); if (getVideos().some(v => v.id === id)) openVideoPlayer(id); else goTab('videos'); }
+    else if (kind === 'post') { goTab('forums'); }
+    else if (kind === 'user' && id) goTab('profile', id);
+    else goTab('home');
+  } catch (_) {}
 }
 function applyPendingCall(from) {
   const p = _pendingCall; if (!p || p.from !== from || Date.now() > p.exp) return;
@@ -6063,6 +6128,15 @@ function setupGlobalLiveEvents() {
     DB.set('crix_videos', vids);
     rerenderLiveScreens('videos');
   });
+  // Comentarios nuevos (o borrados) en el juego que tenés abierto.
+  socket.on('map_comment', ev => {
+    if (!ev || ev.mapId !== _gcmt.id) return;
+    if (ev.comment && !_gcmt.list.some(c => c.id === ev.comment.id)) _gcmt.list.push(ev.comment);
+    if (ev.removed) _gcmt.list = _gcmt.list.filter(c => c.id !== ev.removed);
+    renderGameComments();
+  });
+  // Novedades (comentarios, me gusta, seguidores, equipo, cuenta...): con la app abierta se ven como aviso; con la app cerrada llegan como push.
+  socket.on('activity', d => { if (d && d.title) showToast(d.title + (d.body ? ' · ' + d.body : ''), 5000); });
   socket.on('post_updated', ev => {
     if (!ev || !ev.id) return;
     if (ev.refetch) { liveRefresh('posts'); return; }
@@ -8147,6 +8221,14 @@ function appearanceFields(d) {
   <div id="gp-desc" style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:12px;background:var(--bg3);border-radius:8px;padding:10px"></div>
   <div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-bottom:14px" id="gp-stats"></div>
   <div id="gp-actions" class="mo-btns"></div>
+  <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+    <div style="font-weight:800;margin-bottom:8px" id="gp-cmt-title">💬 Comentarios</div>
+    <div id="gp-cmt-form" style="display:flex;gap:8px;margin-bottom:10px">
+      <textarea id="gp-cmt-inp" maxlength="1000" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px;font-family:var(--font);resize:none;outline:none;height:52px" placeholder="Escribí un comentario..."></textarea>
+      <button class="btn btn-p" style="font-size:12px;align-self:flex-end" onclick="submitGameComment()">Enviar</button>
+    </div>
+    <div id="gp-comments" style="max-height:260px;overflow:auto"></div>
+  </div>
 </div>
 </div>
 <script>
