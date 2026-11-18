@@ -3876,7 +3876,7 @@ const guiHandle = name => new Proxy({}, {
   get: (target, key) => { if (key === 'onClick') return fn => game.on('gui:' + name + ':click', fn); if (key === 'onSubmit') return fn => game.on('gui:' + name + ':submit', fn); if (key === 'name') return name; const state = guiState[name] || (cfg.gui || {})[name] || {}; return state[key]; },
   set: (target, key, value) => { (guiState[name] = guiState[name] || {})[key] = value; sendCommand('guiSet', {name:name, prop:String(key), value:value}); return true; }
 });
-const gui = { get: name => guiHandle(String(name)), show: name => { sendCommand('guiSet', {name:String(name), prop:'visible', value:true}); }, hide: name => { sendCommand('guiSet', {name:String(name), prop:'visible', value:false}); }, toast: (text, seconds) => sendCommand('toast', {text:String(text).slice(0,200), seconds:number(seconds,3)}) };
+const gui = { get: name => guiHandle(String(name)), show: name => { sendCommand('guiSet', {name:String(name), prop:'visible', value:true}); }, hide: name => { sendCommand('guiSet', {name:String(name), prop:'visible', value:false}); }, toast: (text, seconds) => sendCommand('toast', {text:String(text).slice(0,200), seconds:number(seconds,3)}), chat: text => sendCommand('chatMsg', {text:String(text).slice(0,200)}) };
 const playerCmd = (op, extra) => sendCommand('player', Object.assign({op:op}, extra || {}));
 const localPlayer = {
   setSpeed: v => playerCmd('speed', {value:number(v,100)}), setJump: v => playerCmd('jump', {value:number(v,100)}),
@@ -6271,7 +6271,7 @@ function respawnPlayer(source) {
   gState.deaths++; gState.health = gState.maxHealth;
   const c = gState.checkpoint || gSpawnPos;
   teleportPlayer(c.x, c.y + 0.3, c.z);
-  addGMsg(source === 'void' ? '💀 Caíste al vacío' : '💀 Reapareciste', 'sys');
+  // Sin mensaje automático en el chat: si el creador quiere avisar que moriste, lo programa con game.on('died', () => gui.chat('...')).
   _damageFlash(); updateGameHud(); dispatchScriptEvent('died', []);
 }
 function _cool(key, ms, now) { if ((gState.cool[key]||0) > now) return false; gState.cool[key] = now + ms; return true; }
@@ -6311,7 +6311,7 @@ function _applyBehavior(object, d, box, now) {
         else gameBanner('Teletransporte sin destino', 1.5);
       } break;
     case 'win':
-      if (_cool('w'+id, 5000, now)) { gameBanner('🏆 ¡Llegaste a la meta!', 3.5); addGMsg('🏆 ' + ME.username + ' llegó a la meta', 'sys'); dispatchScriptEvent('won', []); if (netConnected) netSendChat('🏆 ¡Llegué a la meta!'); }
+      if (_cool('w'+id, 5000, now)) { gameBanner('🏆 ¡Llegaste a la meta!', 3.5); dispatchScriptEvent('won', []); }
       break;
   }
 }
@@ -6349,6 +6349,7 @@ function _handleExtendedCommand(run, message) {
   if (c === 'remote') { if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('script_remote', {name:String(payload.name||'').slice(0,40), data:payload.data}); return true; }
   if (c === 'avatar') { _avatarFromScript(String(payload.target || 'me'), payload.cmd); return true; }
   if (c === 'sound') { CrixAudio.command({ ...payload, op: payload.op, name: payload.name }); return true; }
+  if (c === 'chatMsg') { const t = String(payload.text || '').slice(0, 200); if (t) addGMsg(t, 'sys'); return true; }   // solo el creador decide qué sale en el chat
   if (c === 'toast') { gameBanner(String(payload.text||''), Number(payload.seconds)||3); return true; }
   return false;
 }
@@ -6758,7 +6759,7 @@ function codeKeydown(e) {
 // ── Autocompletado ──
 const CODE_COMPLETIONS = {
   'game.': [['createPart','({ name, type, position:{x,y,z}, size:{x,y,z}, color, anchored })','Crea una pieza'],['updatePart','(id, { x, y, z, color, transparent… })','Modifica una pieza'],['destroyPart','(id)','Elimina una pieza'],['getPlayer','()','Datos del jugador'],['findPart','(nombre)','Busca una pieza por nombre'],['on','(evento, fn)','Eventos: died, won, coin'],['onTouched','(nombrePieza, fn)','Cuando el jugador toca la pieza'],['onTouchEnded','(nombrePieza, fn)','Cuando deja de tocarla (Script de servidor)'],['onImpact','(nombrePieza, fn(info), velocidadMin)','Golpe contra la pieza con su velocidad (Script de servidor)'],['getPart','(idONombre)','Estado actual de una pieza (Script de servidor)'],['onKey','(tecla, fn)','Al apretar una tecla'],['player','','Control del jugador'],['gui','','Interfaces']],
-  'gui.': [['get','(nombre)','Elemento: .text .visible .value .onClick(fn)'],['show','(nombre)','Muestra pantalla o elemento'],['hide','(nombre)','Oculta pantalla o elemento'],['toast','(texto, segundos)','Aviso en pantalla']],
+  'gui.': [['get','(nombre)','Elemento: .text .visible .value .onClick(fn)'],['show','(nombre)','Muestra pantalla o elemento'],['hide','(nombre)','Oculta pantalla o elemento'],['toast','(texto, segundos)','Aviso en pantalla'],['chat','(texto)','Mensaje en el chat (el juego no escribe nada solo, ni al morir)']],
   'localPlayer.': [['setSpeed','(porcentaje)','100 = normal'],['setJump','(porcentaje)','100 = normal'],['teleport','(x, y, z)',''],['damage','(n)',''],['heal','(n)',''],['setHealth','(n)',''],['kill','()',''],['respawn','()',''],['addCoins','(n)',''],['setCoins','(n)',''],['setCheckpoint','(x, y, z)',''],['say','(texto)','Aviso en pantalla'],['health','','Vida actual'],['maxHealth','',''],['coins','',''],['deaths','',''],['position','','{x,y,z}']],
   'workspace.': [['findFirstChild','(nombre)',''],['getChildren','()','Todas las piezas'],['createPart','(props)',''],['updatePart','(id, patch)',''],['destroyPart','(id)','']],
   'task.': [['wait','(segundos)','Pausa (máx. 2 s)'],['delay','(segundos, fn)','Ejecuta luego'],['every','(segundos, fn)','Repite; devuelve id'],['cancel','(id)','Detiene un every']],
