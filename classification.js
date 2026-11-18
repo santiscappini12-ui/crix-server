@@ -15,7 +15,7 @@ const VERSION = 1;
 const KINDS = ['video', 'game', 'app'];
 const TIERS = [0, 7, 12, 16, 18];   // edades mínimas internas (escala genérica de Crix)
 // Humor tabú (sexo, muerte, religión, drogas...) y partes del cuerpo con fin educativo: NUNCA fuerzan 18+ por sí solos.
-// Solo mostrar partes íntimas sin fin educativo (o contenido erótico) es 18+. Partes del cuerpo cortadas o desprendidas
+// Solo mostrar genitales descubiertos sin fin educativo, o sexo explícito, es 18+. La desnudez parcial y los movimientos sexuales simulados quedan en 16+. Partes del cuerpo cortadas o desprendidas
 // por violencia NO cuentan como desnudez: se declaran en "Violencia".
 const AGE_TABOO_MILD = 12, AGE_TABOO_STRONG = 16, AGE_BODY_EDU = 12;
 
@@ -102,17 +102,17 @@ const CONTENT = [
     O('Ninguno', 'None', 0),
     O('Romance leve (besos, abrazos)', 'Mild romance (kissing, hugging)', 7),
     O('Insinuaciones, ropa provocativa o humor sexual', 'Innuendo, suggestive clothing, or sexual humor', 12, 'sexual'),
-    O('Desnudez parcial (ropa interior, traje de baño) o escenas sexuales sugeridas, sin mostrar partes íntimas descubiertas', 'Partial nudity (underwear, swimwear) or implied sexual scenes, without showing uncovered intimate parts', 16, 'sexual'),
-    O('Muestra partes íntimas descubiertas sin fin educativo, o contenido erótico o actos sexuales explícitos (solo para adultos; las partes del cuerpo cortadas o desprendidas por violencia no cuentan acá, van en Violencia)', 'Shows uncovered intimate parts with no educational purpose, or erotic content or explicit sexual acts (adults only; body parts cut off by violence do not count here, they go under Violence)', 18, 'sexual_explicit'),
+    O('Desnudez parcial (pechos, glúteos o torso descubiertos) o movimientos y escenas sexuales simulados o sugeridos, sin mostrar genitales ni sexo explícito', 'Partial nudity (uncovered chest, buttocks or torso) or simulated or implied sexual movements and scenes, without showing genitals or explicit sex', 16, 'sexual'),
+    O('Genitales descubiertos sin fin educativo, o actos sexuales explícitos (solo para adultos; las partes del cuerpo cortadas o desprendidas por violencia no cuentan acá, van en Violencia)', 'Uncovered genitals with no educational purpose, or explicit sexual acts (adults only; body parts cut off by violence do not count here, they go under Violence)', 18, 'sexual_explicit'),
   ]),
   // Humor tabú: el sexo u otros temas tabú contados COMO HUMOR (chiste, sátira, absurdo), sin erotismo, no suben a 18+.
   // Solo cambia a 18+ si se muestran partes íntimas descubiertas sin fin educativo (o si es erótico).
   Q('taboo', T('Humor sobre sexo u otros temas tabú (muerte, religión, drogas, enfermedades, cuerpo...), sin erotismo', 'Humor about sex or other taboo topics (death, religion, drugs, illness, the body...), not erotic'), [
     O('No hay', 'None', 0),
     O('Chistes o referencias tabú leves, sin mostrar partes íntimas', 'Mild taboo jokes or references, without showing intimate parts', AGE_TABOO_MILD, 'taboo_humor'),
-    O('Humor tabú fuerte o crudo (contado o insinuado), sin erotismo y sin mostrar partes íntimas', 'Strong or crude taboo humor (told or implied), not erotic and without showing intimate parts', AGE_TABOO_STRONG, 'taboo_humor'),
-    O('Muestra partes íntimas con fin educativo (educación sexual, anatomía, salud), sin erotismo', 'Shows intimate parts for an educational purpose (sex education, anatomy, health), not erotic', AGE_BODY_EDU, 'body_edu'),
-    O('Muestra partes íntimas descubiertas sin fin educativo, o es erótico (solo para adultos; las partes del cuerpo cortadas o desprendidas por violencia no cuentan acá)', 'Shows uncovered intimate parts with no educational purpose, or is erotic (adults only; body parts cut off by violence do not count here)', 18, 'sexual_explicit'),
+    O('Humor tabú fuerte o crudo (contado, insinuado o con movimientos sexuales simulados), sin erotismo explícito y sin mostrar genitales', 'Strong or crude taboo humor (told, implied, or with simulated sexual movements), not explicitly erotic and without showing genitals', AGE_TABOO_STRONG, 'taboo_humor'),
+    O('Muestra genitales con fin educativo (educación sexual, anatomía, salud), sin erotismo', 'Shows genitals for an educational purpose (sex education, anatomy, health), not erotic', AGE_BODY_EDU, 'body_edu'),
+    O('Muestra genitales descubiertos sin fin educativo, o es erótico explícito (solo para adultos; las partes del cuerpo cortadas o desprendidas por violencia no cuentan acá)', 'Shows uncovered genitals with no educational purpose, or is explicitly erotic (adults only; body parts cut off by violence do not count here)', 18, 'sexual_explicit'),
   ], null, true),
   Q('language', T('Lenguaje', 'Language'), [
     O('Sin groserías', 'No profanity', 0),
