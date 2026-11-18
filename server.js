@@ -184,7 +184,7 @@ function broadcastRemote(events) {
       else if (kind === 'updated') io.emit('map_updated', { mapId:id });
       else if (kind === 'deleted') io.emit('map_deleted', { mapId:id });
     } else if (col === 'videos') {
-      if (kind === 'new' && rec.ready !== false && videoIsPublic(rec)) io.emit('video_new', { id, title:rec.title, authorId:rec.authorId, authorName:rec.authorName, cat:rec.cat, thumb:rec.thumb, created:rec.created, privacy:rec.privacy });
+      if (kind === 'new' && rec.ready !== false && videoIsPublic(rec)) io.emit('video_new', { id, title:rec.title, authorId:rec.authorId, authorName:rec.authorName, cat:rec.cat, thumb:rec.thumb, ...thumbLabel(rec), created:rec.created, privacy:rec.privacy });
       else if (kind === 'new') io.emit('video_updated', { id, refetch:true });   // borrador o privado: cada cliente pide lo que puede ver
       else if (kind === 'updated') io.emit('video_updated', { id, refetch:true });   // likes, vistas, comentarios, título, privacidad
       else if (kind === 'deleted') io.emit('video_deleted', { id });
@@ -782,9 +782,17 @@ function dataUrlToBuffer(value) {
   const m = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.*)$/s.exec(String(value || ''));
   return m ? Buffer.from(m[2], 'base64') : null;
 }
+// Miniatura sensible (declarada por el creador): 0 normal · 1 desnudez parcial · 2 parte íntima suelta (humor tabú) · 3 genitales en un cuerpo.
+// Edad mínima del CONTENIDO para poder llevar cada tipo de miniatura. La miniatura se ve en el catálogo sin que nadie la elija,
+// así que su clasificación es independiente de la del video (se puede subir una miniatura que no sale en el video).
+const THUMB_MIN_AGE = [0, 16, 16, 18];
+const thumbLevelOf = v => { const n = Number(v && v.thumbLevel); return Number.isInteger(n) && n >= 0 && n <= 3 ? n : 0; };
+// La API NO decide quién ve qué: solo entrega la etiqueta (thumbLevel + thumbAge) junto a la miniatura. Cada cliente decide cómo tratarla.
+// El cliente de Crix la oculta o la difumina según la edad verificada; otros clientes hacen lo suyo.
+const thumbLabel = v => { const l = thumbLevelOf(v); return { thumbLevel: l, thumbAge: THUMB_MIN_AGE[l] }; };
 function publicVideo(video) {
   const { data, file, ...rest } = video;
-  return { ...rest, data: video.ready !== false ? '[data]' : null, ready: video.ready !== false, unrated: !video.classification };
+  return { ...rest, ...thumbLabel(video), data: video.ready !== false ? '[data]' : null, ready: video.ready !== false, unrated: !video.classification };
 }
 // Migración: videos viejos guardados como base64 dentro de la base → archivos.
 (function migrateVideos() {
@@ -2024,7 +2032,7 @@ app.get('/api/videos/:id/data', async (req, res) => {
   const file = await videoLocalFile(v);
   if (!file) return res.status(404).json({ ok:false, err:'El archivo del video no está disponible' });
   if (v.size > 25 * 1024 * 1024) return res.status(413).json({ ok:false, err:'Usá /stream para videos grandes', stream:`/api/videos/${v.id}/stream` });
-  res.json({ ok: true, data: `data:${v.mime};base64,${fs.readFileSync(file).toString('base64')}`, thumb: v.thumb });
+  res.json({ ok: true, data: `data:${v.mime};base64,${fs.readFileSync(file).toString('base64')}`, thumb: v.thumb, ...thumbLabel(v) });
 });
 
 // Reproducción por streaming (con soporte de rangos para adelantar/retroceder).
@@ -2038,6 +2046,18 @@ app.get('/api/videos/:id/stream', async (req, res) => {
   if (!file) return res.status(404).end();
   res.set({ 'Content-Type': v.mime || 'video/mp4', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': (v.privacy || 'public') === 'public' ? 'public, max-age=3600' : 'private, max-age=600' });
   res.sendFile(file, { acceptRanges: true, dotfiles: 'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
+});
+
+// Un admin corrige el nivel de una miniatura (p. ej. tras una denuncia o si el creador declaró de menos).
+app.post('/api/admin/videos/:id/thumb-level', requireAuth, requireAdmin, (req, res) => {
+  const v = (DB.videos || []).find(x => x.id === req.params.id);
+  if (!v) return res.status(404).json({ ok:false, err:'Video no encontrado' });
+  const n = Number(req.body && req.body.level);
+  if (!Number.isInteger(n) || n < 0 || n > 3) return res.status(400).json({ ok:false, err:'Nivel inválido (0 a 3)' });
+  v.thumbLevel = n; saveDB();
+  io.emit('video_updated', { id:v.id, refetch:true });
+  console.log(`[THUMB] ${req.user.username} puso la miniatura de ${v.id} en nivel ${n}`);
+  res.json({ ok:true, level:n });
 });
 
 app.post('/api/videos', async (req, res) => {
@@ -2061,8 +2081,12 @@ app.post('/api/videos', async (req, res) => {
     }
     const privacy = ['public','private'].includes(v.privacy) ? v.privacy : 'public';
     const thumb = typeof v.thumb === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(v.thumb) && v.thumb.length <= 2000000 ? v.thumb : (old?.thumb || null);
+    // Nivel de la miniatura: lo declara el creador; si no viene, se conserva el anterior (o 0).
+    const thumbLevel = v.thumbLevel === undefined ? thumbLevelOf(old) : thumbLevelOf(v);
+    if (thumb && Number(cls?.age ?? 0) < THUMB_MIN_AGE[thumbLevel])
+      return res.status(422).json({ ok:false, code:'THUMB_CONFLICT', err:`Una miniatura con ese contenido solo puede acompañar a videos clasificados ${THUMB_MIN_AGE[thumbLevel]}+. Cambiá la miniatura o la clasificación del video.` });
     const saved = {
-      ...(old || {}), id:String(v.id), title:String(v.title).slice(0,120), desc:String(v.desc || '').slice(0,2000), cat:String(v.cat || 'otros').slice(0,30),
+      ...(old || {}), thumbLevel, id:String(v.id), title:String(v.title).slice(0,120), desc:String(v.desc || '').slice(0,2000), cat:String(v.cat || 'otros').slice(0,30),
       authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb, ...(cls ? { classification: cls } : {}),
       views: old?.views || 0, likes: old?.likes || [], comments: old?.comments || [], created: old?.created || v.created || new Date().toISOString()
     };
@@ -2077,7 +2101,7 @@ app.post('/api/videos', async (req, res) => {
     saveDB();
     if (!old && persist.enabled) { try { await persist.flush(8000); } catch {} }   // que otra instancia ya pueda ver el video cuando llegue el PUT del archivo
     const becamePublic = !!old && (old.privacy !== 'public' || !old.classification) && saved.privacy === 'public' && !!saved.classification;
-    if (saved.ready && (!wasReady || becamePublic) && videoIsPublic(saved)) io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, created: saved.created, privacy: saved.privacy });
+    if (saved.ready && (!wasReady || becamePublic) && videoIsPublic(saved)) io.emit('video_new', { id: saved.id, title: saved.title, authorId: saved.authorId, authorName: saved.authorName, cat: saved.cat, thumb: saved.thumb, ...thumbLabel(saved), created: saved.created, privacy: saved.privacy });
     else if (old) io.emit('video_updated', { id: saved.id, refetch:true });   // título, descripción, miniatura o privacidad (si pasó a privado, el resto lo deja de ver)
     else toUser(saved.authorId).emit('video_updated', { id: saved.id, refetch:true });   // borrador: sus otros dispositivos lo ven mientras sube
     res.json({ ok: true, ready: !!saved.ready });
@@ -2121,7 +2145,7 @@ async function finalizeVideoUpload(video, tmp, size) {
     video.file = file; video.mime = mime; video.size = size; video.ready = true; delete video.data;
     await settleUpload(persist.putFile('videos/' + file, path.join(VIDEO_DIR, file)));
     saveDB();
-    if (!wasReady && videoIsPublic(video)) io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, created: video.created, privacy: video.privacy });
+    if (!wasReady && videoIsPublic(video)) io.emit('video_new', { id: video.id, title: video.title, authorId: video.authorId, authorName: video.authorName, cat: video.cat, thumb: video.thumb, ...thumbLabel(video), created: video.created, privacy: video.privacy });
     else emitVideoEvent(video, 'video_updated', { id: video.id, refetch:true });   // privado: aparece en los dispositivos del autor; archivo reemplazado: todos
     return { ok:true, size:video.size, mime:video.mime };
   } catch (e) { try { if (fs.existsSync(tmp)) fs.rmSync(tmp, { force:true }); } catch {} throw e; }
