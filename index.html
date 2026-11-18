@@ -2837,6 +2837,7 @@ function runSearch() { const q = searchQuery.toLowerCase(); const allMaps = Obje
 function switchSearchTab(tab) { searchTab = tab; document.getElementById('search-games-results').style.display = tab === 'games' ? 'grid' : 'none'; document.getElementById('search-users-results').style.display = tab === 'users' ? 'grid' : 'none'; document.getElementById('sf-games').classList.toggle('active', tab === 'games'); document.getElementById('sf-users').classList.toggle('active', tab === 'users'); }
 let viewingUserId = null;
 function renderProfile(uid) {
+  adminPanelOpen = false;
   viewingUserId = uid || ME.id;
   const users = getUsers();
   // Si el usuario no existe en DB pero se buscó por nombre, mostrar como desconectado
@@ -3003,7 +3004,9 @@ function logout() {
   document.getElementById('a-p').value = '';
 }
 function isAdmin() { return !!(ME && ME.isAdmin); }
+let adminPanelOpen = false;   // true mientras el panel de Admin está en pantalla: los refrescos en vivo lo redibujan a él, no al perfil
 function openAdminPanel() {
+  adminPanelOpen = true;
   const users = getUsers();
   const maps = getMaps();
   const userList = Object.values(users).filter(u => u.id !== ME.id);
@@ -5961,6 +5964,7 @@ function _restoreForumDrafts(drafts) {
 }
 function renderForumsKeepDrafts() { const drafts = _captureForumDrafts(); renderForums(); _restoreForumDrafts(drafts); }
 function refreshProfileTabs() {
+  if (adminPanelOpen) return;   // el panel de Admin no tiene pestañas de perfil
   // Solo se redibuja la pestaña abierta del perfil (renderProfile completo borraba lo escrito en "Buscar y agregar amigo").
   const active = document.querySelector('#profile-inner .tab.active'); const tab = active && active.id ? active.id.replace('pftab-', '') : 'games';
   try { pfTab(tab); } catch (_) {}
@@ -6006,7 +6010,7 @@ function rerenderLiveScreens(kind) {
       if (_screenActive('s-search')) runSearch();
       if (_screenActive('s-msg')) loadConvList();
       // El perfil completo solo se redibuja si no se está escribiendo dentro de él.
-      if (_screenActive('s-profile') && !document.getElementById('profile-inner')?.contains(document.activeElement)) renderProfile(viewingUserId || ME.id);
+      if (_screenActive('s-profile') && !document.getElementById('profile-inner')?.contains(document.activeElement)) { if (adminPanelOpen && isAdmin()) { const y = window.scrollY; openAdminPanel(); window.scrollTo(0, y); } else renderProfile(viewingUserId || ME.id); }
       renderFriendRequests();
     }
   } catch (err) { console.warn('[LIVE] render', kind, err.message); }
