@@ -2567,6 +2567,12 @@ function avatarInnerHtml(user) {
   const src = profileAvatarSrc(user);
   return src ? '<img src="' + src + '" alt="Foto de perfil" style="width:100%;height:100%;object-fit:cover;display:block">' : esc((user?.username || '?')[0].toUpperCase());
 }
+// Círculo con la foto de perfil de una cuenta (o su inicial si no tiene foto). Se usa en cada creación: juegos, videos, comentarios.
+function authAv(id, name, size, color) {
+  const u = getUsers()[id] || {}, src = profileAvatarSrc(u), px = size || 24;
+  return '<span style="width:' + px + 'px;height:' + px + 'px;border-radius:50%;background:' + (src ? 'transparent' : (u.color || color || '#5b8def')) + ';display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:' + Math.max(9, Math.round(px * .45)) + 'px;flex-shrink:0;overflow:hidden;vertical-align:middle;color:#fff">' +
+    avatarInnerHtml({ avatar:u.avatar, username:u.username || name }) + '</span>';
+}
 function updateOwnAvatar() {
   const el = document.getElementById('nav-av');
   if (!el) return;
@@ -2686,7 +2692,7 @@ function defaultParts() { return [ {id:'ground',type:'Block',name:'Suelo',x:0,y:
 const THUMB_ICONS = ['🏝️','🌋','🏙️','🌌','🏔️','🌊','🏰','🛸','⚔️','🎮','🌃','🗺️'];
 const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt-teal'];
 function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine');   renderOnlineNow(); }
-function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${gameThumbHtml(m, i)}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="clsReclassify('${m.id}')" title="${clsT('classify')}">🏷️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editUploadData('${m.id}')" title="Datos de subida">⚙️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}${clsBadge(m, isOwner)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
+function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${gameThumbHtml(m, i)}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="clsReclassify('${m.id}')" title="${clsT('classify')}">🏷️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editUploadData('${m.id}')" title="Datos de subida">⚙️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}${clsBadge(m, isOwner)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author" style="display:flex;align-items:center;gap:5px">${authAv(m.authorId, m.authorName, 18)}<span>por ${esc(m.authorName)}</span></div></div></div>`; }).join(''); }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
 // Editar los datos de subida (nombre, descripción, género, privacidad, miniatura, ícono, clasificación) de un juego/app YA subido,
 // sin abrir el estudio. Usa pubMapId para no tocar stMapId (si el estudio tiene otro juego abierto, no se mezcla).
@@ -4929,7 +4935,7 @@ function renderVideos() {
       '</div>' +
       '<div class="video-meta"><span>👁 ' + views + '</span><span>❤️ ' + likes + '</span></div>' +
       (ME && v.authorId === ME.id && !v.classification ? '<button class="btn btn-p" style="font-size:12px;width:100%;margin:6px 0" onclick="event.stopPropagation();clsReclassifyVideo(\'' + v.id + '\')">🏷️ Clasificar (borrador)</button>' : '') +
-      '<div class="video-author" onclick="goTab(\'profile\',\'' + v.authorId + '\')">' + esc(v.authorName) + '</div>' +
+      '<div class="video-author" style="display:flex;align-items:center;gap:5px" onclick="goTab(\'profile\',\'' + v.authorId + '\')">' + authAv(v.authorId, v.authorName, 18) + '<span>' + esc(v.authorName) + '</span></div>' +
       '</div></div>';
   }).join('');
 }
@@ -4965,7 +4971,7 @@ async function openVideoPlayer(vid) {
     '</div>' +
     (ME && v.authorId === ME.id && !v.classification ? '<div style="font-size:12px;color:var(--text2);margin-bottom:10px">' + esc(clsT('draft')) + ' <button class="btn btn-p" style="font-size:12px" onclick="clsReclassifyVideo(\'' + v.id + '\')">🏷️ ' + esc(clsT('classify')) + '</button></div>' : '') +
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">' +
-    '<div style="width:38px;height:38px;border-radius:50%;background:' + ((getUsers()[v.authorId]||{}).color||'#5b8def') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + v.authorName[0].toUpperCase() + '</div>' +
+    authAv(v.authorId, v.authorName, 38) +
     '<div style="flex:1"><div style="font-weight:700">' + esc(v.authorName) + '</div></div>' +
     (ME && v.authorId === ME.id ? '<button class="btn btn-g" onclick="openEditVideo(\'' + v.id + '\')">✏️ Editar datos</button>' : '') +
     '<button class="btn btn-g" onclick="crixShare(\'video\',\'' + v.id + '\')">🔗 Compartir</button>' +
@@ -5004,7 +5010,7 @@ function renderVideoComments(v) {
   el.dataset.n = String(comments.length);
   el.innerHTML = comments.length ? comments.map(c =>
     '<div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">' +
-    '<div style="width:32px;height:32px;border-radius:50%;background:#5b8def;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">' + (c.authorName||'?')[0].toUpperCase() + '</div>' +
+    authAv(c.authorId, c.authorName, 32) +
     '<div><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
     '<div style="font-size:13px;margin-top:2px">' + esc(c.text) + '</div>' +
     '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : (c.time||'')) + '</div></div>' +
@@ -5356,7 +5362,7 @@ function renderGameComments() {
   el.innerHTML = list.length ? list.map(c => {
     const canDel = ME && (c.authorId === ME.id || (m && m.authorId === ME.id) || isAdmin());
     return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">' +
-      '<div style="width:30px;height:30px;border-radius:50%;background:#5b8def;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">' + esc((c.authorName || '?')[0].toUpperCase()) + '</div>' +
+      authAv(c.authorId, c.authorName, 30) +
       '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
       '<div style="font-size:13px;margin-top:2px;white-space:pre-wrap;word-break:break-word">' + esc(c.text) + '</div>' +
       '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : '') + '</div></div>' +
@@ -5396,8 +5402,21 @@ async function openGamePage(mapId) {
   // Info
   document.getElementById('gp-name').textContent = m.name;
   const authorEl = document.getElementById('gp-author');
-  authorEl.textContent = 'por ' + m.authorName;
+  authorEl.style.cssText += ';display:flex;align-items:center;gap:6px';
+  authorEl.innerHTML = authAv(m.authorId, m.authorName, 22) + '<span>por ' + esc(m.authorName) + '</span>';
   authorEl.onclick = () => { closeModal('mo-game-page'); goTab('profile', m.authorId); };
+  // Equipo: quienes colaboran en el juego (si tiene), con su foto; al tocar uno se abre su perfil.
+  const teamEl = document.getElementById('gp-team');
+  if (teamEl) {
+    const allUsers = getUsers(), team = (Array.isArray(m.collaborators) ? m.collaborators : []).filter(id => id !== m.authorId);
+    if (team.length) {
+      teamEl.style.display = 'flex';
+      teamEl.innerHTML = '<span>🤝 Equipo (' + team.length + '):</span>' + team.map(id => {
+        const u = allUsers[id], name = (u && u.username) || 'Usuario';
+        return '<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border-radius:20px;padding:2px 8px 2px 2px;cursor:pointer;color:var(--text2)" onclick="closeModal(\'mo-game-page\');goTab(\'profile\',\'' + esc(id) + '\')">' + authAv(id, name, 18) + '<span>' + esc(name) + '</span></span>';
+      }).join('');
+    } else { teamEl.style.display = 'none'; teamEl.innerHTML = ''; }
+  }
   document.getElementById('gp-desc').textContent = m.desc || 'Sin descripción.';
   // Stats
   document.getElementById('gp-stats').innerHTML =
@@ -8215,6 +8234,7 @@ function appearanceFields(d) {
     <div style="flex:1">
       <div id="gp-name" style="font-family:var(--display);font-size:22px;font-weight:800;line-height:1.2"></div>
       <div id="gp-author" style="font-size:12px;color:var(--acc);margin-top:3px;cursor:pointer"></div>
+      <div id="gp-team" style="display:none;font-size:11px;color:var(--text3);margin-top:6px;align-items:center;flex-wrap:wrap;gap:6px"></div>
     </div>
     <div id="gp-privacy-badge" style="font-size:11px;padding:3px 10px;border-radius:20px;font-weight:700;flex-shrink:0"></div>
   </div>
