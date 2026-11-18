@@ -124,7 +124,7 @@ const CONTENT = [
     O('Ninguna', 'None', 0),
     O('Estereotipos o chistes leves', 'Mild stereotypes or jokes', 12, 'discrimination'),
     O('Lenguaje discriminatorio presente', 'Discriminatory language present', 16, 'discrimination'),
-    O('Discriminación como tema central u ofensiva', 'Discrimination as a central or offensive theme', 18, 'discrimination'),
+    O('Discriminación como tema central u ofensiva', 'Discrimination as a central or offensive theme', 16, 'discrimination'),   // Crix es de los sistemas más relajados: la discriminación (también como humor) nunca llega a 18+
   ]),
   Q('drugs', T('Alcohol, tabaco y drogas', 'Alcohol, tobacco, and drugs'), [
     O('No aparecen', 'None', 0),
