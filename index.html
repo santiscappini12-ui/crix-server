@@ -1948,7 +1948,7 @@ function clsRender() {
       h += '<div class="cls-sec">' + clsT('contentTitle') + '</div>';
       for (const q of cfg.questions) {
         h += '<div class="cls-q"><div class="cls-qt">' + esc(q.text) + '</div><select class="inp" onchange="clsSetAnswer(\'' + q.id + '\',this.value)"><option value="">' + clsT('pick') + '</option>' +
-          q.options.map((o, i) => '<option value="' + i + '"' + (c.answers[q.id] === i ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select></div>';
+          q.options.map((o, i) => '<option value="' + i + '"' + ((c.answers[q.id] === i || (q.optional && c.answers[q.id] === undefined && i === 0)) ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select></div>';
       }
       h += '<label class="cls-decl"><input type="checkbox" id="cls-decl" ' + (c.declared ? 'checked ' : '') + 'onchange="_cls.declared=this.checked"> ' + esc(clsT('decl', { c: clsCountryName(c.country) })) + '</label>';
     }
@@ -1973,11 +1973,11 @@ function clsRender() {
 async function clsSubmit() {
   const c = _cls; if (!c || c.busy) return;
   if (!c.country) { showToast(clsT('needCountry')); return; }
-  if (clsLegalList().some(q => typeof c.legal[q.id] !== 'boolean') || c.cfg.questions.some(q => !Number.isInteger(c.answers[q.id]))) { showToast(clsT('missing')); return; }
+  if (clsLegalList().some(q => typeof c.legal[q.id] !== 'boolean') || c.cfg.questions.some(q => !q.optional && !Number.isInteger(c.answers[q.id]))) { showToast(clsT('missing')); return; }
   if (!c.declared) { showToast(clsT('needDecl')); return; }
   // Solo viajan las respuestas de las preguntas que aplican a este país y tipo de medio.
   const legal = Object.fromEntries(clsLegalList().map(q => [q.id, c.legal[q.id]]));
-  const answers = Object.fromEntries(c.cfg.questions.map(q => [q.id, c.answers[q.id]]));
+  const answers = Object.fromEntries(c.cfg.questions.map(q => [q.id, Number.isInteger(c.answers[q.id]) ? c.answers[q.id] : 0]));
   c.busy = true; const btn = document.getElementById('cls-go'); if (btn) btn.disabled = true;
   try {
     const r = await apiRequest('/api/classification/evaluate?lang=' + clsL(), { method:'POST', body:{ kind:c.kind, country:c.country, answers, legal, declared:true } });

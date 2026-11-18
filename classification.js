@@ -14,6 +14,10 @@ const I18N = require('./classification-i18n');   // traducciones a pt, fr, de, i
 const VERSION = 1;
 const KINDS = ['video', 'game', 'app'];
 const TIERS = [0, 7, 12, 16, 18];   // edades mínimas internas (escala genérica de Crix)
+// Humor tabú (sexo, muerte, religión, drogas...) y partes del cuerpo con fin educativo: NUNCA fuerzan 18+ por sí solos.
+// Solo mostrar partes íntimas sin fin educativo (o contenido erótico) es 18+. Partes del cuerpo cortadas o desprendidas
+// por violencia NO cuentan como desnudez: se declaran en "Violencia".
+const AGE_TABOO_MILD = 12, AGE_TABOO_STRONG = 16, AGE_BODY_EDU = 12;
 
 // ── Sistemas de clasificación: una etiqueta por tramo de edad [0, 7, 12, 16, 18] ──
 // Son sistemas PROPIOS de Crix ("Crix AR", "Crix EUU"...), pensados a partir de las edades que suele usar cada región.
@@ -78,7 +82,7 @@ const LEGAL_EXTRA = {
 
 // ── Bloque de contenido ──
 // Cada opción tiene la edad mínima que implica; `d` es un descriptor opcional que se muestra en la etiqueta.
-const Q = (id, text, options, only) => ({ id, text, options, only });
+const Q = (id, text, options, only, optional) => ({ id, text, options, only, optional: !!optional });
 const O = (es, en, age, d) => ({ text: T(es, en), age, d });
 const CONTENT = [
   Q('violence', T('Violencia', 'Violence'), [
@@ -98,9 +102,18 @@ const CONTENT = [
     O('Ninguno', 'None', 0),
     O('Romance leve (besos, abrazos)', 'Mild romance (kissing, hugging)', 7),
     O('Insinuaciones, ropa provocativa o humor sexual', 'Innuendo, suggestive clothing, or sexual humor', 12, 'sexual'),
-    O('Desnudez parcial o escenas sexuales sugeridas, no explícitas', 'Partial nudity or implied sexual scenes, not explicit', 16, 'sexual'),
-    O('Desnudez completa o actos sexuales explícitos (solo para adultos)', 'Full nudity or explicit sexual acts (adults only)', 18, 'sexual_explicit'),
+    O('Desnudez parcial (ropa interior, traje de baño) o escenas sexuales sugeridas, sin mostrar partes íntimas descubiertas', 'Partial nudity (underwear, swimwear) or implied sexual scenes, without showing uncovered intimate parts', 16, 'sexual'),
+    O('Muestra partes íntimas descubiertas sin fin educativo, o contenido erótico o actos sexuales explícitos (solo para adultos; las partes del cuerpo cortadas o desprendidas por violencia no cuentan acá, van en Violencia)', 'Shows uncovered intimate parts with no educational purpose, or erotic content or explicit sexual acts (adults only; body parts cut off by violence do not count here, they go under Violence)', 18, 'sexual_explicit'),
   ]),
+  // Humor tabú: el sexo u otros temas tabú contados COMO HUMOR (chiste, sátira, absurdo), sin erotismo, no suben a 18+.
+  // Solo cambia a 18+ si se muestran partes íntimas descubiertas sin fin educativo (o si es erótico).
+  Q('taboo', T('Humor sobre sexo u otros temas tabú (muerte, religión, drogas, enfermedades, cuerpo...), sin erotismo', 'Humor about sex or other taboo topics (death, religion, drugs, illness, the body...), not erotic'), [
+    O('No hay', 'None', 0),
+    O('Chistes o referencias tabú leves, sin mostrar partes íntimas', 'Mild taboo jokes or references, without showing intimate parts', AGE_TABOO_MILD, 'taboo_humor'),
+    O('Humor tabú fuerte o crudo (contado o insinuado), sin erotismo y sin mostrar partes íntimas', 'Strong or crude taboo humor (told or implied), not erotic and without showing intimate parts', AGE_TABOO_STRONG, 'taboo_humor'),
+    O('Muestra partes íntimas con fin educativo (educación sexual, anatomía, salud), sin erotismo', 'Shows intimate parts for an educational purpose (sex education, anatomy, health), not erotic', AGE_BODY_EDU, 'body_edu'),
+    O('Muestra partes íntimas descubiertas sin fin educativo, o es erótico (solo para adultos; las partes del cuerpo cortadas o desprendidas por violencia no cuentan acá)', 'Shows uncovered intimate parts with no educational purpose, or is erotic (adults only; body parts cut off by violence do not count here)', 18, 'sexual_explicit'),
+  ], null, true),
   Q('language', T('Lenguaje', 'Language'), [
     O('Sin groserías', 'No profanity', 0),
     O('Insultos muy suaves', 'Very mild insults', 7, 'language'),
@@ -152,6 +165,8 @@ const DESCRIPTORS = {
   fear:             T('Miedo', 'Fear'),
   sexual:           T('Contenido sexual', 'Sexual content'),
   sexual_explicit:  T('Contenido sexual explícito', 'Explicit sexual content'),
+  taboo_humor:      T('Humor tabú', 'Taboo humor'),
+  body_edu:         T('Cuerpo con fin educativo', 'Body shown for education'),
   language:         T('Lenguaje soez', 'Strong language'),
   discrimination:   T('Discriminación', 'Discrimination'),
   drugs:            T('Drogas, alcohol o tabaco', 'Drugs, alcohol, or tobacco'),
@@ -189,7 +204,7 @@ function publicConfig(kind, lang) {
     legalCommon: LEGAL_COMMON.map(x => ({ id: x.id, text: pick(x.text, l) })),
     legalExtra: Object.fromEntries(Object.entries(LEGAL_EXTRA).map(([c, list]) => [c, list.map(x => ({ id: x.id, text: pick(x.text, l) }))])),
     rights: { id: LEGAL_RIGHTS.id, text: pick(LEGAL_RIGHTS.text, l) },
-    questions: questionsFor(k).map(q => ({ id: q.id, text: pick(q.text, l), options: q.options.map(o => pick(o.text, l)) })),
+    questions: questionsFor(k).map(q => ({ id: q.id, text: pick(q.text, l), options: q.options.map(o => pick(o.text, l)), ...(q.optional ? { optional: true } : {}) })),
   };
 }
 
@@ -226,7 +241,7 @@ function evaluate(input, lang) {
   const answers = input.answers && typeof input.answers === 'object' ? input.answers : {};
   let age = 0; const descriptors = new Set(); const clean = {};
   for (const q of questionsFor(kind)) {
-    const idx = answers[q.id];
+    const idx = (answers[q.id] === undefined && q.optional) ? 0 : answers[q.id];   // preguntas nuevas: si falta, "ninguno" (no rompe clasificaciones ya guardadas ni clientes de API viejos)
     if (!Number.isInteger(idx) || idx < 0 || idx >= q.options.length) return fail('CLASSIFICATION_INVALID', 'Respondé todas las preguntas de contenido.', 'Answer all the content questions.');
     clean[q.id] = idx;
     const opt = q.options[idx];
