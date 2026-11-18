@@ -2136,15 +2136,20 @@ function ageHandleReturn() {
   ageComplete(id).then(ok => { if (ok) showToast(clsT('ageOk'), 5000); else ageWatchStart(); });
 }
 // Un admin da (o quita) el +18 a una cuenta. No ve el estado actual de nadie: son dos acciones, no un interruptor con estado.
+let _adultBusy = false;
 async function adminToggleAdult(uid, on, from) {
-  if (!isAdmin()) return;
+  if (!isAdmin() || _adultBusy) return;
+  _adultBusy = true;
   try {
     await apiRequest('/api/admin/users/' + encodeURIComponent(uid) + '/adult', { method:'POST', body:{ adult: !!on } });
     const u = getUsers()[uid];
-    if (uid === ME.id) { if (on) ME.adult = true; else delete ME.adult; }
     showToast(clsT(on ? 'ageMarked' : 'ageUnmarked', { u: (u && u.username) || uid }), 3500);
+    // Se vuelve a pedir todo al servidor (cuentas, tu sesión y catálogo): así lo que se ve coincide con lo que quedó guardado.
+    if (uid === ME.id) { await ageRefreshMe(); if (on) ME.adult = true; else delete ME.adult; }
+    try { await refreshLive('users'); await refreshLive('maps'); } catch (_) {}
     if (from === 'admin') openAdminPanel(); else if (from === 'profile') goTab('profile', uid);
-  } catch (e) { showToast(e.message, 4000); }
+  } catch (e) { showToast((e && e.message) || 'No se pudo cambiar el +18', 4500); }
+  finally { _adultBusy = false; }
 }
 // Clasificar (o reclasificar) un juego/app propio desde su tarjeta.
 async function clsReclassify(id) {
@@ -5925,7 +5930,7 @@ async function refreshLive(kind) {
       // Se pide también la sesión: así tu propia cuenta (amigos, solicitudes, foto, bio) se actualiza desde lo que hiciste en OTRO dispositivo.
       const [r, sess] = await Promise.all([apiRequest('/api/users'), apiRequest('/api/session').catch(() => null)]);
       const users = { ...(r.users||{}) };
-      if (sess && sess.user) { const own = sessionProfile(sess.user, users); users[own.id] = own; ME = own; }
+      if (sess && sess.user) { const wasAdult = !!(ME && ME.adult); const own = sessionProfile(sess.user, users); users[own.id] = own; ME = own; if (wasAdult !== !!own.adult) liveRefresh('maps'); }
       else if (getUsers()[ME.id]) users[ME.id] = { ...users[ME.id], ...getUsers()[ME.id] };
       DB.set('users', users);
       if (sess && sess.user) { updateOwnAvatar(); checkNotifs(); }

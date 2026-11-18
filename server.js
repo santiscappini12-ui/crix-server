@@ -1232,15 +1232,20 @@ app.post('/api/age/complete', requireAuth, async (req, res) => {
 app.post('/api/admin/users/:id/adult', requireAuth, requireAdmin, (req, res) => {
   const target = DB.users[req.params.id];
   if (!target) return res.status(404).json({ ok:false, err:'Usuario no encontrado' });
-  if (typeof req.body?.adult !== 'boolean') return res.status(400).json({ ok:false, err:'Falta indicar si es +18 (adult: true/false)' });
-  if (req.body.adult) target.ageVerified = { method:'admin', at:new Date().toISOString(), by:req.user.id, byName:req.user.username };
+  // Acepta true/false (JSON) y también "true"/"false"/1/0, por si un cliente lo manda como texto.
+  const raw = req.body ? req.body.adult : undefined;
+  const adult = raw === true || raw === 'true' || raw === 1 || raw === '1' ? true : raw === false || raw === 'false' || raw === 0 || raw === '0' ? false : null;
+  if (adult === null) return res.status(400).json({ ok:false, err:'Falta indicar si es +18 (adult: true/false)' });
+  if (adult) target.ageVerified = { method:'admin', at:new Date().toISOString(), by:req.user.id, byName:req.user.username };
   else delete target.ageVerified;
   delete target.ageCheck;
+  DB.users[target.id] = target;
   saveDB();
   toUser(target.id).emit('user_updated', { userId:target.id });
   io.emit('user_updated', { userId:target.id });
-  console.log(`[AGE] ${req.user.username} ${req.body.adult ? 'marcó como +18 a' : 'quitó el +18 de'} ${target.username}${target.id === req.user.id ? ' (él mismo)' : ''}`);
-  res.json({ ok:true });
+  toUser(target.id).emit('map_updated', { all:true });   // el catálogo cambia para esa cuenta: los juegos +18 se abren o se bloquean
+  console.log(`[AGE] ${req.user.username} ${adult ? 'marcó como +18 a' : 'quitó el +18 de'} ${target.username}${target.id === req.user.id ? ' (él mismo)' : ''}`);
+  res.json({ ok:true, adult });
 });
 
 // ── GET todos los usuarios (sin pw) ──

@@ -154,6 +154,14 @@ const CONTENT = [
     O('Los usuarios no pueden subir ni crear contenido dentro', 'Users cannot upload or create content inside it', 0),
     O('Los usuarios pueden subir o crear contenido propio (puede ser de cualquier intensidad; no se cuenta en esta clasificación)', 'Users can upload or create their own content (any intensity; not counted in this rating)', 0, 'ugc'),
   ], ['game', 'app']),
+  // Alcance de la clasificación: un juego puede tener partes de otras clasificaciones, o secciones +18 separadas, sin que TODO el juego pase a esa clasificación.
+  // Las demás preguntas se responden por lo que es el juego en general; esta aclara lo que queda aparte. Las secciones +18 no suben la edad del juego,
+  // pero hay que limitarlas a quien tiene +18 verificado (en los scripts: player.isAdult).
+  Q('scope', T('¿Toda la clasificación aplica a todo el juego?', 'Does the whole rating apply to the whole game?'), [
+    O('Sí: todo el juego es de la misma clasificación (lo que respondí vale para todo)', 'Yes: the whole game has the same rating (what I answered applies to all of it)', 0),
+    O('Tiene partes con contenido de otras clasificaciones, variado según la zona o el modo (respondí por el contenido general; lo más fuerte está arriba en las preguntas)', 'It has parts with content from other ratings, varying by area or mode (I answered for the general content; the strongest content is covered in the questions above)', 0, 'mixed'),
+    O('Tiene secciones +18 separadas u opcionales, pero el juego en su conjunto NO es +18 (respondí las preguntas sin contar esas secciones, y solo las ve quien tiene +18 verificado)', 'It has separate or optional 18+ sections, but the game as a whole is NOT 18+ (I answered the questions without counting those sections, and only users with verified 18+ can see them)', 0, 'adult_parts'),
+  ], ['game', 'app'], true),
   Q('kids', T('¿Está pensado principalmente para menores de 13 años?', 'Is it mainly intended for children under 13?'), [
     O('No', 'No', 0),
     O('Sí, es para niños', 'Yes, it is for children', 0, 'kids'),
@@ -177,6 +185,8 @@ const DESCRIPTORS = {
   loot:             T('Cajas sorpresa pagas', 'Paid random rewards'),
   online:           T('Interacción entre usuarios', 'Users interact'),
   ugc:              T('Incluye contenido de usuarios (no clasificado)', 'Includes user-generated content (not rated)'),
+  mixed:            T('Contenido variado según la zona o el modo', 'Content varies by area or mode'),
+  adult_parts:      T('Incluye secciones +18 separadas', 'Includes separate 18+ sections'),
   kids:             T('Para niños', 'For children'),
 };
 
@@ -249,8 +259,8 @@ function evaluate(input, lang) {
     age = Math.max(age, opt.age);
     if (opt.d) descriptors.add(opt.d);
   }
-  // Un medio para niños no puede tener contenido de 13+.
-  if (descriptors.has('kids') && age > 12) {
+  // Un medio para niños no puede tener contenido de 13+, ni secciones +18 aparte.
+  if (descriptors.has('kids') && (age > 12 || descriptors.has('adult_parts'))) {
     return fail('KIDS_CONFLICT', 'Dijiste que es para menores de 13 años pero el contenido que declaraste es para mayores.', 'You said it is for children under 13, but the content you declared is for older audiences.');
   }
   const tier = TIERS.find(t => t >= age) ?? 18;
