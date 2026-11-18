@@ -546,7 +546,9 @@ function banActive(u) {
   delete u.banned; saveDB();
   return false;
 }
-function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,...s}=u; return s; }
+// +18: el detalle (cómo lo consiguió cada cuenta) NUNCA sale de acá. La cuenta solo recibe un booleano sobre sí misma
+// (el cliente lo usa para abrir o no contenido +18, no lo muestra). Ninguna cuenta, ni admin, ve el detalle: solo el sistema y los scripts.
+function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,ageVerified:___a,ageCheck:___c,...s}=u; s.adult = isAgeVerified(u); return s; }
 function publicUser(u) {
   if (!u) return null;
   const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ageVerified:_________, ageCheck:__________, ...profile } = u;
@@ -717,7 +719,7 @@ function appCtx(socket) {
   const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room || !room.players[socket.id]) return null;
   return { meta, room, map: DB.maps[meta.mapId] };
 }
-const publicPlayer = p => ({ id:p.userId, socketId:p.socketId, username:p.username, color:p.color, joinedAt:p.joinedAt });
+const publicPlayer = p => ({ id:p.userId, socketId:p.socketId, username:p.username, color:p.color, joinedAt:p.joinedAt, isAdult:!!p.isAdult });   // isAdult: solo lo sabe el script/app, nunca cómo se obtuvo
 // ── Almacenamiento de videos: archivos en disco (no base64 dentro del JSON de la base) ──
 const VIDEO_DIR = persist.VIDEO_DIR;
 const VIDEO_EXT = { 'video/mp4':'mp4', 'video/webm':'webm', 'video/ogg':'ogv' };
@@ -1175,8 +1177,7 @@ const AGEEFY_HOST_RE = /(^|\.)ageefy\.(com|app)$/i;
 const AGE_START_COOLDOWN_MS = 15 * 1000, AGE_SESSION_TTL_MS = 24 * 3600 * 1000;
 
 app.get('/api/age/status', requireAuth, (req, res) => {
-  const a = req.user.ageVerified;
-  res.json({ ok:true, verified:isAgeVerified(req.user), method:a?.method || null, at:a?.at || null, pending:!!req.user.ageCheck });
+  res.json({ ok:true, verified:isAgeVerified(req.user), pending:!!req.user.ageCheck });
 });
 
 app.post('/api/age/start', requireAuth, async (req, res) => {
@@ -1239,10 +1240,16 @@ app.post('/api/admin/users/:id/adult', requireAuth, requireAdmin, (req, res) => 
   toUser(target.id).emit('user_updated', { userId:target.id });
   io.emit('user_updated', { userId:target.id });
   console.log(`[AGE] ${req.user.username} ${req.body.adult ? 'marcó como +18 a' : 'quitó el +18 de'} ${target.username}${target.id === req.user.id ? ' (él mismo)' : ''}`);
-  res.json({ ok:true, userId:target.id, adult:!!req.body.adult });
+  res.json({ ok:true });
 });
 
 // ── GET todos los usuarios (sin pw) ──
+// Vista de admin: sin ningún dato de +18 (ni el booleano) de otras cuentas.
+function adminView(u, viewer) {
+  const v = safeUser(u);
+  if (u.id !== viewer.id) delete v.adult;
+  return v;
+}
 app.get('/api/users', (req, res) => {
   const viewer = readSession(req);
   const out = {};
@@ -1254,7 +1261,7 @@ app.get('/api/users', (req, res) => {
       out[id] = { id, username:'Banned User', color:'#333344', banned:true, created:u.created };
     } else {
       out[id] = {
-        ...(viewer?.isAdmin ? safeUser(u) : publicUser(u)),
+        ...(viewer?.isAdmin ? adminView(u, viewer) : publicUser(u)),
         online: !!presence,
         ...(canSeeGame ? {
           currentGameId: presence.mapId,
@@ -2619,7 +2626,7 @@ G('join_game', (socket, data) => {
       socketId: socket.id, userId: userId||socket.id,
       username: username.substring(0,30), color: color||'#5b8def',
       look: CrixAvatar.sanitizeLook(user?.look && typeof user.look==='object' ? user.look : data?.look, {}),
-      x:0,y:3,z:0, ry:0, anim:0, moving:false, onGround:false, mapId, instanceId, joinedAt:Date.now(),
+      x:0,y:3,z:0, ry:0, anim:0, moving:false, onGround:false, mapId, instanceId, joinedAt:Date.now(), isAdult:!!user && isAgeVerified(user),
     };
     room.players[socket.id] = pd;
     connSockets[socket.id] = { ...(connSockets[socket.id]||{}), userId, username, color, mapId, instanceId };
