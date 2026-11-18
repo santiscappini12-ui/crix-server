@@ -908,7 +908,7 @@ function sharePage(kind) {
 const ICON_DATA_RE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+=*)$/;
 const okIconData = v => typeof v === 'string' && v.length <= 600000 && ICON_DATA_RE.test(v);
 function publicMapForShortcut(id) { const m = DB.maps[String(id || '')]; return mapIsPublic(m) ? m : null; }
-function gameIconSource(map) { return okIconData(map?.icon) ? map.icon : (typeof map?.thumb === 'string' && map.thumb.length <= 2000000 && ICON_DATA_RE.test(map.thumb) ? map.thumb : null); }
+function gameIconSource(map) { return okIconData(map?.icon) ? map.icon : (typeof map?.thumb === 'string' && ![1, 3].includes(thumbLevelOf(map)) && map.thumb.length <= 2000000 && ICON_DATA_RE.test(map.thumb) ? map.thumb : null); }
 function gameIconVersion(map) { const src = gameIconSource(map); return src ? crypto.createHash('sha1').update(src).digest('hex').slice(0, 10) : '0'; }
 app.get('/juego/:id/icon.png', (req, res) => {
   const map = publicMapForShortcut(req.params.id), src = map && gameIconSource(map), m = src && ICON_DATA_RE.exec(src);
@@ -1477,7 +1477,7 @@ app.post('/api/join-user/:id', requireAuth, (req, res) => {
 // hasta un tope de tamaño. `?full=1` devuelve el catálogo completo como antes.
 const MAP_LIST_FULL_BUDGET = 8 * 1024 * 1024;
 const MAP_LIGHT_KEYS = ['classification', 'likedBy', 'collaborators', 'assignedPlayers', 'textureIds', 'textureNames', 'sounds', 'tags'];
-function publicMapRecord(m) { if (m.icon) { const { icon, ...rest } = m; return { ...rest, hasIcon:true }; } return m; }
+function publicMapRecord(m) { const lab = m.thumb ? thumbLabel(m) : {}; if (m.icon) { const { icon, ...rest } = m; return { ...rest, ...lab, hasIcon:true }; } return m.thumb ? { ...m, ...lab } : m; }
 function summarizeMap(id, m) {
   const out = { partial:true };
   for (const [k, v] of Object.entries(m)) {
@@ -1488,6 +1488,7 @@ function summarizeMap(id, m) {
     else if (MAP_LIGHT_KEYS.includes(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length <= 500) out[k] = v;
   }
   out.id = id;
+  if (m.thumb) Object.assign(out, thumbLabel(m));
   if (m.icon) out.hasIcon = true;
   if (typeof m.thumb === 'string' && m.thumb) {
     if (m.thumb.length <= 4096) out.thumb = m.thumb;
@@ -1783,6 +1784,11 @@ app.post('/api/maps', (req, res) => {
     delete next.hasIcon;
     delete next.unrated; delete next.classification;
     if (cls) next.classification = cls;
+    // Qué muestra la miniatura (0-3): lo declara el dueño; quien colabora no lo cambia. Una miniatura sensible exige clasificación acorde.
+    next.thumbLevel = isOwner && m.thumbLevel !== undefined ? thumbLevelOf(m) : thumbLevelOf(old);
+    if (!next.thumb) next.thumbLevel = 0;
+    if (next.thumb && Number(cls?.age ?? 0) < THUMB_MIN_AGE[next.thumbLevel])
+      return res.status(422).json({ ok:false, code:'THUMB_CONFLICT', err:`Una miniatura con ese contenido solo puede acompañar a juegos clasificados ${THUMB_MIN_AGE[next.thumbLevel]}+. Cambiá la miniatura o la clasificación.` });
     // Sin clasificación válida, un juego/app NUEVO queda como borrador oculto (solo lo ve su autor). Los anteriores a esta función siguen visibles.
     if (!cls && (!old || old.unrated)) next.unrated = true;
     DB.maps[m.id] = next;
@@ -2048,6 +2054,17 @@ app.get('/api/videos/:id/stream', async (req, res) => {
   res.sendFile(file, { acceptRanges: true, dotfiles: 'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 
+// Un admin corrige el nivel de la miniatura de un juego.
+app.post('/api/admin/maps/:id/thumb-level', requireAuth, requireAdmin, (req, res) => {
+  const m = DB.maps[req.params.id];
+  if (!m) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  const n = Number(req.body && req.body.level);
+  if (!Number.isInteger(n) || n < 0 || n > 3) return res.status(400).json({ ok:false, err:'Nivel inválido (0 a 3)' });
+  m.thumbLevel = n; saveDB();
+  io.emit('map_updated', { mapId:m.id });
+  console.log(`[THUMB] ${req.user.username} puso la miniatura del juego ${m.id} en nivel ${n}`);
+  res.json({ ok:true, level:n });
+});
 // Un admin corrige el nivel de una miniatura (p. ej. tras una denuncia o si el creador declaró de menos).
 app.post('/api/admin/videos/:id/thumb-level', requireAuth, requireAdmin, (req, res) => {
   const v = (DB.videos || []).find(x => x.id === req.params.id);
