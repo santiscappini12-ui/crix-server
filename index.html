@@ -718,7 +718,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <!-- ═══ VIDEOS / FOROS ═══ -->
 <div id="s-videos" class="screen">
 <div class="page"><div class="page-inner">
-  <div class="section-hd"><div class="section-hd-accent" style="background:#ef4444"></div>Videos<div style="margin-left:auto;display:flex;gap:8px;align-items:center"><select id="thumb-filter-sel" class="inp" style="display:none;width:auto;font-size:11px;padding:4px 6px" title="Filtro de miniaturas" onchange="setThumbFilter(this.value)"><option value="strict">Difuminado: estricto</option><option value="medium">Difuminado: solo explícito</option><option value="off">Difuminado: desactivado</option></select><button class="btn btn-p" style="font-size:12px;padding:6px 14px" onclick="openUploadVideo()">+ Subir video</button></div></div>
+  <div class="section-hd"><div class="section-hd-accent" style="background:#ef4444"></div>Videos<div style="margin-left:auto;display:flex;gap:8px;align-items:center"><button class="btn btn-p" style="font-size:12px;padding:6px 14px" onclick="openUploadVideo()">+ Subir video</button></div></div>
   <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <button class="filter-btn active" onclick="vidFilter('all',this)">Todos</button>
     <button class="filter-btn" onclick="vidFilter('gaming',this)">🎮 Gaming</button>
@@ -4843,7 +4843,6 @@ function vidFilter(f, el) {
 }
 function renderVideos() {
   const el = document.getElementById('video-grid'); if (!el) return;
-  const _tf = document.getElementById('thumb-filter-sel'); if (_tf) { _tf.style.display = (ME && ME.ageVerified) ? '' : 'none'; _tf.value = thumbFilterMode(); }
   let vids = getVideos();
   if (_vidFilter !== 'all') vids = vids.filter(v => v.cat === _vidFilter);
   vids = vids.sort((a,b) => new Date(b.created) - new Date(a.created));
@@ -6707,15 +6706,35 @@ function uploadVideoFileWhole(id, file, onProgress) {
 // Filtro de miniaturas (política del CLIENTE de Crix; la API solo da la etiqueta thumbLevel/thumbAge).
 // Niveles: 1 desnudez parcial · 2 humor tabú en caricatura (parte suelta o personaje/objeto con esa forma: NUNCA se difumina ni se oculta) · 3 genitales en un cuerpo.
 // Sin +18 verificado: los niveles 1 y 3 no muestran la imagen (🔞). Con +18: preferencia estricto (difumina 1 y 3) / solo explícito (difumina 3) / desactivado.
-function thumbFilterMode() { try { return localStorage.getItem('crix_thumb_filter') || 'strict'; } catch { return 'strict'; } }
-function setThumbFilter(m) { try { localStorage.setItem('crix_thumb_filter', m); } catch {} if (typeof renderVideos === 'function') try { renderVideos(); } catch {} }
+// Ajuste GLOBAL del usuario (Configuración): activar/desactivar, intensidad (px de desenfoque) y alcance. Aplica a todas las miniaturas.
+function thumbAdult() { return !!(ME && ME.ageVerified); }
+function thumbBlurOn() { if (!thumbAdult()) return true; try { return localStorage.getItem('crix_thumb_blur_on') !== '0' && localStorage.getItem('crix_thumb_filter') !== 'off'; } catch { return true; } }
+function thumbBlurPx() { try { const n = parseInt(localStorage.getItem('crix_thumb_blur_px'), 10); const min = thumbAdult() ? 2 : 12; return n >= 2 && n <= 60 ? Math.max(min, n) : 22; } catch { return 22; } }
+function thumbFilterMode() { if (!thumbAdult()) return 'strict'; if (!thumbBlurOn()) return 'off'; try { return localStorage.getItem('crix_thumb_filter') === 'medium' ? 'medium' : 'strict'; } catch { return 'strict'; } }
+function thumbSettingsRefresh() { if (typeof renderVideos === 'function') try { renderVideos(); } catch {} }
+function setThumbBlurOn(on) {
+  if (!thumbAdult()) { showToast('Solo los usuarios con +18 verificado pueden desactivar el difuminado'); return; }
+  try { localStorage.setItem('crix_thumb_blur_on', on ? '1' : '0'); if (on && localStorage.getItem('crix_thumb_filter') === 'off') localStorage.setItem('crix_thumb_filter', 'strict'); } catch {}
+  thumbSettingsFill(); thumbSettingsRefresh();
+}
+function setThumbBlurPx(v) { try { localStorage.setItem('crix_thumb_blur_px', String(Math.max(thumbAdult() ? 2 : 12, Math.min(60, parseInt(v, 10) || 22)))); } catch {} thumbSettingsFill(false); thumbSettingsRefresh(); }
+function setThumbFilter(m) { if (!thumbAdult()) return; try { localStorage.setItem('crix_thumb_filter', m === 'medium' ? 'medium' : 'strict'); } catch {} thumbSettingsRefresh(); }
+function thumbSettingsFill(full) {
+  const on = thumbBlurOn(), px = thumbBlurPx(), g = id => document.getElementById(id);
+  if (!g('set-thumb-on')) return;
+  const adult = thumbAdult(); g('set-thumb-on').classList.toggle('on', on); g('set-thumb-on').parentNode.style.opacity = adult ? '' : '.5'; g('set-thumb-px').min = adult ? 2 : 12; g('set-thumb-scope').disabled = !adult; g('set-thumb-val').textContent = px + ' px';
+  g('set-thumb-ctl').style.display = on ? '' : 'none';
+  if (full !== false) { g('set-thumb-px').value = px; g('set-thumb-scope').value = thumbFilterMode() === 'medium' ? 'medium' : 'strict'; }
+  g('set-thumb-prev').style.filter = 'blur(' + px + 'px)'; g('set-thumb-prev').style.transform = 'scale(' + (1 + px / 120).toFixed(3) + ')';
+  const note = g('set-thumb-note'); if (note) note.textContent = adult ? '' : 'Solo los usuarios con +18 verificado pueden desactivar el difuminado o limitarlo a lo explícito. Tu intensidad mínima es 12 px, y las miniaturas sensibles siguen ocultas con 🔞.';
+}
 function videoThumbHtml(v) {
   if (!v.thumb) return '<div class="video-thumb-ph">🎬</div>';
   const lvl = Number(v.thumbLevel) || 0, own = !!ME && (v.authorId === ME.id || isAdmin());
   if (lvl === 2) return '<img src="' + v.thumb + '" loading="lazy">';   // humor tabú en caricatura: no es +18 explícito, se ve normal
   if (lvl >= 1 && !own && !(ME && ME.ageVerified)) return '<div class="video-thumb-ph" title="Miniatura oculta: requiere +18 verificado">🔞</div>';
   const mode = thumbFilterMode(), blur = lvl >= 1 && (mode === 'strict' || (mode === 'medium' && lvl >= 3));
-  return '<img src="' + v.thumb + '" loading="lazy"' + (blur ? ' style="filter:blur(22px);transform:scale(1.15)"' : '') + '>';
+  return '<img src="' + v.thumb + '" loading="lazy"' + (blur ? ' style="filter:blur(' + thumbBlurPx() + 'px);transform:scale(' + (1 + thumbBlurPx() / 120).toFixed(3) + ')"' : '') + '>';
 }
 function makeVideoThumb(file) {
   return new Promise(resolve => {
@@ -8653,6 +8672,16 @@ function stuAddSound(folderId) {
 <div class="mo-box">
   <h3>⚙️ Configuración</h3>
   <div class="field-grp"><label class="field-lbl">Idioma</label><select class="inp" id="lang-sel-settings" data-lang-sel onchange="setLang(this.value)" aria-label="Idioma"></select></div>
+  <div class="field-grp"><label class="field-lbl">Difuminado de miniaturas</label>
+    <div class="set-note" style="margin-bottom:8px">Se aplica a todas las miniaturas de video con contenido sensible, en todo Crix.</div>
+    <div class="tgl-row" onclick="setThumbBlurOn(!thumbBlurOn())" style="margin-bottom:8px"><div class="tgl" id="set-thumb-on"><div class="tgl-k"></div></div><span>Difuminar miniaturas sensibles</span></div>
+    <div id="set-thumb-ctl">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:13px;color:var(--text2)">Intensidad</span><input type="range" id="set-thumb-px" min="2" max="60" step="1" style="flex:1" oninput="setThumbBlurPx(this.value)" aria-label="Intensidad del difuminado"><b id="set-thumb-val" style="min-width:42px;text-align:right"></b></div>
+      <select class="inp" id="set-thumb-scope" onchange="setThumbFilter(this.value)" aria-label="Qué difuminar" style="margin-bottom:8px"><option value="strict">Difuminar todo lo sensible (niveles 1 y 3)</option><option value="medium">Difuminar solo lo explícito (nivel 3)</option></select>
+      <div style="width:100%;height:70px;border-radius:8px;overflow:hidden;background:linear-gradient(135deg,#ef4444,#f59e0b 40%,#3b82f6)"><div id="set-thumb-prev" style="width:100%;height:100%;background:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 12px,rgba(0,0,0,.35) 12px 24px)"></div></div>
+    </div>
+    <div class="set-note" id="set-thumb-note" style="margin-top:6px"></div>
+  </div>
   <div class="field-grp"><label class="field-lbl">Cuenta</label><div id="set-account"></div></div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-settings')">Cerrar</button></div>
 </div>
@@ -9024,6 +9053,7 @@ window.openSettings = function () {
     box.insertAdjacentHTML('afterbegin', '<button class="btn btn-g" style="margin-bottom:10px" onclick="closeModal(\'mo-settings\');openClsApi()">🔑 Conseguir API de clasificación</button>');
   } else box.innerHTML = '';
   fillLangSelects();
+  thumbSettingsFill();
   openModal('mo-settings');
 };
 
