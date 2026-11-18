@@ -2136,6 +2136,13 @@ function ageHandleReturn() {
   ageComplete(id).then(ok => { if (ok) showToast(clsT('ageOk'), 5000); else ageWatchStart(); });
 }
 // Un admin da (o quita) el +18 a una cuenta. No ve el estado actual de nadie: son dos acciones, no un interruptor con estado.
+// ¿Esa cuenta está marcada como +18? Solo los admins reciben el dato de las demás cuentas (el servidor no lo entrega a nadie más).
+const adultOn = u => !!(u && ((ME && u.id === ME.id) ? ME.adult : u.adult));
+// Un solo botón: dice "Marcar +18" si no lo está y "Desmarcar +18" si ya lo está.
+function adultBtnHtml(u, from, style) {
+  const on = adultOn(u);
+  return '<button class="btn btn-g" style="' + style + (on ? ';border-color:var(--red);color:var(--red)' : '') + '" onclick="adminToggleAdult(\'' + u.id + '\',' + (!on) + ',\'' + from + '\')">' + esc(clsT(on ? 'ageUnmark' : 'ageMark')) + (on ? ' ✓' : '') + '</button>';
+}
 let _adultBusy = false;
 async function adminToggleAdult(uid, on, from) {
   if (!isAdmin() || _adultBusy) return;
@@ -2856,7 +2863,7 @@ function renderProfile(uid) {
   const adminBanBtn = isAdmin() && !isMe ? (isBanned
     ? '<button class="btn btn-green" style="font-size:12px" onclick="unbanUser(\''+u.id+'\')">✅ Desbanear</button>'
     : '<button class="btn btn-red" style="font-size:12px" onclick="banUser(\''+u.id+'\')">🚫 Banear</button>') : '';
-  const adminAdultBtn = isAdmin() ? '<button class="btn btn-g" style="font-size:12px" onclick="adminToggleAdult(\''+u.id+'\',true,\'profile\')">'+esc(clsT('ageMark'))+'</button><button class="btn btn-g" style="font-size:12px" onclick="adminToggleAdult(\''+u.id+'\',false,\'profile\')">'+esc(clsT('ageUnmark'))+'</button>' : '';   // sin mostrar el estado actual
+  const adminAdultBtn = isAdmin() ? adultBtnHtml(u, 'profile', 'font-size:12px') : '';
   const ageTagHtml = isMe && ME && ME.adult ? '<div class="pf-bio">'+esc(clsT('ageTag'))+'</div>' : '';   // solo la propia persona; nunca cómo lo consiguió
   document.getElementById('profile-inner').innerHTML =
     '<div class="pf-banner">'+
@@ -3026,7 +3033,7 @@ function openAdminPanel() {
         (isBanned
           ? '<button class="btn btn-green" style="font-size:11px;padding:4px 10px" onclick="unbanUser(\''+u.id+'\')">Desbanear</button>'
           : '<button class="btn btn-red" style="font-size:11px;padding:4px 10px" onclick="banUser(\''+u.id+'\')">Banear</button>')+
-        (isAdmin() ? '<button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="adminToggleAdult(\''+u.id+'\',true,\'admin\')">'+esc(clsT('ageMark'))+'</button><button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="adminToggleAdult(\''+u.id+'\',false,\'admin\')">'+esc(clsT('ageUnmark'))+'</button>' : '')+
+        (isAdmin() ? adultBtnHtml(u, 'admin', 'font-size:11px;padding:4px 10px') : '')+
         (isAdmin() && !u.isAdmin ? '<button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="makeAdmin(\''+u.id+'\')">\u26A1 Admin</button>' : '')+
         '</div></div>';
     }).join('')+

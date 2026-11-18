@@ -1249,11 +1249,10 @@ app.post('/api/admin/users/:id/adult', requireAuth, requireAdmin, (req, res) => 
 });
 
 // ── GET todos los usuarios (sin pw) ──
-// Vista de admin: sin ningún dato de +18 (ni el booleano) de otras cuentas.
+// Vista de admin: incluye el booleano `adult` de cada cuenta (para que el botón muestre Marcar o Desmarcar).
+// Nunca sale el detalle de cómo lo consiguió (ageVerified): solo el booleano, y solo para admins.
 function adminView(u, viewer) {
-  const v = safeUser(u);
-  if (u.id !== viewer.id) delete v.adult;
-  return v;
+  return safeUser(u);
 }
 app.get('/api/users', (req, res) => {
   const viewer = readSession(req);
