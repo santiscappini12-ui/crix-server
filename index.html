@@ -1844,7 +1844,7 @@ async function ensureFullMap(id) {
 // (las rutas de subida /api/maps y /api/videos vuelven a calcular todo en el servidor).
 // ═══════════════════════════════════════════════════════════════════
 const CLS_UI = {
-  es: { ageTitle:'🔞 Contenido +18', ageBody:'Este contenido está clasificado {l} (solo adultos). Para entrar tenés que verificar tu edad con ageefy: un escaneo rápido de la cara, sin crear cuentas ni guardar fotos. Si conocés a un admin de Crix, también puede marcarte como +18.', ageBtn:'Verificar mi edad con ageefy', ageDoneBtn:'Ya terminé en ageefy', ageRedirect:'Abriendo ageefy…', ageChecking:'Comprobando tu verificación…', ageOk:'✅ Edad verificada. Ya podés entrar a contenido +18.', ageNotYet:'La verificación todavía no terminó. Completala en ageefy y volvé a tocar “Ya terminé”.', ageFail:'No se pudo verificar tu edad: {e}', ageNeedLogin:'Iniciá sesión para verificar tu edad.', ageMark:'🔞 Marcar +18', ageUnmark:'Quitar +18', ageMarked:'🔞 {u} quedó marcado como +18', ageUnmarked:'{u} ya no está marcado como +18', ageTag:'🔞 +18 verificado',
+  es: { ageTitle:'🔞 Contenido +18', ageBody:'Este contenido está clasificado {l} (solo adultos). Para entrar tenés que verificar tu edad con ageefy: un escaneo rápido de la cara, sin crear cuentas ni guardar fotos.', ageBtn:'Verificar mi edad con ageefy', ageDoneBtn:'Ya terminé en ageefy', ageRedirect:'Abriendo ageefy…', ageChecking:'Comprobando tu verificación…', ageOk:'✅ Edad verificada. Ya podés entrar a contenido +18.', ageNotYet:'La verificación todavía no terminó. Completala en ageefy y volvé a tocar “Ya terminé”.', ageFail:'No se pudo verificar tu edad: {e}', ageNeedLogin:'Iniciá sesión para verificar tu edad.', ageMark:'🔞 Marcar +18', ageUnmark:'Quitar +18', ageMarked:'🔞 {u} quedó marcado como +18', ageUnmarked:'{u} ya no está marcado como +18', ageTag:'🔞 +18 verificado',
     title:'🏷️ Clasificación del contenido', kind_video:'video', kind_game:'juego', kind_app:'app',
     intro:'Crix solo prohíbe lo que es ilegal. Respondé este cuestionario para que tu {k} lleve la clasificación de tu país. Se clasifica el medio completo (no cada textura o archivo suelto).',
     country:'Tu país', detected:'Detectado automáticamente: {c}', pick:'Elegí…', legalTitle:'1. Legalidad', legalIntro:'Si algo de esto es ilegal en {c}, no se puede subir.',
@@ -1853,7 +1853,7 @@ const CLS_UI = {
     resultIn:'Clasificación en {c}', minAge:'Edad mínima', all:'Todo público', blockedTitle:'No se puede subir', missing:'Respondé todas las preguntas.', needCountry:'Elegí tu país.', needDecl:'Marcá la declaración para continuar.',
     loading:'Cargando cuestionario…', loadFail:'No se pudo cargar el cuestionario', calcFail:'No se pudo calcular la clasificación', needBefore:'Hace falta completar la clasificación para subirlo.',
     draft:'Queda como borrador: nadie más lo ve hasta que lo clasifiques (🏷️).', adultGate:'Este contenido está clasificado {l} (solo adultos). ¿Confirmás que sos mayor de edad?', unrated:'Sin clasificar', classify:'Clasificar', classified:'Clasificación: {l}', pending:'Pendiente: se te pedirá al publicar', saved:'🏷️ Clasificación guardada: {l}', rejected:'No se pudo subir', adult:'Adultos', explicit:'Explícito' },
-  en: { ageTitle:'🔞 18+ content', ageBody:'This content is rated {l} (adults only). To enter you need to verify your age with ageefy: a quick face scan, no account and no photos stored. If you know a Crix admin, they can also mark you as 18+.', ageBtn:'Verify my age with ageefy', ageDoneBtn:'I finished on ageefy', ageRedirect:'Opening ageefy…', ageChecking:'Checking your verification…', ageOk:'✅ Age verified. You can now enter 18+ content.', ageNotYet:'The verification is not finished yet. Complete it on ageefy and tap “I finished” again.', ageFail:'Could not verify your age: {e}', ageNeedLogin:'Log in to verify your age.', ageMark:'🔞 Mark as 18+', ageUnmark:'Remove 18+', ageMarked:'🔞 {u} is now marked as 18+', ageUnmarked:'{u} is no longer marked as 18+', ageTag:'🔞 18+ verified',
+  en: { ageTitle:'🔞 18+ content', ageBody:'This content is rated {l} (adults only). To enter you need to verify your age with ageefy: a quick face scan, no account and no photos stored.', ageBtn:'Verify my age with ageefy', ageDoneBtn:'I finished on ageefy', ageRedirect:'Opening ageefy…', ageChecking:'Checking your verification…', ageOk:'✅ Age verified. You can now enter 18+ content.', ageNotYet:'The verification is not finished yet. Complete it on ageefy and tap “I finished” again.', ageFail:'Could not verify your age: {e}', ageNeedLogin:'Log in to verify your age.', ageMark:'🔞 Mark as 18+', ageUnmark:'Remove 18+', ageMarked:'🔞 {u} is now marked as 18+', ageUnmarked:'{u} is no longer marked as 18+', ageTag:'🔞 18+ verified',
     title:'🏷️ Content rating', kind_video:'video', kind_game:'game', kind_app:'app',
     intro:'Crix only prohibits what is illegal. Answer this questionnaire so your {k} gets the rating used in your country. The whole item is rated (not each texture or loose file).',
     country:'Your country', detected:'Detected automatically: {c}', pick:'Choose…', legalTitle:'1. Legality', legalIntro:'If any of this is illegal in {c}, it cannot be uploaded.',
@@ -1862,7 +1862,7 @@ const CLS_UI = {
     resultIn:'Rating in {c}', minAge:'Minimum age', all:'Everyone', blockedTitle:'It cannot be uploaded', missing:'Answer all the questions.', needCountry:'Choose your country.', needDecl:'Tick the declaration to continue.',
     loading:'Loading questionnaire…', loadFail:'Could not load the questionnaire', calcFail:'Could not calculate the rating', needBefore:'The rating questionnaire is required to upload it.',
     draft:'It stays as a draft: nobody else sees it until you rate it (🏷️).', adultGate:'This content is rated {l} (adults only). Do you confirm you are of legal age?', unrated:'Unrated', classify:'Rate', classified:'Rating: {l}', pending:'Pending: you will be asked when publishing', saved:'🏷️ Rating saved: {l}', rejected:'Could not upload', adult:'Adults', explicit:'Explicit' },
-  pt: { ageTitle:'🔞 Conteúdo +18', ageBody:'Este conteúdo está classificado {l} (somente adultos). Para entrar você precisa verificar sua idade com a ageefy: uma leitura rápida do rosto, sem criar conta nem guardar fotos. Se você conhece um admin do Crix, ele também pode te marcar como +18.', ageBtn:'Verificar minha idade com a ageefy', ageDoneBtn:'Já terminei na ageefy', ageRedirect:'Abrindo a ageefy…', ageChecking:'Verificando sua verificação…', ageOk:'✅ Idade verificada. Agora você pode entrar em conteúdo +18.', ageNotYet:'A verificação ainda não terminou. Conclua na ageefy e toque em “Já terminei” de novo.', ageFail:'Não foi possível verificar sua idade: {e}', ageNeedLogin:'Faça login para verificar sua idade.', ageMark:'🔞 Marcar +18', ageUnmark:'Remover +18', ageMarked:'🔞 {u} foi marcado como +18', ageUnmarked:'{u} não está mais marcado como +18', ageTag:'🔞 +18 verificado',
+  pt: { ageTitle:'🔞 Conteúdo +18', ageBody:'Este conteúdo está classificado {l} (somente adultos). Para entrar você precisa verificar sua idade com a ageefy: uma leitura rápida do rosto, sem criar conta nem guardar fotos.', ageBtn:'Verificar minha idade com a ageefy', ageDoneBtn:'Já terminei na ageefy', ageRedirect:'Abrindo a ageefy…', ageChecking:'Verificando sua verificação…', ageOk:'✅ Idade verificada. Agora você pode entrar em conteúdo +18.', ageNotYet:'A verificação ainda não terminou. Conclua na ageefy e toque em “Já terminei” de novo.', ageFail:'Não foi possível verificar sua idade: {e}', ageNeedLogin:'Faça login para verificar sua idade.', ageMark:'🔞 Marcar +18', ageUnmark:'Remover +18', ageMarked:'🔞 {u} foi marcado como +18', ageUnmarked:'{u} não está mais marcado como +18', ageTag:'🔞 +18 verificado',
     title:'🏷️ Classificação do conteúdo', kind_video:'vídeo', kind_game:'jogo', kind_app:'app',
     intro:'O Crix só proíbe o que é ilegal. Responda a este questionário para que o seu {k} receba a classificação usada no seu país. O item é classificado por inteiro (não cada textura ou arquivo solto).',
     country:'Seu país', detected:'Detectado automaticamente: {c}', pick:'Escolha…', legalTitle:'1. Legalidade', legalIntro:'Se algo disso for ilegal em {c}, não pode ser enviado.',
@@ -1871,7 +1871,7 @@ const CLS_UI = {
     resultIn:'Classificação em {c}', minAge:'Idade mínima', all:'Livre', blockedTitle:'Não pode ser enviado', missing:'Responda a todas as perguntas.', needCountry:'Escolha o seu país.', needDecl:'Marque a declaração para continuar.',
     loading:'Carregando questionário…', loadFail:'Não foi possível carregar o questionário', calcFail:'Não foi possível calcular a classificação', needBefore:'É preciso preencher a classificação para enviar.',
     draft:'Fica como rascunho: ninguém mais vê até você classificar (🏷️).', adultGate:'Este conteúdo está classificado {l} (somente adultos). Você confirma que é maior de idade?', unrated:'Sem classificação', classify:'Classificar', classified:'Classificação: {l}', pending:'Pendente: será pedido ao publicar', saved:'🏷️ Classificação salva: {l}', rejected:'Não foi possível enviar', adult:'Adultos', explicit:'Explícito' },
-  fr: { ageTitle:'🔞 Contenu 18+', ageBody:'Ce contenu est classé {l} (adultes uniquement). Pour y accéder, vous devez vérifier votre âge avec ageefy : un scan rapide du visage, sans compte ni photo conservée. Si vous connaissez un admin de Crix, il peut aussi vous marquer comme 18+.', ageBtn:'Vérifier mon âge avec ageefy', ageDoneBtn:'J’ai terminé sur ageefy', ageRedirect:'Ouverture d’ageefy…', ageChecking:'Vérification en cours…', ageOk:'✅ Âge vérifié. Vous pouvez maintenant accéder aux contenus 18+.', ageNotYet:'La vérification n’est pas encore terminée. Terminez-la sur ageefy puis appuyez de nouveau sur « J’ai terminé ».', ageFail:'Impossible de vérifier votre âge : {e}', ageNeedLogin:'Connectez-vous pour vérifier votre âge.', ageMark:'🔞 Marquer 18+', ageUnmark:'Retirer 18+', ageMarked:'🔞 {u} est maintenant marqué 18+', ageUnmarked:'{u} n’est plus marqué 18+', ageTag:'🔞 18+ vérifié',
+  fr: { ageTitle:'🔞 Contenu 18+', ageBody:'Ce contenu est classé {l} (adultes uniquement). Pour y accéder, vous devez vérifier votre âge avec ageefy : un scan rapide du visage, sans compte ni photo conservée.', ageBtn:'Vérifier mon âge avec ageefy', ageDoneBtn:'J’ai terminé sur ageefy', ageRedirect:'Ouverture d’ageefy…', ageChecking:'Vérification en cours…', ageOk:'✅ Âge vérifié. Vous pouvez maintenant accéder aux contenus 18+.', ageNotYet:'La vérification n’est pas encore terminée. Terminez-la sur ageefy puis appuyez de nouveau sur « J’ai terminé ».', ageFail:'Impossible de vérifier votre âge : {e}', ageNeedLogin:'Connectez-vous pour vérifier votre âge.', ageMark:'🔞 Marquer 18+', ageUnmark:'Retirer 18+', ageMarked:'🔞 {u} est maintenant marqué 18+', ageUnmarked:'{u} n’est plus marqué 18+', ageTag:'🔞 18+ vérifié',
     title:'🏷️ Classification du contenu', kind_video:'vidéo', kind_game:'jeu', kind_app:'app',
     intro:'Crix n’interdit que ce qui est illégal. Répondez à ce questionnaire pour que votre {k} reçoive la classification utilisée dans votre pays. L’élément est classé dans son ensemble (pas chaque texture ou fichier isolé).',
     country:'Votre pays', detected:'Détecté automatiquement : {c}', pick:'Choisir…', legalTitle:'1. Légalité', legalIntro:'Si l’un de ces points est illégal en {c}, il ne peut pas être envoyé.',
@@ -1880,7 +1880,7 @@ const CLS_UI = {
     resultIn:'Classification en {c}', minAge:'Âge minimum', all:'Tout public', blockedTitle:'Impossible à envoyer', missing:'Répondez à toutes les questions.', needCountry:'Choisissez votre pays.', needDecl:'Cochez la déclaration pour continuer.',
     loading:'Chargement du questionnaire…', loadFail:'Impossible de charger le questionnaire', calcFail:'Impossible de calculer la classification', needBefore:'La classification est nécessaire pour l’envoyer.',
     draft:'Il reste en brouillon : personne d’autre ne le voit tant que vous ne l’avez pas classé (🏷️).', adultGate:'Ce contenu est classé {l} (adultes uniquement). Confirmez-vous être majeur ?', unrated:'Non classé', classify:'Classer', classified:'Classification : {l}', pending:'En attente : demandé lors de la publication', saved:'🏷️ Classification enregistrée : {l}', rejected:'Envoi impossible', adult:'Adultes', explicit:'Explicite' },
-  de: { ageTitle:'🔞 Inhalt ab 18', ageBody:'Dieser Inhalt ist {l} eingestuft (nur Erwachsene). Zum Öffnen musst du dein Alter mit ageefy bestätigen: ein kurzer Gesichtsscan, ohne Konto und ohne gespeicherte Fotos. Wenn du einen Crix-Admin kennst, kann er dich auch als 18+ markieren.', ageBtn:'Mein Alter mit ageefy bestätigen', ageDoneBtn:'Ich bin bei ageefy fertig', ageRedirect:'ageefy wird geöffnet…', ageChecking:'Bestätigung wird geprüft…', ageOk:'✅ Alter bestätigt. Du kannst jetzt Inhalte ab 18 öffnen.', ageNotYet:'Die Bestätigung ist noch nicht abgeschlossen. Schließe sie bei ageefy ab und tippe erneut auf „Ich bin fertig“.', ageFail:'Alter konnte nicht bestätigt werden: {e}', ageNeedLogin:'Melde dich an, um dein Alter zu bestätigen.', ageMark:'🔞 Als 18+ markieren', ageUnmark:'18+ entfernen', ageMarked:'🔞 {u} ist jetzt als 18+ markiert', ageUnmarked:'{u} ist nicht mehr als 18+ markiert', ageTag:'🔞 18+ bestätigt',
+  de: { ageTitle:'🔞 Inhalt ab 18', ageBody:'Dieser Inhalt ist {l} eingestuft (nur Erwachsene). Zum Öffnen musst du dein Alter mit ageefy bestätigen: ein kurzer Gesichtsscan, ohne Konto und ohne gespeicherte Fotos.', ageBtn:'Mein Alter mit ageefy bestätigen', ageDoneBtn:'Ich bin bei ageefy fertig', ageRedirect:'ageefy wird geöffnet…', ageChecking:'Bestätigung wird geprüft…', ageOk:'✅ Alter bestätigt. Du kannst jetzt Inhalte ab 18 öffnen.', ageNotYet:'Die Bestätigung ist noch nicht abgeschlossen. Schließe sie bei ageefy ab und tippe erneut auf „Ich bin fertig“.', ageFail:'Alter konnte nicht bestätigt werden: {e}', ageNeedLogin:'Melde dich an, um dein Alter zu bestätigen.', ageMark:'🔞 Als 18+ markieren', ageUnmark:'18+ entfernen', ageMarked:'🔞 {u} ist jetzt als 18+ markiert', ageUnmarked:'{u} ist nicht mehr als 18+ markiert', ageTag:'🔞 18+ bestätigt',
     title:'🏷️ Inhaltseinstufung', kind_video:'Video', kind_game:'Spiel', kind_app:'App',
     intro:'Crix verbietet nur, was illegal ist. Beantworten Sie diesen Fragebogen, damit Ihr(e) {k} die in Ihrem Land übliche Einstufung erhält. Eingestuft wird das Ganze (nicht jede Textur oder Einzeldatei).',
     country:'Ihr Land', detected:'Automatisch erkannt: {c}', pick:'Auswählen…', legalTitle:'1. Rechtmäßigkeit', legalIntro:'Wenn etwas davon in {c} illegal ist, kann es nicht hochgeladen werden.',
@@ -1889,7 +1889,7 @@ const CLS_UI = {
     resultIn:'Einstufung in {c}', minAge:'Mindestalter', all:'Für alle', blockedTitle:'Kann nicht hochgeladen werden', missing:'Beantworten Sie alle Fragen.', needCountry:'Wählen Sie Ihr Land.', needDecl:'Setzen Sie den Haken bei der Erklärung, um fortzufahren.',
     loading:'Fragebogen wird geladen…', loadFail:'Der Fragebogen konnte nicht geladen werden', calcFail:'Die Einstufung konnte nicht berechnet werden', needBefore:'Zum Hochladen muss die Einstufung ausgefüllt werden.',
     draft:'Es bleibt ein Entwurf: Niemand sonst sieht es, bis Sie es einstufen (🏷️).', adultGate:'Dieser Inhalt ist {l} eingestuft (nur Erwachsene). Bestätigen Sie, dass Sie volljährig sind?', unrated:'Nicht eingestuft', classify:'Einstufen', classified:'Einstufung: {l}', pending:'Ausstehend: wird beim Veröffentlichen abgefragt', saved:'🏷️ Einstufung gespeichert: {l}', rejected:'Hochladen nicht möglich', adult:'Erwachsene', explicit:'Explizit' },
-  it: { ageTitle:'🔞 Contenuto 18+', ageBody:'Questo contenuto è classificato {l} (solo adulti). Per entrare devi verificare la tua età con ageefy: una rapida scansione del viso, senza account e senza foto salvate. Se conosci un admin di Crix, può anche segnarti come 18+.', ageBtn:'Verifica la mia età con ageefy', ageDoneBtn:'Ho finito su ageefy', ageRedirect:'Apertura di ageefy…', ageChecking:'Controllo della verifica…', ageOk:'✅ Età verificata. Ora puoi entrare nei contenuti 18+.', ageNotYet:'La verifica non è ancora finita. Completala su ageefy e tocca di nuovo «Ho finito».', ageFail:'Impossibile verificare la tua età: {e}', ageNeedLogin:'Accedi per verificare la tua età.', ageMark:'🔞 Segna come 18+', ageUnmark:'Rimuovi 18+', ageMarked:'🔞 {u} è stato segnato come 18+', ageUnmarked:'{u} non è più segnato come 18+', ageTag:'🔞 18+ verificato',
+  it: { ageTitle:'🔞 Contenuto 18+', ageBody:'Questo contenuto è classificato {l} (solo adulti). Per entrare devi verificare la tua età con ageefy: una rapida scansione del viso, senza account e senza foto salvate.', ageBtn:'Verifica la mia età con ageefy', ageDoneBtn:'Ho finito su ageefy', ageRedirect:'Apertura di ageefy…', ageChecking:'Controllo della verifica…', ageOk:'✅ Età verificata. Ora puoi entrare nei contenuti 18+.', ageNotYet:'La verifica non è ancora finita. Completala su ageefy e tocca di nuovo «Ho finito».', ageFail:'Impossibile verificare la tua età: {e}', ageNeedLogin:'Accedi per verificare la tua età.', ageMark:'🔞 Segna come 18+', ageUnmark:'Rimuovi 18+', ageMarked:'🔞 {u} è stato segnato come 18+', ageUnmarked:'{u} non è più segnato come 18+', ageTag:'🔞 18+ verificato',
     title:'🏷️ Classificazione del contenuto', kind_video:'video', kind_game:'gioco', kind_app:'app',
     intro:'Crix vieta solo ciò che è illegale. Rispondi a questo questionario perché il tuo {k} riceva la classificazione usata nel tuo paese. Viene classificato l’intero elemento (non ogni texture o file singolo).',
     country:'Il tuo paese', detected:'Rilevato automaticamente: {c}', pick:'Scegli…', legalTitle:'1. Legalità', legalIntro:'Se qualcosa di questo è illegale in {c}, non può essere caricato.',
@@ -2050,7 +2050,7 @@ function clsBadge(rec, showUnrated) {
 }
 // Contenido +18 ("categoría C"): hace falta tener la edad verificada, ya sea con ageefy.com o porque un admin te marcó como +18.
 // Esto es solo el aviso: quien decide es el servidor, que no entrega el juego ni el video a una cuenta sin verificar.
-const ageIsOk = () => !!(ME && ME.ageVerified);
+const ageIsOk = () => !!(ME && ME.adult);   // booleano interno: se usa para abrir contenido +18, nunca se muestra
 async function clsAdultGate(rec) {
   const c = rec && rec.classification; if (!c || !c.adult) return true;
   if (ME && (rec.authorId === ME.id || (Array.isArray(rec.collaborators) && rec.collaborators.includes(ME.id)))) return true;
@@ -2061,19 +2061,39 @@ async function clsAdultGate(rec) {
 async function ageRefreshMe() {
   try {
     const r = await apiRequest('/api/session');
-    if (r.user && r.user.ageVerified) ME.ageVerified = r.user.ageVerified; else delete ME.ageVerified;
+    if (r.user && r.user.adult) ME.adult = true; else delete ME.adult;
     const us = getUsers(); us[ME.id] = ME; DB.set('users', us);
   } catch (_) {}
 }
 // Cierra el circuito con ageefy: el servidor consulta el resultado de la sesión de ESTA cuenta; el navegador no decide nada.
+// Todo es automático: no hay botón de "ya verifiqué". Mientras haya una verificación en curso se consulta solo (cada pocos
+// segundos, al volver a la pestaña y al reabrir la app) y apenas ageefy la marca completa, la cuenta queda verificada.
+const AGE_FLAG = 'crix4_age_pending';
+const ageFlag = {
+  get() { try { return localStorage.getItem(AGE_FLAG) === '1'; } catch { return false; } },
+  set(v) { try { v ? localStorage.setItem(AGE_FLAG, '1') : localStorage.removeItem(AGE_FLAG); } catch {} }
+};
 async function ageComplete(id) {
-  showToast(clsT('ageChecking'), 4000);
   try {
     const r = await apiRequest('/api/age/complete', { method:'POST', body: id ? { id } : {} });
-    if (r.verified) { await ageRefreshMe(); showToast(clsT('ageOk'), 5000); return true; }
-    showToast(clsT('ageNotYet'), 6000); return false;
-  } catch (e) { showToast(clsT('ageFail', { e: e.message }), 6000); return false; }
+    if (r.verified) { await ageRefreshMe(); ageFlag.set(false); return true; }
+  } catch (e) {
+    if (e && (e.status === 403 || e.status === 409 || e.status === 410)) ageFlag.set(false);   // sin sesión en curso, vencida o rechazada: no insistir
+    if (e && e.payload && e.payload.code === 'AGE_TOO_YOUNG') showToast(clsT('ageFail', { e: e.message }), 6000);
+  }
+  return false;
 }
+let _ageTimer = null, _ageTries = 0;
+function ageWatchStart() {
+  ageFlag.set(true); _ageTries = 0;
+  if (_ageTimer) return;
+  _ageTimer = setInterval(async () => {
+    if (!ME || ageIsOk() || !ageFlag.get() || ++_ageTries > 225) { clearInterval(_ageTimer); _ageTimer = null; if (ageIsOk()) ageFlag.set(false); return; }   // ~15 min
+    if (document.hidden) return;
+    if (await ageComplete()) { clearInterval(_ageTimer); _ageTimer = null; showToast(clsT('ageOk'), 5000); const m = document.getElementById('mo-age'); if (m && m._finish) m._finish(true); }
+  }, 4000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && ME && !ageIsOk() && ageFlag.get()) ageWatchStart(); });
 function ageGateModal(label) {
   return new Promise(resolve => {
     if (!ME) { showToast(clsT('ageNeedLogin')); return resolve(false); }
@@ -2083,21 +2103,21 @@ function ageGateModal(label) {
       '<div style="font-size:13px;color:var(--text2);line-height:1.6">' + esc(clsT('ageBody', { l: label || '18+' })) + '</div>' +
       '<div id="age-msg" style="font-size:12px;color:var(--text3);min-height:16px"></div>' +
       '<button class="btn btn-p" id="age-go">' + esc(clsT('ageBtn')) + '</button>' +
-      '<button class="btn btn-g" id="age-done">' + esc(clsT('ageDoneBtn')) + '</button>' +
       '<button class="btn btn-g" id="age-cancel">' + esc(clsT('cancel')) + '</button></div>';
     document.body.appendChild(ov);
-    const msg = ov.querySelector('#age-msg'), go = ov.querySelector('#age-go'), dn = ov.querySelector('#age-done');
+    const msg = ov.querySelector('#age-msg'), go = ov.querySelector('#age-go');
     const close = ok => { ov.remove(); resolve(ok); };
+    ov._finish = close;
     ov.querySelector('#age-cancel').onclick = () => close(false);
     go.onclick = async () => {
       go.disabled = true; msg.textContent = clsT('ageRedirect');
       try {
         const r = await apiRequest('/api/age/start', { method:'POST', body:{} });
         if (r.verified) { await ageRefreshMe(); return close(true); }
+        ageWatchStart();          // desde acá se verifica solo, aunque ageefy abra en otra pestaña o no vuelva a Crix
         location.href = r.url;   // ageefy hace el escaneo y vuelve a Crix con ?age=done&id=…
       } catch (e) { msg.textContent = clsT('ageFail', { e: e.message }); go.disabled = false; }
     };
-    dn.onclick = async () => { dn.disabled = true; msg.textContent = clsT('ageChecking'); const ok = await ageComplete(); if (ok) return close(true); msg.textContent = clsT('ageNotYet'); dn.disabled = false; };
   });
 }
 // Regreso desde ageefy: …/?age=done&id=<sesión>. Se limpia la URL y se completa apenas la sesión de Crix está lista.
@@ -2109,18 +2129,11 @@ let _pendingAgeId = null;
     history.replaceState(null, '', location.pathname + location.hash);
   } catch (_) {}
 })();
-function ageHandleReturn() { if (_pendingAgeId === null || !ME) return; const id = _pendingAgeId; _pendingAgeId = null; ageComplete(id); }
-// Un admin marca (o desmarca) a alguien como +18. También puede marcarse a sí mismo.
-async function adminToggleAdult(uid, on, from) {
-  if (!isAdmin()) return;
-  try {
-    await apiRequest('/api/admin/users/' + encodeURIComponent(uid) + '/adult', { method:'POST', body:{ adult: !!on } });
-    const us = getUsers(), u = us[uid];
-    if (u) { if (on) u.ageVerified = { method:'admin', by:ME.id, at:new Date().toISOString() }; else delete u.ageVerified; us[uid] = u; DB.set('users', us); }
-    if (uid === ME.id) { if (on) ME.ageVerified = (u && u.ageVerified) || { method:'admin' }; else delete ME.ageVerified; }
-    showToast(clsT(on ? 'ageMarked' : 'ageUnmarked', { u: (u && u.username) || uid }), 3500);
-    if (from === 'admin') openAdminPanel(); else if (from === 'profile') goTab('profile', uid);
-  } catch (e) { showToast(e.message, 4000); }
+function ageHandleReturn() {
+  if (!ME) return;
+  if (_pendingAgeId === null) { if (ageFlag.get() && !ageIsOk()) ageWatchStart(); return; }   // reabrió la app con una verificación en curso
+  const id = _pendingAgeId; _pendingAgeId = null;
+  ageComplete(id).then(ok => { if (ok) showToast(clsT('ageOk'), 5000); else ageWatchStart(); });
 }
 // Clasificar (o reclasificar) un juego/app propio desde su tarjeta.
 async function clsReclassify(id) {
@@ -2827,8 +2840,8 @@ function renderProfile(uid) {
   const adminBanBtn = isAdmin() && !isMe ? (isBanned
     ? '<button class="btn btn-green" style="font-size:12px" onclick="unbanUser(\''+u.id+'\')">✅ Desbanear</button>'
     : '<button class="btn btn-red" style="font-size:12px" onclick="banUser(\''+u.id+'\')">🚫 Banear</button>') : '';
-  const adminAdultBtn = isAdmin() ? '<button class="btn btn-g" style="font-size:12px" onclick="adminToggleAdult(\''+u.id+'\','+(u.ageVerified?'false':'true')+',\'profile\')">'+esc(clsT(u.ageVerified?'ageUnmark':'ageMark'))+'</button>' : '';
-  const ageTagHtml = (isAdmin() || isMe) && u.ageVerified ? '<div class="pf-bio">'+esc(clsT('ageTag'))+(u.ageVerified.method==='admin' ? ' · admin' : ' · ageefy')+'</div>' : '';
+  const adminAdultBtn = '';   // el +18 de otras cuentas no se muestra ni se cambia desde la interfaz
+  const ageTagHtml = isMe && ME && ME.adult ? '<div class="pf-bio">'+esc(clsT('ageTag'))+'</div>' : '';   // solo la propia persona; nunca cómo lo consiguió
   document.getElementById('profile-inner').innerHTML =
     '<div class="pf-banner">'+
     '<div class="pf-av" style="width:72px;height:72px;font-size:28px;background:'+u.color+';overflow:hidden">'+avatarInnerHtml(u)+'</div>'+
@@ -2998,7 +3011,6 @@ function openAdminPanel() {
           ? '<button class="btn btn-green" style="font-size:11px;padding:4px 10px" onclick="unbanUser(\''+u.id+'\')">Desbanear</button>'
           : '<button class="btn btn-red" style="font-size:11px;padding:4px 10px" onclick="banUser(\''+u.id+'\')">Banear</button>')+
         (isAdmin() && !u.isAdmin ? '<button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="makeAdmin(\''+u.id+'\')">\u26A1 Admin</button>' : '')+
-        (isAdmin() ? '<button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="adminToggleAdult(\''+u.id+'\','+(u.ageVerified?'false':'true')+',\'admin\')">'+esc(clsT(u.ageVerified?'ageUnmark':'ageMark'))+'</button>' : '')+
         '</div></div>';
     }).join('')+
     '</div>';
@@ -3872,7 +3884,7 @@ self.onmessage = async message => { const data=message.data||{}; if(data.type===
   if(data.type==='workspace'){parts=(data.parts||[]).map(summary);return;}
 };`;
 function scriptPartsSnapshot(parts) { return (parts||[]).map((part,index)=>({id:String(part.id||'map-part-'+index),name:part.name||'Part',type:part.type||'Block',x:part.x||0,y:part.y||0,z:part.z||0,sx:part.sx||4,sy:part.sy||4,sz:part.sz||4,color:part.color||'#888888',anchored:part.anchored!==false,canCollide:part.canCollide!==false,transparent:part.transparent||0,material:part.material||'SmoothPlastic',isNPC:!!part.isNPC})); }
-function scriptPlayerSnapshot() { const p=gPlayer?gPlayer.position:{x:0,y:0,z:0}; return {position:{x:p.x,y:p.y,z:p.z},x:p.x,y:p.y,z:p.z,rotationY:gPlayer?gPlayer.rotation.y:0,velocityY:gVelY,onGround:!!gOnGround,health:gState.health,maxHealth:gState.maxHealth,coins:gState.coins,deaths:gState.deaths}; }
+function scriptPlayerSnapshot() { const p=gPlayer?gPlayer.position:{x:0,y:0,z:0}; return {isAdult:!!(ME&&ME.adult),position:{x:p.x,y:p.y,z:p.z},x:p.x,y:p.y,z:p.z,rotationY:gPlayer?gPlayer.rotation.y:0,velocityY:gVelY,onGround:!!gOnGround,health:gState.health,maxHealth:gState.maxHealth,coins:gState.coins,deaths:gState.deaths}; }
 function makeScriptWorker(script, parts, mode, eventName, player, allScripts=[]) { const language=script.language||'crixscript'; const code=language==='crixscript'?compileCrixScript(script.code||''):(script.code||''); const modules=(allScripts||[]).filter(item=>item.type==='ModuleScript').map(item=>({id:item.id,name:item.name,code:(item.language||'crixscript')==='crixscript'?compileCrixScript(item.code||'',true):(item.code||'')})); const blobUrl=URL.createObjectURL(new Blob([SCRIPT_WORKER_SOURCE],{type:'text/javascript'})); const worker=new Worker(blobUrl); const config={id:script.id||script.name||'script',name:script.name||'Script',code,mode,event:eventName,modules,gui:(typeof guiElementsSnapshot==='function'?guiElementsSnapshot():{}),parts:scriptPartsSnapshot(parts),player:player||scriptPlayerSnapshot()}; return {worker,blobUrl,code,language,config}; }
 function runScript(scriptOverride, partsOverride) {
   if (!scriptOverride) saveActiveScript();
@@ -4516,7 +4528,7 @@ function crixAppPush(payload) {
   const f = document.getElementById('game-iframe');
   try { if (f && f.contentWindow) f.contentWindow.postMessage(Object.assign({ crix:1 }, payload), '*'); } catch {}
 }
-function crixAppMe(socketId) { return { id: ME ? ME.id : 'guest', username: ME ? ME.username : 'Invitado', color: (ME && ME.color) || '#5b8def', socketId: socketId || 'local' }; }
+function crixAppMe(socketId) { return { id: ME ? ME.id : 'guest', username: ME ? ME.username : 'Invitado', color: (ME && ME.color) || '#5b8def', socketId: socketId || 'local', isAdult: !!(ME && ME.adult) }; }
 function crixAppHelloOffline() {
   crixApp.online = false; crixApp.helloDone = true;
   const me = crixAppMe('local');
@@ -4558,7 +4570,7 @@ function crixAppBindSocket() {
   if (!socket || socket._crixBound) return; socket._crixBound = true;
   socket.on('app_msg', msg => crixAppPush({ ev:'message', msg }));
   socket.on('app_state', ({ key, value }) => crixAppPush({ ev:'state', key, value }));
-  socket.on('player_joined', p => crixAppPush({ ev:'join', player:{ id:p.userId, socketId:p.socketId, username:p.username, color:p.color, joinedAt:p.joinedAt } }));
+  socket.on('player_joined', p => crixAppPush({ ev:'join', player:{ id:p.userId, socketId:p.socketId, username:p.username, color:p.color, joinedAt:p.joinedAt, isAdult:!!p.isAdult } }));
   socket.on('player_left', ({ socketId }) => crixAppPush({ ev:'leave', socketId }));
   socket.on('join_ack', () => { if (crixApp.active && crixApp.online && crixApp.helloDone) crixAppHello(); });   // volvió a entrar tras un corte
 }
@@ -6776,7 +6788,7 @@ function uploadVideoFileWhole(id, file, onProgress) {
 // Niveles: 1 desnudez parcial · 2 humor tabú en caricatura (parte suelta o personaje/objeto con esa forma: NUNCA se difumina ni se oculta) · 3 genitales en un cuerpo.
 // Sin +18 verificado: los niveles 1 y 3 no muestran la imagen (🔞). Con +18: preferencia estricto (difumina 1 y 3) / solo explícito (difumina 3) / desactivado.
 // Ajuste GLOBAL del usuario (Configuración): activar/desactivar, intensidad (px de desenfoque) y alcance. Aplica a todas las miniaturas.
-function thumbAdult() { return !!(ME && ME.ageVerified); }
+function thumbAdult() { return !!(ME && ME.adult); }
 function thumbBlurOn() { if (!thumbAdult()) return true; try { return localStorage.getItem('crix_thumb_blur_on') !== '0' && localStorage.getItem('crix_thumb_filter') !== 'off'; } catch { return true; } }
 function thumbBlurPx() { try { const n = parseInt(localStorage.getItem('crix_thumb_blur_px'), 10); const min = thumbAdult() ? 2 : 12; return n >= 2 && n <= 60 ? Math.max(min, n) : 22; } catch { return 22; } }
 function thumbFilterMode() { if (!thumbAdult()) return 'strict'; if (!thumbBlurOn()) return 'off'; try { return localStorage.getItem('crix_thumb_filter') === 'medium' ? 'medium' : 'strict'; } catch { return 'strict'; } }
@@ -6803,7 +6815,7 @@ function filteredThumbHtml(item, ph, base) {
   base = base || '';
   const lvl = Number(item.thumbLevel) || 0, own = !!ME && (item.authorId === ME.id || isAdmin());
   if (lvl === 2) return '<img src="' + item.thumb + '" loading="lazy"' + (base ? ' style="' + base + '"' : '') + '>';   // humor tabú en caricatura: no es +18 explícito, se ve normal
-  if (lvl >= 1 && !own && !(ME && ME.ageVerified)) return ph;
+  if (lvl >= 1 && !own && !(ME && ME.adult)) return ph;
   const mode = thumbFilterMode(), blur = lvl >= 1 && (mode === 'strict' || (mode === 'medium' && lvl >= 3));
   const st = base + (blur ? 'filter:blur(' + thumbBlurPx() + 'px);transform:scale(' + (1 + thumbBlurPx() / 120).toFixed(3) + ');' : '');
   return '<img src="' + item.thumb + '" loading="lazy"' + (st ? ' style="' + st + '"' : '') + '>';
