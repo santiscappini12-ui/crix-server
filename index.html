@@ -718,7 +718,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <!-- ═══ VIDEOS / FOROS ═══ -->
 <div id="s-videos" class="screen">
 <div class="page"><div class="page-inner">
-  <div class="section-hd"><div class="section-hd-accent" style="background:#ef4444"></div>Videos<div style="margin-left:auto;display:flex;gap:8px;align-items:center"><select id="thumb-filter-sel" class="inp" style="display:none;width:auto;font-size:11px;padding:4px 6px" title="Filtro de miniaturas" onchange="setThumbFilter(this.value)"><option value="strict">Filtro: estricto</option><option value="medium">Filtro: medio</option><option value="off">Filtro: desactivado</option></select><button class="btn btn-p" style="font-size:12px;padding:6px 14px" onclick="openUploadVideo()">+ Subir video</button></div></div>
+  <div class="section-hd"><div class="section-hd-accent" style="background:#ef4444"></div>Videos<div style="margin-left:auto;display:flex;gap:8px;align-items:center"><select id="thumb-filter-sel" class="inp" style="display:none;width:auto;font-size:11px;padding:4px 6px" title="Filtro de miniaturas" onchange="setThumbFilter(this.value)"><option value="strict">Difuminado: estricto</option><option value="medium">Difuminado: solo explícito</option><option value="off">Difuminado: desactivado</option></select><button class="btn btn-p" style="font-size:12px;padding:6px 14px" onclick="openUploadVideo()">+ Subir video</button></div></div>
   <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <button class="filter-btn active" onclick="vidFilter('all',this)">Todos</button>
     <button class="filter-btn" onclick="vidFilter('gaming',this)">🎮 Gaming</button>
@@ -764,7 +764,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
   <div class="field-grp"><label class="field-lbl">Visibilidad</label><select class="inp" id="uv-privacy"><option value="public">🌍 Público: visible para todos</option><option value="private">🔒 Privado: solo yo</option></select></div>
   <div class="field-grp"><label class="field-lbl">Archivo de video</label><label class="upload-zone" style="padding:12px">📹 Seleccioná un video<input type="file" id="uv-file" accept="video/*" style="display:none" onchange="previewVideoUpload(event)"></label><video id="uv-preview" style="display:none;width:100%;border-radius:8px;margin-top:8px;max-height:180px" controls></video></div>
   <div class="field-grp"><label class="field-lbl">Miniatura (opcional)</label><label class="upload-zone" style="padding:12px">🖼️ Subir una miniatura propia (puede ser cualquier imagen)<input type="file" id="uv-thumb-file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="previewVideoThumb(event)"></label><img id="uv-thumb-preview" style="display:none;width:100%;border-radius:8px;margin-top:8px;max-height:140px;object-fit:cover"><button type="button" class="btn btn-g" id="uv-thumb-clear" style="display:none;font-size:11px;margin-top:6px" onclick="clearVideoThumb()">Quitar miniatura propia</button></div>
-  <div class="field-grp"><label class="field-lbl">¿Qué muestra la miniatura?</label><select class="inp" id="uv-thumb-level"><option value="0">Nada sensible</option><option value="1">Desnudez parcial (requiere video 16+)</option><option value="2">Parte íntima suelta, sin cuerpo (requiere video 16+)</option><option value="3">Genitales en un cuerpo (requiere video 18+)</option></select><div style="font-size:11px;color:var(--text3);margin-top:4px">La miniatura se ve en el catálogo aunque nadie entre al video, por eso se declara aparte. En Crix, quien no tenga +18 verificado no la verá. Declarar de menos puede llevar a que un admin la oculte o la quite.</div></div>
+  <div class="field-grp"><label class="field-lbl">¿Qué muestra la miniatura?</label><select class="inp" id="uv-thumb-level"><option value="0">Nada sensible</option><option value="1">Desnudez parcial (requiere video 16+)</option><option value="2">Humor tabú en caricatura: parte íntima suelta, o personaje/objeto con esa forma, p. ej. una cabeza (requiere video 16+)</option><option value="3">Genitales descubiertos en un cuerpo o personaje (requiere video 18+)</option></select><div style="font-size:11px;color:var(--text3);margin-top:4px">La miniatura se ve en el catálogo aunque nadie entre al video, por eso se declara aparte. Si solo es un personaje u objeto con esa forma (p. ej. la cabeza de un personaje), en caricatura, sigue siendo humor tabú: no es +18 explícito y no se difumina. Si muestra genitales descubiertos en un cuerpo o personaje, se difumina por defecto y quien no tenga +18 verificado no la ve (quien sí lo tenga puede desactivar el difuminado). Declarar de menos puede llevar a que un admin la oculte o la quite.</div></div>
   <div id="uv-progress" style="display:none;margin:4px 0 12px"><div style="height:8px;background:var(--bg3);border-radius:6px;overflow:hidden"><div id="uv-progress-bar" style="height:100%;width:0;background:var(--acc);transition:width .15s"></div></div><div id="uv-progress-txt" style="font-size:11px;color:var(--text2);margin-top:4px"></div></div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-upload-video')">Cancelar</button><button class="btn btn-p" id="uv-submit" onclick="confirmUploadVideo()">📤 Publicar</button></div>
 </div>
@@ -6705,14 +6705,16 @@ function uploadVideoFileWhole(id, file, onProgress) {
   });
 }
 // Filtro de miniaturas (política del CLIENTE de Crix; la API solo da la etiqueta thumbLevel/thumbAge).
-// Sin +18 verificado: no se muestra la imagen (🔞). Con +18: preferencia estricto (niveles 1-3) / medio (2-3) / desactivado.
+// Niveles: 1 desnudez parcial · 2 humor tabú en caricatura (parte suelta o personaje/objeto con esa forma: NUNCA se difumina ni se oculta) · 3 genitales en un cuerpo.
+// Sin +18 verificado: los niveles 1 y 3 no muestran la imagen (🔞). Con +18: preferencia estricto (difumina 1 y 3) / solo explícito (difumina 3) / desactivado.
 function thumbFilterMode() { try { return localStorage.getItem('crix_thumb_filter') || 'strict'; } catch { return 'strict'; } }
 function setThumbFilter(m) { try { localStorage.setItem('crix_thumb_filter', m); } catch {} if (typeof renderVideos === 'function') try { renderVideos(); } catch {} }
 function videoThumbHtml(v) {
   if (!v.thumb) return '<div class="video-thumb-ph">🎬</div>';
   const lvl = Number(v.thumbLevel) || 0, own = !!ME && (v.authorId === ME.id || isAdmin());
+  if (lvl === 2) return '<img src="' + v.thumb + '" loading="lazy">';   // humor tabú en caricatura: no es +18 explícito, se ve normal
   if (lvl >= 1 && !own && !(ME && ME.ageVerified)) return '<div class="video-thumb-ph" title="Miniatura oculta: requiere +18 verificado">🔞</div>';
-  const mode = thumbFilterMode(), blur = lvl >= 1 && (mode === 'strict' || (mode === 'medium' && lvl >= 2));
+  const mode = thumbFilterMode(), blur = lvl >= 1 && (mode === 'strict' || (mode === 'medium' && lvl >= 3));
   return '<img src="' + v.thumb + '" loading="lazy"' + (blur ? ' style="filter:blur(22px);transform:scale(1.15)"' : '') + '>';
 }
 function makeVideoThumb(file) {
@@ -6737,7 +6739,7 @@ function videoStreamUrl(v) {
 }
 function videoPlayerHtml(v) {
   if (v.ready === false) return '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text2);text-align:center;padding:20px">⏳ Este video todavía se está subiendo…</div>';
-  return '<video id="vp-video" controls autoplay playsinline preload="metadata" ' + (v.thumb && !(Number(v.thumbLevel) > 0) ? 'poster="' + esc(v.thumb) + '" ' : '') + 'style="width:100%;height:100%;background:#000" src="' + esc(videoStreamUrl(v)) + '" onerror="videoPlayError(this)"></video>';
+  return '<video id="vp-video" controls autoplay playsinline preload="metadata" ' + (v.thumb && [0, 2].includes(Number(v.thumbLevel) || 0) ? 'poster="' + esc(v.thumb) + '" ' : '') + 'style="width:100%;height:100%;background:#000" src="' + esc(videoStreamUrl(v)) + '" onerror="videoPlayError(this)"></video>';
 }
 function videoPlayError(el) {
   el.parentElement.innerHTML = '<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text2);text-align:center;padding:20px;gap:6px">⚠️ No se pudo reproducir este video.<small style="color:var(--text3)">Puede estar en un formato que tu navegador no soporta (probá MP4/H.264 o WebM).</small></div>';

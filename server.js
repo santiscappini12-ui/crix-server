@@ -782,7 +782,7 @@ function dataUrlToBuffer(value) {
   const m = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.*)$/s.exec(String(value || ''));
   return m ? Buffer.from(m[2], 'base64') : null;
 }
-// Miniatura sensible (declarada por el creador): 0 normal · 1 desnudez parcial · 2 parte íntima suelta (humor tabú) · 3 genitales en un cuerpo.
+// Miniatura sensible (declarada por el creador): 0 normal · 1 desnudez parcial · 2 humor tabú en caricatura (parte íntima suelta, o personaje/objeto con esa forma; no es +18 explícito) · 3 genitales descubiertos en un cuerpo o personaje.
 // Edad mínima del CONTENIDO para poder llevar cada tipo de miniatura. La miniatura se ve en el catálogo sin que nadie la elija,
 // así que su clasificación es independiente de la del video (se puede subir una miniatura que no sale en el video).
 const THUMB_MIN_AGE = [0, 16, 16, 18];
