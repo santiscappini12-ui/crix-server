@@ -2133,7 +2133,7 @@ async function clsReclassify(id) {
 }
 // Línea de clasificación dentro de la ventana de publicar juego.
 function pubClsRefresh() { const el = document.getElementById('pub-cls-badge'); if (!el) return; el.innerHTML = pubClass ? clsBadge({ classification: pubClass }) + ' <span style="color:var(--text2)">' + esc(clsSysName(pubClass) + ' · ' + pubClass.countryName) + '</span>' : esc(clsT('pending')); }
-async function pubClassify() { const m = getMaps()[stMapId]; const c = await classifyMedia(m && m.kind === 'app' ? 'app' : 'game', pubClass); if (c) { pubClass = c; pubClsRefresh(); } }
+async function pubClassify() { const m = getMaps()[pubMapId]; const c = await classifyMedia(m && m.kind === 'app' ? 'app' : 'game', pubClass); if (c) { pubClass = c; pubClsRefresh(); } }
 
 async function uploadMapWithRetry(id) {
   for (let n = 1; n <= 3; n++) {
@@ -2650,8 +2650,18 @@ function defaultParts() { return [ {id:'ground',type:'Block',name:'Suelo',x:0,y:
 const THUMB_ICONS = ['🏝️','🌋','🏙️','🌌','🏔️','🌊','🏰','🛸','⚔️','🎮','🌃','🗺️'];
 const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt-teal'];
 function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine');   renderOnlineNow(); }
-function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${gameThumbHtml(m, i)}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="clsReclassify('${m.id}')" title="${clsT('classify')}">🏷️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}${clsBadge(m, isOwner)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
+function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${gameThumbHtml(m, i)}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="clsReclassify('${m.id}')" title="${clsT('classify')}">🏷️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editUploadData('${m.id}')" title="Datos de subida">⚙️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}${clsBadge(m, isOwner)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author">por ${esc(m.authorName)}</div></div></div>`; }).join(''); }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
+// Editar los datos de subida (nombre, descripción, género, privacidad, miniatura, ícono, clasificación) de un juego/app YA subido,
+// sin abrir el estudio. Usa pubMapId para no tocar stMapId (si el estudio tiene otro juego abierto, no se mezcla).
+async function editUploadData(id) {
+  try { event && event.stopPropagation && event.stopPropagation(); } catch (_) {}
+  if (!ME) return;
+  try { await ensureFullMap(id); } catch (err) { showToast('No se pudo abrir el juego: ' + err.message); return; }
+  const m = getMaps()[id];
+  if (!m || m.authorId !== ME.id) { showToast('Solo el autor puede editar los datos de subida'); return; }
+  openPublish(id);
+}
 async function editMap(id) { try { await ensureFullMap(id); } catch (err) { showToast('No se pudo abrir el juego: ' + err.message); return; } const item = getMaps()[id]; if (item?.isHtmlGame) { openAppEditor(id); return; } stMapId = id; initStudio(); goTab('studio'); }
 function handleUpload(e) {
   const file = e.target.files[0]; if (!file) return;
@@ -2996,7 +3006,7 @@ function openAdminPanel() {
   document.getElementById('s-profile').classList.add('active');
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
 }
-function banUser(uid) {
+async function banUser(uid) {
   const users = getUsers(); const u = users[uid]; if (!u) return;
   const reason = prompt('Motivo del baneo:', '');
   if (reason === null) return;
@@ -3004,7 +3014,8 @@ function banUser(uid) {
   const durInput = prompt('Duración del baneo:\n- Número de días (ej: 7)\n- 0 = PERMANENTE', '7');
   if (durInput === null) return;
   const days = parseInt(durInput);
-  u.banned = {
+  if (isNaN(days) || days < 0) { showToast('Duración inválida'); return; }
+  const banned = {
     reason: reason || 'Sin motivo',
     notes: notes || '',
     permanent: days === 0,
@@ -3012,13 +3023,19 @@ function banUser(uid) {
     bannedBy: ME.username,
     bannedAt: new Date().toISOString()
   };
-  users[uid] = u; setUsers(users);
+  try { await apiRequest('/api/user/' + encodeURIComponent(uid), { method:'POST', body:{ banned } }); }
+  catch (err) { showToast('No se pudo banear: ' + err.message, 4000); return; }
+  u.banned = banned; users[uid] = u; DB.set('users', users);
   showToast('🚫 Usuario baneado: ' + u.username);
   openAdminPanel();
 }
-function unbanUser(uid) {
+// El servidor es la fuente de verdad: se avisa con banned:null y SOLO si respondió ok se actualiza la copia local.
+// (Antes: delete u.banned + setUsers() mandaba un cuerpo sin 'banned', el servidor lo ignoraba y el error se tragaba en silencio.)
+async function unbanUser(uid) {
   const users = getUsers(); const u = users[uid]; if (!u) return;
-  delete u.banned; users[uid] = u; setUsers(users);
+  try { await apiRequest('/api/user/' + encodeURIComponent(uid), { method:'POST', body:{ banned:null } }); }
+  catch (err) { showToast('No se pudo desbanear: ' + err.message, 4000); return; }
+  delete u.banned; users[uid] = u; DB.set('users', users);
   showToast('✅ Ban removido: ' + u.username);
   openAdminPanel();
 }
@@ -3380,7 +3397,7 @@ function updateStStatus() { document.getElementById('stu-status').textContent = 
 function delScript(id) { if(!stScripts.some(s=>s.id===id))return;recordStudioHistory();stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
 function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); maps[stMapId].textureNames = {...stTexNames}; setMaps(maps); showToast((CLOUD_READY && ME && DB.get('token')) ? '💾 Guardado' : '💾 Guardado solo en este navegador: inicia sesión para que el juego publicado use estos cambios y scripts'); if (Object.keys(stTexData).length) setTimeout(stPushTextures, 900); }
 function stuTest() { stuSave(); if(stMapId){stPlaytesting=true;const back=document.getElementById('g-back-btn');if(back)back.textContent='⏹ Volver a Crix Hub';playMap(stMapId);} }
-let pubThumbData = null, pubIconData = null;
+let pubThumbData = null, pubIconData = null, pubMapId = null;
 // Recorta al centro y devuelve un PNG cuadrado (los íconos de pantalla de inicio tienen que ser cuadrados).
 function squareIconFromDataUrl(src, size = 512) {
   return new Promise(resolve => {
@@ -3411,7 +3428,7 @@ function previewIcon(e) {
   };
   r.readAsDataURL(f);
 }
-function openPublish() { if (!(getMaps()[stMapId] || {}).isHtmlGame) stuSave(); const m = getMaps()[stMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; const pg = document.getElementById('pub-genre'); if (pg && m.genre) pg.value = m.genre; const pp = document.getElementById('pub-privacy'); if (pp) { pp.value = m.privacy || 'public'; const w = document.getElementById('pub-assigned-wrap'); if (w) w.style.display = pp.value === 'assigned' ? '' : 'none'; const pa = document.getElementById('pub-assigned'); if (pa) pa.value = (m.assignedPlayers || []).join(', '); } } pubThumbData = null; pubIconData = null; { const tl = document.getElementById('pub-thumb-level'); if (tl) tl.value = String((m && Number(m.thumbLevel)) || 0); } pubClass = (m && m.classification) || null; pubClsRefresh(); document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; const hasIc = !!(m && (m.icon || m.hasIcon)); document.getElementById('pub-icon-name').textContent = hasIc ? 'Ícono actual (elegí otro para cambiarlo)' : 'Se usa la miniatura'; const ipv = document.getElementById('pub-icon-preview'); if (hasIc) { ipv.src = m.icon || ('/juego/' + encodeURIComponent(m.id) + '/icon.png?t=' + Date.now()); ipv.style.display = 'block'; } else ipv.style.display = 'none'; openModal('mo-publish'); }
+function openPublish(mapId) { pubMapId = mapId || stMapId; if (!mapId && !(getMaps()[pubMapId] || {}).isHtmlGame) stuSave(); const m = getMaps()[pubMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; const pg = document.getElementById('pub-genre'); if (pg && m.genre) pg.value = m.genre; const pp = document.getElementById('pub-privacy'); if (pp) { pp.value = m.privacy || 'public'; const w = document.getElementById('pub-assigned-wrap'); if (w) w.style.display = pp.value === 'assigned' ? '' : 'none'; const pa = document.getElementById('pub-assigned'); if (pa) pa.value = (m.assignedPlayers || []).join(', '); } } pubThumbData = null; pubIconData = null; { const tl = document.getElementById('pub-thumb-level'); if (tl) tl.value = String((m && Number(m.thumbLevel)) || 0); } pubClass = (m && m.classification) || null; pubClsRefresh(); document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; const hasIc = !!(m && (m.icon || m.hasIcon)); document.getElementById('pub-icon-name').textContent = hasIc ? 'Ícono actual (elegí otro para cambiarlo)' : 'Se usa la miniatura'; const ipv = document.getElementById('pub-icon-preview'); if (hasIc) { ipv.src = m.icon || ('/juego/' + encodeURIComponent(m.id) + '/icon.png?t=' + Date.now()); ipv.style.display = 'block'; } else ipv.style.display = 'none'; openModal('mo-publish'); }
 function previewThumb(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { pubThumbData = ev.target.result; document.getElementById('pub-thumb-name').textContent = f.name; const canvas = document.getElementById('pub-thumb-preview'); const img = new Image(); img.onload = () => { canvas.style.display='block'; canvas.getContext('2d').drawImage(img,0,0,canvas.width=canvas.clientWidth,canvas.height=canvas.clientWidth*9/16); }; img.src = pubThumbData; }; r.readAsDataURL(f); }
 async function confirmPublish() {
   const name = document.getElementById('pub-name').value.trim();
@@ -3420,7 +3437,7 @@ async function confirmPublish() {
   const privacy = (document.getElementById('pub-privacy')||{}).value || 'public';
   const assignedRaw = (document.getElementById('pub-assigned')||{}).value || '';
   if (!name) { showToast('Poné un nombre'); return; }
-  const maps = getMaps(); const m = maps[stMapId]; if (!m) return;
+  const maps = getMaps(); const m = maps[pubMapId]; if (!m) return;
   if (!pubClass) { pubClass = await classifyMedia(m.kind === 'app' ? 'app' : 'game', m.classification); pubClsRefresh(); if (!pubClass) { showToast(clsT('needBefore')); return; } }
   m.classification = pubClass;
   m.name = name; m.desc = desc; m.genre = genre;
@@ -3436,7 +3453,7 @@ async function confirmPublish() {
   setMaps(maps); closeModal('mo-publish');
   if (!ME || !DB.get('token')) { showToast('⚠️ Iniciá sesión para que el juego se publique para todos'); return; }
   showToast('⏳ Subiendo al servidor…');
-  const r = await (MAP_UPLOADS[stMapId] || queueMapUpload(stMapId));
+  const r = await (MAP_UPLOADS[pubMapId] || queueMapUpload(pubMapId));
   if (r && r.ok) showToast(privacy === 'public' ? '🚀 ¡Publicado para todos!' : '✅ Guardado en el servidor');
   else showToast('⚠️ No se pudo publicar: ' + ((r && r.err) || 'sin conexión') + '. Se reintenta solo.');
 }
@@ -4867,6 +4884,7 @@ function renderVideos() {
       '<div class="video-info">' +
       '<div style="display:flex;align-items:flex-start;gap:6px">' +
       '<div class="video-title" style="flex:1" onclick="openVideoPlayer(\'' + v.id + '\')">' + esc(v.title) + clsBadge(v, !!ME && v.authorId === ME.id) + '</div>' +
+      (ME && v.authorId === ME.id ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="openEditVideo(\'' + v.id + '\')" title="Editar datos">✏️</button>' : '') +
       (ME && v.authorId === ME.id ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="clsReclassifyVideo(\'' + v.id + '\')" title="' + clsT('classify') + '">🏷️</button>' : '') +
       (canDel ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="deleteVideo(\'' + v.id + '\')" title="Borrar">🗑</button>' : '') +
       '</div>' +
@@ -4910,6 +4928,7 @@ async function openVideoPlayer(vid) {
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">' +
     '<div style="width:38px;height:38px;border-radius:50%;background:' + ((getUsers()[v.authorId]||{}).color||'#5b8def') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + v.authorName[0].toUpperCase() + '</div>' +
     '<div style="flex:1"><div style="font-weight:700">' + esc(v.authorName) + '</div></div>' +
+    (ME && v.authorId === ME.id ? '<button class="btn btn-g" onclick="openEditVideo(\'' + v.id + '\')">✏️ Editar datos</button>' : '') +
     '<button class="btn btn-g" onclick="crixShare(\'video\',\'' + v.id + '\')">🔗 Compartir</button>' +
     '<button class="btn ' + (liked?'btn-red':'btn-g') + '" id="vp-like-btn" onclick="toggleVideoLike(\'' + v.id + '\')" >❤️ ' + (v.likes||[]).length + '</button>' +
     '</div>' +
@@ -4984,7 +5003,50 @@ async function deleteVideo(vid) {
   else renderVideos();
   showToast('Video eliminado');
 }
+var _uvEditId = null;
+function uvSetMode(edit) {
+  const h3 = document.querySelector('#mo-upload-video h3'), fg = document.getElementById('uv-file').closest('.field-grp'), btn = document.getElementById('uv-submit');
+  if (h3) h3.textContent = edit ? '✏️ Editar datos del video' : '🎬 Subir Video';
+  if (fg) fg.style.display = edit ? 'none' : '';
+  if (btn) { btn.textContent = edit ? '💾 Guardar cambios' : '📤 Publicar'; btn.disabled = false; }
+  if (!edit) _uvEditId = null;
+}
+// Editar título, descripción, categoría, privacidad y miniatura de un video ya subido (el archivo no se vuelve a subir).
+function openEditVideo(id) {
+  try { event && event.stopPropagation && event.stopPropagation(); } catch (_) {}
+  const v = getVideos().find(x => x.id === id);
+  if (!v || !ME || v.authorId !== ME.id) { showToast('Solo el autor puede editar este video'); return; }
+  _uvCls = v.classification || null; _uvFile = null; _uvFileData = null; _uvThumb = null; clearVideoThumb(); uvProgress(-1);
+  _uvEditId = id; uvSetMode(true); _uvEditId = id;
+  document.getElementById('uv-title').value = v.title || '';
+  document.getElementById('uv-desc').value = v.desc || '';
+  const cat = document.getElementById('uv-cat'); if (cat) cat.value = [...cat.options].some(o => o.value === v.cat) ? v.cat : 'other';
+  document.getElementById('uv-privacy').value = v.privacy === 'private' ? 'private' : 'public';
+  document.getElementById('uv-thumb-level').value = String(Number(v.thumbLevel) || 0);
+  const pv = document.getElementById('uv-preview'); if (pv) pv.style.display = 'none';
+  openModal('mo-upload-video');
+}
+async function confirmEditVideo() {
+  const id = _uvEditId, v = getVideos().find(x => x.id === id); if (!v) return;
+  const title = document.getElementById('uv-title').value.trim();
+  if (!title) { showToast('Poné un título'); return; }
+  let cls = v.classification || null;
+  if (!cls) { cls = await classifyMedia('video', null); if (!cls) { showToast(clsT('needBefore')); return; } }
+  const thumbLevel = (_uvThumbCustom || v.thumb) ? (parseInt(document.getElementById('uv-thumb-level').value, 10) || 0) : 0;
+  if (Number(cls.age || 0) < THUMB_MIN_AGE[thumbLevel]) { showToast('Esa miniatura solo puede acompañar a videos ' + THUMB_MIN_AGE[thumbLevel] + '+. Cambiá la miniatura o la clasificación.'); return; }
+  const body = { id, title, desc: document.getElementById('uv-desc').value.trim(), cat: document.getElementById('uv-cat').value, privacy: document.getElementById('uv-privacy').value, thumbLevel };
+  if (_uvThumbCustom) body.thumb = _uvThumbCustom;
+  if (!v.classification) body.classification = cls;
+  const btn = document.getElementById('uv-submit'); btn.disabled = true;
+  try { await apiRequest('/api/videos', { method:'POST', body }); }
+  catch (err) { btn.disabled = false; showToast('No se pudo guardar: ' + ((err && err.message) || 'sin conexión'), 4000); return; }
+  const fresh = getVideos(), f = fresh.find(x => x.id === id);
+  if (f) { Object.assign(f, { title:body.title, desc:body.desc, cat:body.cat, privacy:body.privacy, thumbLevel }); if (body.thumb) f.thumb = body.thumb; if (body.classification) { f.classification = cls; delete f.unrated; } saveVideos(fresh); }
+  closeModal('mo-upload-video'); uvSetMode(false); renderVideos(); showToast('✅ Datos del video guardados');
+  if (document.getElementById('vp-views')) openVideoPlayer(id);
+}
 function openUploadVideo() {
+  uvSetMode(false);
   _uvCls = null; _uvFileData = null; _uvFile = null; _uvThumb = null; document.getElementById('uv-file').value = ''; uvProgress(-1); clearVideoThumb(); document.getElementById('uv-thumb-level').value = '0';
   document.getElementById('uv-title').value = '';
   document.getElementById('uv-desc').value = '';
@@ -5024,6 +5086,7 @@ function clearVideoThumb() {
 }
 const THUMB_MIN_AGE = [0, 16, 16, 18];
 async function confirmUploadVideo() {
+  if (_uvEditId) return confirmEditVideo();
   const title = document.getElementById('uv-title').value.trim();
   if (!title) { showToast('Poné un título'); return; }
   if (!_uvFile) { showToast('Seleccioná un video primero'); return; }
@@ -5270,6 +5333,7 @@ async function openGamePage(mapId) {
     ((m.privacy||'public')==='public' ? '<button class="btn btn-g" onclick="addGameShortcut(\''+mapId+'\')">📌 Acceso directo</button>' : '')+
     '<button class="btn btn-g" id="gp-like-btn" onclick="toggleLike(\''+mapId+'\',this)">'+
     (liked?'❤️':'🤍')+' '+(m.likes||0)+'</button>'+
+    (isOwner ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editUploadData(\''+mapId+'\')">⚙️ Datos de subida</button>' : '')+
     ((isOwner || isCollab) ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editMap(\''+mapId+'\')">✏️ Editar'+(isCollab?' (equipo)':'')+'</button>' : '')+
     (isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');deleteMap(\''+mapId+'\')">🗑️ Borrar</button>' : '')+
     (isAdmin() && !isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');banUser(\''+m.authorId+'\')">🚫 Banear autor</button>' : '');
