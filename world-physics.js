@@ -401,7 +401,7 @@ function stepRoom(room, now, players) {
   const entries = [], byId = new Map();
   for (const part of Object.values(room.worldParts)) {
     if (part.type === 'Spawn' || part.isNPC) continue;
-    const entry = { part, box: partBox(part), dyn: !part.anchored, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
+    const entry = { part, box: partBox(part), dyn: !part.anchored && !part.jointDriven, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
     entries.push(entry); byId.set(part.id, entry);
   }
   const dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
@@ -593,6 +593,7 @@ function raycast(parts, origin, direction, opts = {}) {
   for (const part of parts) {
     if (!part || part.type === 'Spawn' || part.isNPC) continue;
     if (part.canCollide === false && !opts.includeNonCollidable) continue;
+    if (part.canQuery === false) continue;
     if (ignore.has(part.id) || ignore.has(part.name)) continue;
     const hit = rayBox(origin, d, partBox(part), best ? best.t : max);
     if (hit && (!best || hit.t < best.t)) best = { t: hit.t, normal: hit.normal, part };

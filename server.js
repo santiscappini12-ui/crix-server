@@ -9,6 +9,8 @@ const crypto   = require('crypto');
 const { fork } = require('node:child_process');
 const persist  = require('./persist');
 const worldPhysics = require('./world-physics');
+const CrixJoints = require('./crix-joints.js');
+const CrixObjects = require('./crix-objects.js');   // uniones Weld / Motor6D / Hinge… (el mismo módulo que usa el cliente)
 const classification = require('./classification');   // cuestionario de clasificación por país (juegos, apps y videos)
 
 if (persist.enabled && !persist.restored) {
@@ -345,6 +347,16 @@ function normalizeRoomPart(id, source = {}) {
   };
   for(const [key,lo,hi,fallback] of [['friction',0,1,0.15],['bounce',0,1,0.05],['drag',0,1,0.003],['gravityScale',-5,5,1]])if(source[key]!==undefined&&source[key]!==null)part[key]=number(source[key],fallback,lo,hi);
   if(Array.isArray(source.tags))part.tags=source.tags.slice(0,1000).map(tag=>String(tag).slice(0,40));
+  // Propiedades extra estilo Roblox (BasePart). Solo se guardan las que vienen definidas.
+  if(source.reflectance!==undefined)part.reflectance=number(source.reflectance,0,0,1);
+  if(source.density!==undefined)part.density=number(source.density,0.7,0.01,100);
+  for(const key of ['castShadow','canTouch','canQuery','massless','locked'])if(source[key]!==undefined)part[key]=source[key]!==false;
+  if(source.collisionGroup!==undefined)part.collisionGroup=String(source.collisionGroup||'Default').slice(0,40);
+  if(source.parent!==undefined&&source.parent!==null)part.parent=String(source.parent).slice(0,120);
+  if(source.attributes&&typeof source.attributes==='object'&&!Array.isArray(source.attributes)){
+    const attrs={};for(const [k,v] of Object.entries(source.attributes).slice(0,32)){if(/^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(k)&&['string','number','boolean'].includes(typeof v))attrs[k]=typeof v==='string'?v.slice(0,200):v;}
+    part.attributes=attrs;
+  }
   if(type==='ImportedMesh'&&typeof source.meshData==='string')part.meshData=source.meshData;
   return part;
 }
@@ -358,6 +370,10 @@ function initializeRoomWorld(room, map) {
     const id=String(source.id||`map-part-${index}`),part=normalizeRoomPart(id,source);
     room.worldParts[id]=part;room.basePartIds.add(id);
   }
+  room.joints=(Array.isArray(map?.joints)?map.joints:[]).slice(0,500).map((joint,index)=>CrixJoints.sanitize(joint,'joint-'+index));
+  room.jointState={};room.jointVel={};room.jointDriven=null;room.jointAt=0;room.jointErrors=new Set();
+  room.instances=(Array.isArray(map?.instances)?map.instances:[]).slice(0,1000).map((item,index)=>CrixObjects.sanitizeInstance(item,'inst-'+index));
+  room.models=CrixObjects.buildModelsInfo(Object.values(room.worldParts||{}),room.joints,room.instances);
   room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];room.watched=new Set();room.appliedSeq=0;room.phys=null;room.collectedIds=new Set();
 }
 
@@ -391,7 +407,7 @@ function startRoomServerScripts(room,map) {
   if(!runner){room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError||'No se pudo iniciar el entorno de scripts.'});return;}
   room.scriptStarted=true;room.scriptStatus='starting';
   room.watched=new Set();room.appliedSeq=0;
-  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Object.values(room.worldParts||{}),players:playersForRunner(room)});
+  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Object.values(room.worldParts||{}),joints:(room.joints||[]).map(joint=>({id:joint.id,class:joint.class,name:joint.name})),models:room.models||[],players:playersForRunner(room)});
 }
 
 function sendRoomPlayersToRunner(room) {
@@ -415,7 +431,7 @@ function handleScriptRunnerMessage(message) {
     return;
   }
   if(message.type==='output'){
-    io.to(gameChannel(room.mapId,room.instanceId)).emit('script_output',{script:String(message.script||'Script').slice(0,80),text:String(message.text||'').slice(0,500),cls:message.cls==='warn'?'warn':message.cls==='err'?'err':'',detail:String(message.detail||'').slice(0,800)});
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('script_output',{script:String(message.script||'Script').slice(0,80),text:String(message.text||'').slice(0,500),cls:message.cls==='warn'?'warn':message.cls==='err'?'err':''});
     return;
   }
   if(message.type==='watch'){if(room.watched.size<200)room.watched.add(String(message.key||'').slice(0,120));return;}
@@ -471,6 +487,19 @@ function applyServerScriptCommand(room,command,payload) {
     if(command==='physVelocity')worldPhysics.setVelocity(room,id,vector);else worldPhysics.addImpulse(room,id,vector);
     return;
   }
+  if(command==='jointCreate'||command==='jointUpdate'||command==='jointDestroy'){
+    const jid=String(payload.id||'').slice(0,120);if(!jid||!room.joints)return;
+    const index=room.joints.findIndex(joint=>joint.id===jid);
+    if(command==='jointDestroy'){if(index>=0){room.joints.splice(index,1);delete room.jointState[jid];}return;}
+    if(command==='jointCreate'){
+      if(index>=0||room.joints.length>=500)return;
+      const joint=CrixJoints.sanitize({...(payload.data||{}),id:jid},jid);
+      if(payload.preserve!==false&&joint.part0&&joint.part1&&room.worldParts[joint.part0]&&room.worldParts[joint.part1]&&!(payload.data&&payload.data.c0))CrixJoints.preserve(joint,room.worldParts[joint.part0],room.worldParts[joint.part1]);
+      room.joints.push(joint);return;
+    }
+    if(index>=0){const merged=CrixJoints.sanitize({...room.joints[index],...(payload.patch||{}),id:jid,class:room.joints[index].class},jid);room.joints[index]=merged;if(room.jointState[jid])room.jointState[jid].rel=null;}
+    return;
+  }
   if(command==='createPart'){
     if(Object.keys(room.worldParts||{}).length>=1000||!/^server-[a-z0-9-]{1,100}$/i.test(id)||room.worldParts[id])return;
     const part=normalizeRoomPart(id,payload.data||{});room.worldParts[id]=part;
@@ -499,12 +528,42 @@ function applyServerScriptCommand(room,command,payload) {
   }
 }
 
+// Uniones: antes de la física se marcan las piezas que controla el solver (la gravedad normal las ignora);
+// después se resuelven y se envían las poses nuevas a todos (`joint_poses`, 20 Hz).
+function reportJointError(room,joint,message) {
+  const key=joint.id+'|'+message;if(room.jointErrors.has(key))return;room.jointErrors.add(key);
+  io.to(gameChannel(room.mapId,room.instanceId)).emit('script_output',{script:'Uniones',text:message,cls:'err'});
+}
+function stepRoomJoints(room,now,channel,roomId,mark) {
+  if(!room.joints||!room.joints.length)return;
+  if(mark){
+    room.jointDriven=CrixJoints.drivenIds(room.joints,room.worldParts);
+    for(const part of Object.values(room.worldParts))part.jointDriven=room.jointDriven.has(part.id);
+    return;
+  }
+  const elapsed=room.jointAt?Math.min(0.25,(now-room.jointAt)/1000):0.05;room.jointAt=now;
+  const n=Math.max(1,Math.min(5,Math.round(elapsed*60))),h=elapsed/n,moved=new Set();
+  const world={parts:room.worldParts,joints:room.joints,state:room.jointState,vel:room.jointVel,partBox:worldPhysics.partBox,onError:(joint,message)=>reportJointError(room,joint,message)};
+  for(let i=0;i<n;i++)for(const id of CrixJoints.step(world,h).changed)moved.add(id);
+  if(!moved.size)return;
+  const r3=v=>Math.round(v*1000)/1000,list=[],update=[];
+  for(const id of moved){
+    const part=room.worldParts[id];if(!part)continue;
+    if(room.basePartIds.has(id))room.changedPartIds.add(id);
+    list.push([id,r3(part.x),r3(part.y),r3(part.z),r3(part.rx||0),r3(part.ry||0),r3(part.rz||0)]);
+    update.push({id,x:part.x,y:part.y,z:part.z});
+  }
+  if(list.length){io.to(channel).emit('joint_poses',{t:now,parts:list.slice(0,600)});scriptRunner?.send({type:'worldPositions',roomId,parts:update,appliedSeq:room.appliedSeq||0});}
+}
+
 function stepServerWorldPhysics() {
   const now=Date.now();
   for(const room of Object.values(rooms)){
     if(!Object.keys(room.players).length||!room.worldParts){if(room.phys)room.phys.lastAt=0;continue;}
     const roomId=roomKey(room.mapId,room.instanceId),channel=gameChannel(room.mapId,room.instanceId);
+    stepRoomJoints(room,now,channel,roomId,true);
     const result=worldPhysics.stepRoom(room,now,playersForRunner(room));
+    stepRoomJoints(room,now,channel,roomId,false);
     if(result.changed.length){
       for(const update of result.changed)if(room.basePartIds.has(update.id))room.changedPartIds.add(update.id);
       // Un único paquete por tick con todas las piezas que se movieron (antes era uno por pieza).
@@ -886,7 +945,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js',
+const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-console.js','/crix-fx.js','/crix-ext.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
 // Página para probar la API de clasificación desde el navegador (misma dirección que Crix, sin problemas de CORS): /probar-api

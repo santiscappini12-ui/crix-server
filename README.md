@@ -329,9 +329,32 @@ El asistente no usa *tool calling* nativo: el modelo escribe bloques ` ```crix:a
 
 Al ser un modelo sin filtros, cualquier persona con sesión podría usarlo para generar lo que quiera dentro de sus propios proyectos: si hace falta, `CRIX_AI_ADMIN_ONLY=1` o `CRIX_AI_RPM` bajo lo acotan.
 
-### Output (consola de mensajes y errores)
 
-**📟 Output** (botón en la barra del Hub, botón dentro de la partida o tecla **F9**) es una ventana flotante que se puede arrastrar y redimensionar. Muestra, con hora y origen (*Cliente*, *Servidor · NombreDelScript*, *Motor*, *Consola*), todo lo que imprimen `print`, `warn` y `error`, los errores de `LocalScript` y de `Script` de servidor (con el detalle desplegable al tocar la línea), los errores del motor que nadie atrapó y los `console.error/warn` mientras juegas o editas. Filtros por Info / Avisos / Errores / Sistema, búsqueda, copiar, limpiar, pausar el desplazamiento y colapso de líneas repetidas (×N). Se abre sola cuando aparece un error durante la partida (se puede apagar abajo a la derecha). Guarda hasta 1.500 líneas.
+## Objetos estilo Roblox, uniones y Output
+
+Crix Hub ahora tiene un modelo de objetos parecido al de Roblox Studio. **Nada trae comportamiento propio**: todo se programa con Scripts.
+
+**Menú 🧩 Objetos** (barra del Hub, junto a NPC): inserta `Model`, `Folder`, `Humanoid` (solo datos), `Attachment`, uniones (`Weld`, `WeldConstraint`, `Motor6D`, `Hinge`, `BallSocket`, `Prismatic`, `Rod`, `Rope`, `Spring`), luces (`PointLight`, `SpotLight`, `SurfaceLight`) y efectos (`ParticleEmitter`, `Fire`, `Smoke`, `Sparkles`). Para uniones, luces y efectos primero se selecciona la pieza (Part0 / padre). Al elegir Part1 en el inspector la unión conserva la pose actual (nada salta).
+
+**NPC = Model.** Los NPC de la biblioteca ya no son una pieza con IA: son un `Model` de 7 piezas (HumanoidRootPart, Torso, Head, brazos y piernas) unidas por 6 `Motor6D` (RootJoint, Neck, Left/Right Shoulder, Left/Right Hip) y un `Humanoid` con sus valores. No caminan, no tienen vida ni dañan: eso lo escribe el script. Los mapas viejos con `isNPC` siguen funcionando como antes.
+
+**Propiedades de pieza** (sección «Propiedades Roblox» del inspector): Shape, Reflectance, CastShadow, CanCollide, CanTouch, CanQuery, CollisionGroup, Density, Friction, Elasticity, Drag, GravityScale, Massless, Locked, Tags y Attributes.
+
+**🔗 Uniones** (botón de la barra) prueba motores y bisagras en el editor y al parar vuelve todo a su sitio. **🩺 Revisar** busca uniones rotas, modelos sin PrimaryPart, nombres repetidos, etc.
+
+**API de scripts** (Script de servidor, LocalScript y ▶ Probar):
+```js
+const npc = game.getModel("Guardia");          // { id, name, root, rootPart, parts:{nombre:id}, joints:{nombre:id}, humanoid:{Health,…} }
+const j = game.createJoint("Motor6D", a, b, { axis: "y", mode: "velocity", angularVelocity: 3 });
+game.updateJoint(npc.joints["Left Shoulder"], { mode: "servo", targetAngle: 1.2, maxVelocity: 20 });
+game.destroyJoint(j);   game.weld(a, b);   game.motor6d(a, b, props);
+game.setAttribute(id, "equipo", "rojo");   game.getAttribute(id, "equipo");
+```
+`mode`: `none` (libre) · `servo` (va a `targetAngle`/`targetPosition`) · `velocity` (gira o se mueve sin parar). Las uniones se resuelven en `crix-joints.js` (el mismo código en navegador y servidor). En partidas online el servidor las resuelve y envía `joint_poses` a 20 Hz.
+
+**Output en medio del juego.** Botón 🪲 (arriba a la derecha) o **F9**. Muestra errores de JavaScript, promesas rechazadas, `console.error/warn`, errores de Scripts locales y de servidor, y de las uniones (Part inexistente, ciclos…), con filtros, búsqueda, copiar, limpiar y repetidos agrupados. Se abre sola ante el primer error (botón ⚡ Auto).
+
+Archivos nuevos: `crix-joints.js`, `crix-objects.js`, `crix-fx.js`, `crix-ext.js`, `crix-console.js`. El mapa guarda `joints` e `instances` además de `parts`.
 
 ## Sincronización del mundo entre jugadores
 

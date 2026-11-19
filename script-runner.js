@@ -70,6 +70,16 @@ function normalizePart(id, source = {}) {
   if (source.drag !== undefined && source.drag !== null) part.drag = finite(source.drag,0.003,0,1);
   if (source.gravityScale !== undefined && source.gravityScale !== null) part.gravityScale = finite(source.gravityScale,1,-5,5);
   if (Array.isArray(source.tags)) part.tags = source.tags.slice(0,8).map(tag => String(tag).slice(0,40));
+  if (source.reflectance !== undefined) part.reflectance = finite(source.reflectance,0,0,1);
+  if (source.density !== undefined) part.density = finite(source.density,0.7,0.01,100);
+  for (const key of ['castShadow','canTouch','canQuery','massless','locked']) if (source[key] !== undefined) part[key] = source[key] !== false;
+  if (source.collisionGroup !== undefined) part.collisionGroup = String(source.collisionGroup || 'Default').slice(0,40);
+  if (source.parent !== undefined && source.parent !== null) part.parent = String(source.parent).slice(0,120);
+  if (source.attributes && typeof source.attributes === 'object' && !Array.isArray(source.attributes)) {
+    const attrs = {};
+    for (const [k,v] of Object.entries(source.attributes).slice(0,32)) if (/^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(k) && ['string','number','boolean'].includes(typeof v)) attrs[k] = typeof v === 'string' ? v.slice(0,200) : v;
+    part.attributes = attrs;
+  }
   if(type==='ImportedMesh'&&typeof source.meshData==='string'&&source.meshData.length<=2*1024*1024)part.meshData=source.meshData;
   return part;
 }
@@ -87,12 +97,12 @@ function normalizePlayers(players) {
   }));
 }
 
-function output(room, script, text, cls = '', detail = '') {
+function output(room, script, text, cls = '') {
   const now = Date.now();
   room.logs = room.logs.filter(time => now - time < 2000);
   if (room.logs.length >= 40) return;
   room.logs.push(now);
-  send({ type:'output', roomId:room.id, script:String(script || 'Script').slice(0,80), text:String(text || '').slice(0,500), cls:cls === 'warn' ? 'warn' : cls === 'err' ? 'err' : '', detail:String(detail || '').slice(0,800) });
+  send({ type:'output', roomId:room.id, script:String(script || 'Script').slice(0,80), text:String(text || '').slice(0,500), cls:cls === 'warn' ? 'warn' : cls === 'err' ? 'err' : '' });
 }
 
 function emitSceneCommand(room, command, payload) {
@@ -111,6 +121,23 @@ function emitSceneCommand(room, command, payload) {
     room.partSeq.set(id, seq);
     send({ type:'sceneCommand', roomId:room.id, command, seq, payload:{ id, data } });
     return id;
+  }
+  if (command === 'jointCreate' || command === 'jointUpdate' || command === 'jointDestroy') {
+    if (command === 'jointCreate') {
+      if (room.joints.size >= 500) throw new Error('La instancia alcanzó el máximo de uniones (500)');
+      const data = safePayload.data && typeof safePayload.data === 'object' ? safePayload.data : {};
+      for (const key of ['part0','part1']) if (!room.parts.has(String(data[key] || ''))) throw new Error('Unión: no existe ' + key + ' («' + String(data[key] || '') + '»)');
+      const suffix = room.instanceId.replace(/[^a-z0-9]/ig,'').slice(-12) || 'room';
+      const jid = 'sjoint-' + suffix + '-' + (++room.nextJointId);
+      room.joints.set(jid, { id:jid, class:String(data.class || 'Weld') });
+      send({ type:'sceneCommand', roomId:room.id, command, seq:++room.cmdSeq, payload:{ id:jid, data } });
+      return jid;
+    }
+    const jid = String(safePayload.id || '').slice(0,120);
+    if (!room.joints.has(jid)) throw new Error('No existe la unión ' + jid);
+    if (command === 'jointDestroy') room.joints.delete(jid);
+    send({ type:'sceneCommand', roomId:room.id, command, seq:++room.cmdSeq, payload:{ id:jid, patch:cloneJson(safePayload.patch, {}) } });
+    return true;
   }
   const id = String(safePayload.id || '').slice(0,120);
   if (!id || !room.parts.has(id)) throw new Error('No existe la pieza ' + id);
@@ -186,6 +213,28 @@ const ISOLATE_EXTRAS = String.raw`
     game.getVelocity = id => __getVelocity(String(id));
     game.setPhysics = (id, props) => { const patch = {}; for (const key of ['friction', 'bounce', 'drag', 'gravityScale', 'anchored', 'canCollide']) if (props && props[key] !== undefined) patch[key] = props[key]; return __emit('updatePart', { id: String(id), patch }); };
     game.raycast = (origin, direction, opts) => { const r = __raycast(JSON.stringify({ o: __v3(origin), d: __v3(direction), opts: opts || {} })); return r ? JSON.parse(r) : null; };
+
+    // ── Uniones (Weld, WeldConstraint, Motor6D, Hinge, BallSocket, Prismatic, Rod, Rope, Spring) ──
+    // game.createJoint('Motor6D', piezaA, piezaB, { axis:'y', mode:'velocity', angularVelocity:3 })  → id
+    // game.updateJoint(id, { mode:'servo', targetAngle:1.2 })   game.destroyJoint(id)
+    const __jid = p => (p && typeof p === 'object') ? String(p.id) : String(p);
+    game.JOINT_CLASSES = ['Weld', 'WeldConstraint', 'Motor6D', 'Hinge', 'BallSocket', 'Prismatic', 'Rod', 'Rope', 'Spring'];
+    game.createJoint = (cls, part0, part1, props) => {
+      if (!game.JOINT_CLASSES.includes(String(cls))) throw new Error('Clase de unión desconocida: ' + cls + '. Usá una de: ' + game.JOINT_CLASSES.join(', '));
+      return __emit('jointCreate', { data: Object.assign({}, props || {}, { class: String(cls), part0: __jid(part0), part1: __jid(part1) }) });
+    };
+    game.updateJoint = (id, patch) => __emit('jointUpdate', { id: String(id), patch: patch || {} });
+    game.destroyJoint = id => __emit('jointDestroy', { id: String(id) });
+    // game.getModel('Nombre') → { id, name, root (id de la pieza raíz), rootPart (estado actual), parts:{nombre:id}, joints:{nombre:id}, humanoid:{Health,…} }
+    const __models = (() => { try { return JSON.parse(__crixModelsJson); } catch (_) { return []; } })();
+    game.getModel = name => {
+      const m = __models.find(x => x.name === String(name) || x.id === String(name)); if (!m) return null;
+      const out = JSON.parse(JSON.stringify(m)); out.rootPart = m.root ? __getPart(m.root) : null; return out;
+    };
+    game.weld = (a, b) => game.createJoint('WeldConstraint', a, b);
+    game.motor6d = (a, b, props) => game.createJoint('Motor6D', a, b, props);
+    game.setAttribute = (id, key, value) => { const part = __getPart(__jid(id)); if (!part) throw new Error('No existe la pieza ' + id); const attrs = Object.assign({}, part.attributes || {}); if (value === undefined || value === null) delete attrs[String(key)]; else attrs[String(key)] = value; return __emit('updatePart', { id: part.id, patch: { attributes: attrs } }); };
+    game.getAttribute = (id, key) => { const part = __getPart(__jid(id)); return part && part.attributes ? part.attributes[String(key)] : undefined; };
 
     // ── Búsqueda ──
     game.findParts = filter => { const parts = __getParts(); if (typeof filter === 'function') return parts.filter(filter); if (filter === undefined) return parts; return parts.filter(part => part.name === String(filter)); };
@@ -459,14 +508,16 @@ function createRoom(message) {
     id:String(message.roomId), mapId:String(message.mapId), instanceId:String(message.instanceId),
     isolate, context, players:normalizePlayers(message.players), parts:new Map(), scripts,
     disabledScripts:new Set(), commandTimes:[], logs:[], nextPartId:0, busy:false, timer:null,
-    cmdSeq:0, partSeq:new Map(), watchKeys:new Set(), velocity:new Map(), lastPos:new Map(), rays:0, remoteTimes:[],
+    cmdSeq:0, joints:new Map(), nextJointId:0, partSeq:new Map(), watchKeys:new Set(), velocity:new Map(), lastPos:new Map(), rays:0, remoteTimes:[],
   };
   for (const part of (Array.isArray(message.parts) ? message.parts : []).slice(0,MAX_PARTS)) {
     if (!part || part.type === 'Spawn' || part.isNPC) continue;
     const id=String(part.id || 'map-part'); room.parts.set(id,normalizePart(id,part));
   }
+  for (const joint of (Array.isArray(message.joints) ? message.joints : []).slice(0,500)) if (joint && joint.id) room.joints.set(String(joint.id), { id:String(joint.id), class:String(joint.class || 'Weld') });
   const jail=context.global;
   jail.setSync('global',jail.derefInto());
+  try { jail.setSync('__crixModelsJson', JSON.stringify(Array.isArray(message.models) ? message.models.slice(0,200) : [])); } catch (_) { jail.setSync('__crixModelsJson', '[]'); }
   jail.setSync('__crixEmit',new ivm.Callback((command,payload)=>emitSceneCommand(room,String(command),payload),{sync:true}));
   jail.setSync('__crixGetPlayers',new ivm.Callback(()=>room.players,{sync:true}));
   jail.setSync('__crixGetParts',new ivm.Callback(()=>Array.from(room.parts.values()),{sync:true}));
@@ -566,9 +617,8 @@ function noteCallFailure(room,index,error) {
   const count=(room.callFails.get(index)||0)+1;
   room.callFails.set(index,count);
   const name=room.scripts[index]?.name;
-  const detail=String(error&&error.stack||'').split('\n').slice(0,6).join('\n');
-  if (count>=MAX_CONSECUTIVE_CALL_FAILS) { room.disabledScripts.add(index); output(room,name,error.message+' — script desactivado tras '+count+' fallos seguidos','err',detail); }
-  else if (count===1) output(room,name,error.message+' (se reintentará)','err',detail);
+  if (count>=MAX_CONSECUTIVE_CALL_FAILS) { room.disabledScripts.add(index); output(room,name,error.message+' — script desactivado tras '+count+' fallos seguidos','err'); }
+  else if (count===1) output(room,name,error.message+' (se reintentará)','err');
 }
 function noteCallOk(room,index) { if (room.callFails) room.callFails.delete(index); }
 

@@ -478,37 +478,6 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 .cls-icon text{fill:#fff;text-anchor:middle;font-family:var(--display),system-ui,sans-serif;font-weight:900}.cls-icon .cc{letter-spacing:.3px;opacity:.9}
 .cls-s0 .sh{fill:#2f9e5f}.cls-s7 .sh{fill:#2b9aa8}.cls-s12 .sh{fill:#e5b22a}.cls-s16 .sh{fill:#e8782a}.cls-s18 .sh{fill:#d93a3a}.cls-s12 text{fill:#1b1b1b}
 .cls-badge.cls-none{background:var(--bg3);color:var(--text3);border:1px dashed var(--border)}
-
-/* ═══ OUTPUT (consola de errores y mensajes) ═══ */
-#crix-out{position:fixed;left:12px;bottom:12px;width:min(660px,calc(100vw - 24px));height:min(300px,45vh);min-width:280px;min-height:140px;max-width:100vw;z-index:700;display:none;flex-direction:column;background:rgba(6,8,16,.97);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);resize:both;overflow:hidden;font-family:var(--mono)}
-#crix-out.open{display:flex}
-#co-hd{display:flex;align-items:center;gap:5px;padding:6px 8px;background:var(--bg3);border-bottom:1px solid var(--border);cursor:move;flex-wrap:wrap;touch-action:none;font-size:11px;color:var(--text)}
-#co-hd b{font-family:var(--font);font-size:12px;margin-right:4px}
-#co-hd button,#co-hd .co-f{background:var(--bg4);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:3px 8px;font-size:10px;font-family:var(--font);font-weight:600;cursor:pointer}
-#co-hd .co-f.on{color:var(--text);border-color:var(--acc)}
-#co-hd .co-f[data-f=error].on{border-color:var(--red);color:var(--red)}
-#co-hd .co-f[data-f=warn].on{border-color:var(--yellow);color:var(--yellow)}
-#co-q{flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:3px 7px;font-size:11px;font-family:var(--mono)}
-#co-body{flex:1;overflow-y:auto;padding:4px 0;font-size:11px;line-height:1.5;user-select:text;-webkit-user-select:text}
-.co-row{display:flex;gap:7px;padding:1px 10px;cursor:default;color:var(--green);flex-wrap:wrap;border-left:2px solid transparent}
-.co-row:hover{background:rgba(255,255,255,.03)}
-.co-row.co-warn{color:var(--yellow);border-left-color:var(--yellow)}
-.co-row.co-error{color:var(--red);border-left-color:var(--red);background:rgba(239,68,68,.06)}
-.co-row.co-sys{color:var(--text2)}
-.co-t{color:var(--text3);flex-shrink:0}
-.co-s{color:var(--acc);flex-shrink:0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.co-m{flex:1;min-width:120px;white-space:pre-wrap;word-break:break-word}
-.co-n{background:var(--bg5);color:var(--text);border-radius:9px;padding:0 6px;font-size:10px;align-self:flex-start}
-.co-d{flex-basis:100%;margin:2px 0 4px 56px;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text2);white-space:pre-wrap;word-break:break-word;display:none}
-.co-row.show .co-d{display:block}
-.co-row.has-d{cursor:pointer}
-.co-row.has-d .co-m::after{content:' ▸';color:var(--text3)}
-#co-ft{display:flex;align-items:center;gap:10px;padding:4px 10px;background:var(--bg3);border-top:1px solid var(--border);font-size:10px;color:var(--text2);font-family:var(--font)}
-#co-ft label{margin-left:auto;display:flex;align-items:center;gap:4px;cursor:pointer}
-#g-out-btn{position:fixed;top:10px;right:100px;z-index:80;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.1);color:#fff;padding:6px 11px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:700}
-.co-badge{display:none;margin-left:5px;background:var(--red);color:#fff;border-radius:9px;padding:0 6px;font-size:10px}
-.co-badge.on{display:inline-block}
-@media(max-width:640px){#crix-out{left:0;right:0;bottom:0;width:100%;border-radius:10px 10px 0 0;resize:none;height:42vh}}
 </style>
 </head>
 <body>
@@ -852,7 +821,6 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
     <button class="st-btn green" onclick="stuSave()">💾 Guardar</button>
     <button class="st-btn yellow" onclick="stuTest()">▶ Probar</button>
     <button class="st-btn purple" onclick="openPublish()">🚀 Publicar</button>
-    <button class="st-btn" onclick="CrixOutput.toggle()" title="Output (F9)">📟 Output</button>
   </div>
 </div>
 <div id="studio-main">
@@ -944,7 +912,6 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
     </div>
   </div>
   <button id="g-back-btn" onclick="exitGame()">← Salir</button>
-  <button id="g-out-btn" onclick="CrixOutput.toggle()" title="Output (F9)">📟 Output<span id="g-out-badge" class="co-badge"></span></button>
   <div id="g-player-hud"><div class="g-pill" id="g-health-pill"><div id="g-health-fill"></div><span>❤️ <b id="g-health-v">100</b></span></div><div class="g-pill" id="g-coins-pill">🪙 <b id="g-coins-v">0</b></div></div>
   <div id="g-banner"></div><div id="g-flash"></div><div id="game-gui"></div>
   <div id="g-chat-wrap">
@@ -1027,23 +994,6 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <div id="code-status"><span id="code-lint">✓ Sin errores de sintaxis</span><span style="margin-left:auto;color:var(--text3)"><b>Script</b>: servidor · <b>LocalScript</b>: tu navegador (GUI, teclas, jugador) · Ctrl+S guardar · Ctrl+Enter ejecutar · Ctrl+Espacio autocompletar · Ctrl+/ comentar</span></div>
 <div id="code-output"><span class="code-out-sys">-- Output · JavaScript / CrixScript</span></div>
 </div>
-<!-- ═══ OUTPUT ═══ -->
-<div id="crix-out" role="log" aria-label="Output">
-  <div id="co-hd">
-    <b>📟 Output</b>
-    <button class="co-f on" data-f="info">Info</button>
-    <button class="co-f on" data-f="warn">Avisos <span id="co-nw">0</span></button>
-    <button class="co-f on" data-f="error">Errores <span id="co-ne">0</span></button>
-    <button class="co-f on" data-f="sys">Sistema</button>
-    <input id="co-q" placeholder="Buscar…" autocomplete="off" aria-label="Buscar en Output">
-    <button id="co-pause" title="Pausar el desplazamiento automático">⏸</button>
-    <button id="co-copy" title="Copiar lo visible">📋</button>
-    <button id="co-clear" title="Limpiar">🧹</button>
-    <button id="co-close" title="Cerrar (F9)">✕</button>
-  </div>
-  <div id="co-body"></div>
-  <div id="co-ft"><span id="co-count">0 líneas</span><span>Tocá una línea con ▸ para ver el detalle</span><label><input type="checkbox" id="co-auto"> Abrir si hay errores</label></div>
-</div>
 <!-- ═══ NPC MODAL ═══ -->
 <div class="mo-overlay" id="mo-instances">
 <div class="mo-box" style="width:min(460px,94vw)">
@@ -1078,7 +1028,8 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 </div>
 <div class="mo-overlay" id="mo-npc">
 <div class="mo-box">
-  <h3>🤖 NPC</h3>
+  <h3>🤖 NPCs</h3>
+  <h3>🤖 Humanoides</h3>
   <div class="npc-grid" id="npc-grid"></div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-npc')">Cerrar</button></div>
 </div>
@@ -1185,9 +1136,12 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
   <div class="call-btns" id="call-btns"></div>
 </div>
 <div id="toast"></div>
+<script src="/crix-console.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/GLTFLoader.js"></script>
 <script src="/crix-avatar.js"></script>
+<script src="/crix-joints.js"></script>
+<script src="/crix-objects.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 // Copia de world-physics.js (el mismo motor que usa el servidor). Se usa cuando el juego corre sin servidor (prueba desde el Studio).
@@ -1787,6 +1741,7 @@ function raycast(parts, origin, direction, opts = {}) {
   for (const part of parts) {
     if (!part || part.type === 'Spawn' || part.isNPC) continue;
     if (part.canCollide === false && !opts.includeNonCollidable) continue;
+    if (part.canQuery === false) continue;
     if (ignore.has(part.id) || ignore.has(part.name)) continue;
     const hit = rayBox(origin, d, partBox(part), best ? best.t : max);
     if (hit && (!best || hit.t < best.t)) best = { t: hit.t, normal: hit.normal, part };
@@ -3311,7 +3266,7 @@ function _setupStInput() { const el = stRenderer.domElement; el.addEventListener
   el.addEventListener('touchmove', e => { if (e.touches.length === 2) { e.preventDefault(); const d = stPD(e); if (stPinch > 0 && d > 0) stCamDist = Math.max(3, Math.min(200, stCamDist * stPinch / d)); stPinch = d; } }, {passive:false});
   el.addEventListener('touchend', () => stPinch = 0);
   el.addEventListener('contextmenu', e => e.preventDefault()); let panDrag = false, px = 0, py = 0; el.addEventListener('mousedown', e => { if (e.shiftKey) { panDrag = true; px = e.clientX; py = e.clientY; } }); window.addEventListener('mouseup', () => panDrag = false); window.addEventListener('mousemove', e => { if (!panDrag) return; const r = new THREE.Vector3(); stCamera.getWorldDirection(r); const up = new THREE.Vector3(0,1,0); r.cross(up).normalize(); stCamTarget.addScaledVector(r, -(e.clientX-px)*0.05); stCamTarget.y += (e.clientY-py)*0.05; px = e.clientX; py = e.clientY; }); document.addEventListener('keydown', studioShortcuts); }
-function onStClick(e) { if (gizmoDragging) return; const wrap=document.getElementById('stu-canvas-wrap'), rect=wrap.getBoundingClientRect(), mouse=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1), ray=new THREE.Raycaster(); ray.setFromCamera(mouse,stCamera); if(gizmoArrows.length){const ghits=ray.intersectObjects(gizmoArrows,false);if(ghits.length){recordStudioHistory();gizmoDragging=true;gizmoAxis=ghits[0].object.userData.axis;gizmoStart.copy(ghits[0].point);gizmoStartRotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0);gizmoRotationDelta=0;gizmoLastAngle=rotationPointerAngle(gizmoAxis,gizmoStart,selPart.mesh.position);return;}} const meshes=stParts.map(p=>p.mesh).filter(Boolean),hits=ray.intersectObjects(meshes,true); if(hits.length){const root=hits[0].object.userData.studioRoot||hits[0].object;selectPart(stParts.find(p=>p.mesh===root||p.mesh===hits[0].object));}else deselect(); }
+function onStClick(e) { if (gizmoDragging) return; const wrap=document.getElementById('stu-canvas-wrap'), rect=wrap.getBoundingClientRect(), mouse=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1), ray=new THREE.Raycaster(); ray.setFromCamera(mouse,stCamera); if(gizmoArrows.length){const ghits=ray.intersectObjects(gizmoArrows,false);if(ghits.length){recordStudioHistory();gizmoDragging=true;gizmoAxis=ghits[0].object.userData.axis;gizmoStart.copy(ghits[0].point);gizmoStartRotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0);gizmoRotationDelta=0;gizmoLastAngle=rotationPointerAngle(gizmoAxis,gizmoStart,selPart.mesh.position);return;}} const meshes=stParts.filter(p=>!p.data.locked).map(p=>p.mesh).filter(Boolean),hits=ray.intersectObjects(meshes,true); if(hits.length){const root=hits[0].object.userData.studioRoot||hits[0].object;selectPart(stParts.find(p=>p.mesh===root||p.mesh===hits[0].object));}else deselect(); }
 function rotationPointerAngle(axis, point, center) { const v=point.clone().sub(center); return axis==='x'?Math.atan2(v.y,v.z):axis==='y'?Math.atan2(v.x,v.z):Math.atan2(v.y,v.x); }
 function onGizmoDrag(e) { if(!selPart||!gizmoAxis)return; const wrap=document.getElementById('stu-canvas-wrap'),rect=wrap.getBoundingClientRect(),mouse=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1),ray=new THREE.Raycaster(); ray.setFromCamera(mouse,stCamera); const center=selPart.mesh.position.clone(); let normal;if(stTool==='rot'){normal=new THREE.Vector3(gizmoAxis==='x'?1:0,gizmoAxis==='y'?1:0,gizmoAxis==='z'?1:0);}else{normal=gizmoAxis==='y'?new THREE.Vector3(0,0,1):new THREE.Vector3(0,1,0);} const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(normal,center),hitPt=new THREE.Vector3(); if(!ray.ray.intersectPlane(plane,hitPt))return;
   if(stTool==='rot'){let angle=rotationPointerAngle(gizmoAxis,hitPt,center),delta=angle-gizmoLastAngle;while(delta>Math.PI)delta-=Math.PI*2;while(delta<-Math.PI)delta+=Math.PI*2;gizmoRotationDelta+=delta;gizmoLastAngle=angle;const key='r'+gizmoAxis,snapAngle=Math.PI/12,raw=gizmoStartRotation[gizmoAxis==='x'?'x':gizmoAxis==='y'?'y':'z']+gizmoRotationDelta;selPart.data[key]=stSnap>0?Math.round(raw/snapAngle)*snapAngle:raw;selPart.mesh.rotation.set(selPart.data.rx||0,selPart.data.ry||0,selPart.data.rz||0);updateSelectionOutline();}
@@ -3343,6 +3298,7 @@ function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).fin
 }
 function clearSt() { stParts.forEach(p => p.mesh && stScene.remove(p.mesh)); stParts = []; if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; }
 function makeMesh(d) { let geo; const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,1,2,0,2,3, 3,2,5,3,5,4, 0,3,4, 1,5,2, 0,4,1,1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo = geo.toNonIndexed(); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); applyPartUVs(geo, d, sx, sy, sz); const mat = buildPartMaterial(d); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); setShadowFlags(mesh); return mesh; }
+const NPC_LOOKS = { dummy:{ hair:'short' }, zombie:{ skin:'#8fb57a', hair:'none', face:'angry', pants:'#3d4a3a' }, robot:{ style:'stick', hair:'none', face:'neutral', eyes:'#2fd4ff' }, merchant:{ hair:'long', hairColor:'#8a5a2b', face:'happy' }, guard:{ hair:'cap', face:'neutral' }, cat:{ hair:'bun', face:'smug', scale:0.8 } };
 function makeHumanoidRig(d) {
   const root = new THREE.Group(), look = Object.assign({}, d.look || {}); if (d.skinColor && !look.skin) look.skin = d.skinColor;
   const av = _makeAvatar(look, d.color || '#cc6644'); root.add(av.root); root.userData.avatar = av;
@@ -3452,7 +3408,7 @@ function stuAddToFolder(type, folderId) {
     stScripts.push({id,name:type+'_'+stScripts.length,type,code:codes[type]||'',language:'javascript',event:'onStart',parent:folderId});
     refreshExplorer();
     if (['Script','LocalScript','ModuleScript'].includes(type)) openCodeEditor(id);
-  } else if (type==='NPC') { spawnNpc(); }
+  } else if (type==='NPC') { openNpcPanel(); }
   else { stuAdd(type); }
 }
 function openLightingProps() {
@@ -3550,10 +3506,9 @@ async function confirmPublish() {
   if (r && r.ok) showToast(privacy === 'public' ? '🚀 ¡Publicado para todos!' : '✅ Guardado en el servidor');
   else showToast('⚠️ No se pudo publicar: ' + ((r && r.err) || 'sin conexión') + '. Se reintenta solo.');
 }
-// Una sola categoría de NPC: un modelo humanoide sin comportamiento propio (no camina, no ataca, no tiene vida predefinida).
-// Todo lo que haga lo define un Script.
-function openNpcPanel() { spawnNpc(); }
-function spawnNpc() { recordStudioHistory(); const d = { id:'npc'+Date.now(), type:'NPC', name:'NPC', x:stCamTarget.x, y:0.5, z:stCamTarget.z, sx:1, sy:3.05, sz:1, rx:0, ry:0, rz:0, color:'#cc6644', skinColor:'#f0bf98', look:{}, anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); showToast('🤖 NPC agregado'); }
+const NPC_LIB = [{id:'dummy',name:'Dummy',icon:'🪆',type:'Humanoid',color:'#cc6644',hp:100},{id:'zombie',name:'Zombie',icon:'🧟',type:'Enemy',color:'#3d6e3d',hp:50},{id:'robot',name:'Robot',icon:'🤖',type:'NPC',color:'#4466aa',hp:200},{id:'merchant',name:'Comerciante',icon:'🧙',type:'Friendly',color:'#cc9933',hp:100},{id:'guard',name:'Guardia',icon:'💂',type:'Friendly',color:'#334488',hp:150},{id:'cat',name:'Gato',icon:'🐱',type:'Passive',color:'#aaaaaa',hp:30}];
+function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
+function spawnNpc(npcId) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; recordStudioHistory();const d = { id:'npc'+Date.now(), type:'NPC', name:npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:3.05, sz:1, rx:0, ry:0, rz:0, color:npc.color, skinColor:'#f0bf98', look:Object.assign({}, NPC_LOOKS[npc.id]||{}), anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(`🤖 Humanoide ${npc.name} agregado`); }
 const TOOLBOX_ITEMS = [{name:'Castillo',icon:'🏰',cat:'Edificios',type:'Block',color:'#888888',sx:8,sy:12,sz:8},{name:'Árbol',icon:'🌲',cat:'Naturaleza',type:'Cylinder',color:'#228b22',sx:2,sy:8,sz:2},{name:'Roca',icon:'🪨',cat:'Naturaleza',type:'Block',color:'#666655',sx:3,sy:2,sz:3},{name:'Puerta',icon:'🚪',cat:'Edificios',type:'Block',color:'#8B4513',sx:2,sy:4,sz:0.3},{name:'Escalera',icon:'🪜',cat:'Edificios',type:'Wedge',color:'#aaaaaa',sx:2,sy:4,sz:6},{name:'Poste de luz',icon:'💡',cat:'Decoración',type:'Cylinder',color:'#f7c948',sx:0.3,sy:8,sz:0.3},{name:'Barril',icon:'🛢️',cat:'Decoración',type:'Cylinder',color:'#8B4513',sx:1.5,sy:2,sz:1.5},{name:'Fuente',icon:'⛲',cat:'Decoración',type:'Cylinder',color:'#aaaacc',sx:4,sy:0.5,sz:4},{name:'Pared',icon:'🧱',cat:'Edificios',type:'Block',color:'#cc8866',sx:8,sy:4,sz:0.5},{name:'Plataforma Neon',icon:'✨',cat:'Especial',type:'Block',color:'#00ffff',sx:6,sy:0.3,sz:6,material:'Neon'},{name:'Esfera Cristal',icon:'💎',cat:'Especial',type:'Sphere',color:'#88ccff',sx:3,sy:3,sz:3,material:'Glass'},{name:'Columna',icon:'🏛️',cat:'Edificios',type:'Cylinder',color:'#e8e0d0',sx:1.2,sy:8,sz:1.2}];
 let toolboxFilter = 'all';
 function openToolbox() { const cats = ['all', ...new Set(TOOLBOX_ITEMS.map(i => i.cat))]; document.getElementById('toolbox-cats').innerHTML = cats.map(c => `<button class="filter-btn ${toolboxFilter===c?'active':''}" onclick="setToolboxCat('${c}',this)">${c==='all'?'Todos':c}</button>`).join(''); renderToolboxGrid(); openModal('mo-toolbox'); }
@@ -3908,6 +3863,16 @@ const game = {
   updatePart:(id,patch={}) => { id=String(id); const item=parts.find(part=>part.id===id); if(item){ if(patch.position){for(const axis of ['x','y','z']){const upper=axis.toUpperCase();if(patch.position[axis]!==undefined)item.position[axis]=patch.position[axis];else if(patch.position[upper]!==undefined)item.position[axis]=patch.position[upper];}}if(patch.size){for(const axis of ['x','y','z']){const upper=axis.toUpperCase();if(patch.size[axis]!==undefined)item.size[axis]=patch.size[axis];else if(patch.size[upper]!==undefined)item.size[axis]=patch.size[upper];}}for(const key of ['x','y','z'])if(key in patch)item.position[key]=patch[key];for(const key of ['sx','sy','sz'])if(key in patch)item.size[key[1]]=patch[key];for(const key of ['name','type','color','material','transparent','anchored','canCollide','rx','ry','rz'])if(key in patch)item[key]=patch[key]; } sendCommand('updatePart',{id,patch:clone(patch)}); return true; },
   destroyPart:id => { id=String(id); parts=parts.filter(part=>part.id!==id); sendCommand('destroyPart',{id}); return true; }
 };
+game.JOINT_CLASSES=['Weld','WeldConstraint','Motor6D','Hinge','BallSocket','Prismatic','Rod','Rope','Spring'];
+var jid=function(p){return (p&&typeof p==='object')?String(p.id):String(p);};
+game.createJoint=function(cls,part0,part1,props){ if(game.JOINT_CLASSES.indexOf(String(cls))<0) throw new Error('Clase de union desconocida: '+cls+'. Usa una de: '+game.JOINT_CLASSES.join(', ')); var id='ljoint-'+Date.now().toString(36)+'-'+(++nextPartId); sendCommand('jointCreate',{id:id,data:Object.assign({},props||{},{class:String(cls),part0:jid(part0),part1:jid(part1)})}); return id; };
+game.updateJoint=function(id,patch){ sendCommand('jointUpdate',{id:String(id),patch:patch||{}}); return true; };
+game.destroyJoint=function(id){ sendCommand('jointDestroy',{id:String(id)}); return true; };
+game.weld=function(a,b){ return game.createJoint('WeldConstraint',a,b); };
+game.motor6d=function(a,b,props){ return game.createJoint('Motor6D',a,b,props); };
+game.getModel=function(name){ var list=(cfg&&cfg.models)||[]; var m=list.find(function(x){return x.name===String(name)||x.id===String(name);}); if(!m) return null; var out=clone(m); out.rootPart=m.root?(parts.find(function(p){return p.id===m.root;})||null):null; return out; };
+game.setAttribute=function(id,key,value){ var p=parts.find(function(x){return x.id===jid(id);}); if(!p) throw new Error('No existe la pieza '+id); var a=Object.assign({},p.attributes||{}); if(value===undefined||value===null) delete a[String(key)]; else a[String(key)]=value; return game.updatePart(p.id,{attributes:a}); };
+game.getAttribute=function(id,key){ var p=parts.find(function(x){return x.id===jid(id);}); return p&&p.attributes?p.attributes[String(key)]:undefined; };
 game.CreatePart=game.createPart; game.UpdatePart=game.updatePart; game.DestroyPart=game.destroyPart; game.GetPlayer=game.getPlayer;
 const workspace = { findFirstChild:name=>{const part=parts.find(item=>item.name===name);return part?clone(part):null;}, getChildren:()=>clone(parts), createPart:game.createPart, updatePart:game.updatePart, destroyPart:game.destroyPart };
 workspace.FindFirstChild=workspace.findFirstChild; workspace.GetChildren=workspace.getChildren;
@@ -3965,9 +3930,9 @@ self.onmessage = async message => { const data=message.data||{}; if(data.type===
   if(data.type==='stop'){playerState=clone(data.player||playerState);await invoke('onStop',[clone(playerState)]);send('stopped');return;}
   if(data.type==='workspace'){parts=(data.parts||[]).map(summary);return;}
 };`;
-function scriptPartsSnapshot(parts) { return (parts||[]).map((part,index)=>({id:String(part.id||'map-part-'+index),name:part.name||'Part',type:part.type||'Block',x:part.x||0,y:part.y||0,z:part.z||0,sx:part.sx||4,sy:part.sy||4,sz:part.sz||4,color:part.color||'#888888',anchored:part.anchored!==false,canCollide:part.canCollide!==false,transparent:part.transparent||0,material:part.material||'SmoothPlastic',isNPC:!!part.isNPC})); }
+function scriptPartsSnapshot(parts) { return (parts||[]).map((part,index)=>({id:String(part.id||'map-part-'+index),name:part.name||'Part',type:part.type||'Block',x:part.x||0,y:part.y||0,z:part.z||0,sx:part.sx||4,sy:part.sy||4,sz:part.sz||4,color:part.color||'#888888',anchored:part.anchored!==false,canCollide:part.canCollide!==false,transparent:part.transparent||0,material:part.material||'SmoothPlastic',isNPC:!!part.isNPC,rx:part.rx||0,ry:part.ry||0,rz:part.rz||0,parent:part.parent||'',attributes:part.attributes||{}})); }
 function scriptPlayerSnapshot() { const p=gPlayer?gPlayer.position:{x:0,y:0,z:0}; return {isAdult:!!(ME&&ME.adult),position:{x:p.x,y:p.y,z:p.z},x:p.x,y:p.y,z:p.z,rotationY:gPlayer?gPlayer.rotation.y:0,velocityY:gVelY,onGround:!!gOnGround,health:gState.health,maxHealth:gState.maxHealth,coins:gState.coins,deaths:gState.deaths}; }
-function makeScriptWorker(script, parts, mode, eventName, player, allScripts=[]) { const language=script.language||'crixscript'; const code=language==='crixscript'?compileCrixScript(script.code||''):(script.code||''); const modules=(allScripts||[]).filter(item=>item.type==='ModuleScript').map(item=>({id:item.id,name:item.name,code:(item.language||'crixscript')==='crixscript'?compileCrixScript(item.code||'',true):(item.code||'')})); const blobUrl=URL.createObjectURL(new Blob([SCRIPT_WORKER_SOURCE],{type:'text/javascript'})); const worker=new Worker(blobUrl); const config={id:script.id||script.name||'script',name:script.name||'Script',code,mode,event:eventName,modules,gui:(typeof guiElementsSnapshot==='function'?guiElementsSnapshot():{}),parts:scriptPartsSnapshot(parts),player:player||scriptPlayerSnapshot()}; return {worker,blobUrl,code,language,config}; }
+function makeScriptWorker(script, parts, mode, eventName, player, allScripts=[]) { const language=script.language||'crixscript'; const code=language==='crixscript'?compileCrixScript(script.code||''):(script.code||''); const modules=(allScripts||[]).filter(item=>item.type==='ModuleScript').map(item=>({id:item.id,name:item.name,code:(item.language||'crixscript')==='crixscript'?compileCrixScript(item.code||'',true):(item.code||'')})); const blobUrl=URL.createObjectURL(new Blob([SCRIPT_WORKER_SOURCE],{type:'text/javascript'})); const worker=new Worker(blobUrl); const config={id:script.id||script.name||'script',name:script.name||'Script',code,mode,event:eventName,modules,gui:(typeof guiElementsSnapshot==='function'?guiElementsSnapshot():{}),parts:scriptPartsSnapshot(parts),models:(window.CrixExt&&CrixExt.modelsInfo?CrixExt.modelsInfo():[]),player:player||scriptPlayerSnapshot()}; return {worker,blobUrl,code,language,config}; }
 function runScript(scriptOverride, partsOverride) {
   if (!scriptOverride) saveActiveScript();
   const script=scriptOverride||stScripts.find(x=>x.id===activeScriptId);
@@ -3988,9 +3953,9 @@ function runScript(scriptOverride, partsOverride) {
 const SCRIPT_TICK_MS=50, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=Infinity, SCRIPT_MAX_PARTS=Infinity;
 let runtimeScripts=new Map(), runtimeObjects=new Map(), runtimeWorkspaceBase=[], runtimeTickHandle=null, runtimePhysicsHandle=null, currentGameSession=0, netServerScriptsActive=false, networkRuntimePartIds=new Set();
 function normalizeGamePart(id,source={}) { const pos=source.position||{},size=source.size||{},num=(v,d,min=-10000,max=10000)=>{let n=Number(v);if(!Number.isFinite(n))n=d;return Math.max(min,Math.min(max,n));},type=['Block','Sphere','Cylinder','Wedge','TrussPart','ImportedMesh'].includes(source.type)?source.type:'Block',color=/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?source.color:'#5b8def',materials=Object.keys(MATERIAL_DEFS);
-  return {id:String(id),name:String(source.name||'Part').slice(0,80),type,x:num(source.x??pos.x??pos.X,0),y:num(source.y??pos.y??pos.Y,0),z:num(source.z??pos.z??pos.Z,0),sx:num(source.sx??size.x??size.X,4,0.1,1000),sy:num(source.sy??size.y??size.Y,4,0.1,1000),sz:num(source.sz??size.z??size.Z,4,0.1,1000),rx:num(source.rx,0,-1000,1000),ry:num(source.ry,0,-1000,1000),rz:num(source.rz,0,-1000,1000),color,material:materials.includes(source.material)?source.material:'SmoothPlastic',anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:num(source.transparent,0,0,0.95),behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',behaviorValue:num(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:num(source.texScale,4,0.25,64),texTint:source.texTint===true,meshData:source.type==='ImportedMesh'?source.meshData:undefined};
+  return {id:String(id),name:String(source.name||'Part').slice(0,80),type,x:num(source.x??pos.x??pos.X,0),y:num(source.y??pos.y??pos.Y,0),z:num(source.z??pos.z??pos.Z,0),sx:num(source.sx??size.x??size.X,4,0.1,1000),sy:num(source.sy??size.y??size.Y,4,0.1,1000),sz:num(source.sz??size.z??size.Z,4,0.1,1000),rx:num(source.rx,0,-1000,1000),ry:num(source.ry,0,-1000,1000),rz:num(source.rz,0,-1000,1000),color,material:materials.includes(source.material)?source.material:'SmoothPlastic',anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:num(source.transparent,0,0,0.95),behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',behaviorValue:num(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:num(source.texScale,4,0.25,64),texTint:source.texTint===true,meshData:source.type==='ImportedMesh'?source.meshData:undefined,parent:source.parent?String(source.parent).slice(0,120):undefined,attributes:(source.attributes&&typeof source.attributes==='object'&&!Array.isArray(source.attributes))?source.attributes:undefined,reflectance:source.reflectance===undefined?undefined:num(source.reflectance,0,0,1),density:source.density===undefined?undefined:num(source.density,0.7,0.01,100),castShadow:source.castShadow===undefined?undefined:source.castShadow!==false,canTouch:source.canTouch===undefined?undefined:source.canTouch!==false,canQuery:source.canQuery===undefined?undefined:source.canQuery!==false,massless:source.massless===true?true:undefined,locked:source.locked===true?true:undefined,collisionGroup:source.collisionGroup?String(source.collisionGroup).slice(0,40):undefined};
 }
-function _runtimeObjectSummary(object) { const d=object.data; return {id:String(object.id),name:d.name,type:d.type,x:d.x,y:d.y,z:d.z,sx:d.sx,sy:d.sy,sz:d.sz,color:d.color,anchored:d.anchored,canCollide:d.canCollide,material:d.material}; }
+function _runtimeObjectSummary(object) { const d=object.data; return {id:String(object.id),name:d.name,type:d.type,x:d.x,y:d.y,z:d.z,sx:d.sx,sy:d.sy,sz:d.sz,color:d.color,anchored:d.anchored,canCollide:d.canCollide,material:d.material,rx:d.rx||0,ry:d.ry||0,rz:d.rz||0,parent:d.parent||'',attributes:d.attributes||{}}; }
 function _scriptWorkspaceSnapshot() { return [...runtimeWorkspaceBase,...Array.from(runtimeObjects.values(),_runtimeObjectSummary)]; }
 function _syncScriptWorkspaces() { const parts=_scriptWorkspaceSnapshot(); for(const run of runtimeScripts.values())if(run.active)try{run.worker.postMessage({type:'workspace',parts});}catch(_){} }
 function _clearScriptWatchdog(run) { if(run.watchdog){clearTimeout(run.watchdog);run.watchdog=null;} }
@@ -4031,7 +3996,16 @@ function _replaceRuntimeMesh(object) { const old=object.mesh,mesh=makeMesh(objec
 function _createGameScriptPart(id,source) { const data=normalizeGamePart(id,source);const object={id,data,mesh:null,collider:null,velocity:new THREE.Vector3()};object.mesh=makeMesh(data);gScene.add(object.mesh);runtimeObjects.set(id,object);_syncRuntimeCollider(object); }
 function _updateGameScriptPart(id,patch) { const object=runtimeObjects.get(id),current=object.data,position=patch.position||{},size=patch.size||{};const merged={...current,...patch,x:patch.x??position.x??position.X??current.x,y:patch.y??position.y??position.Y??current.y,z:patch.z??position.z??position.Z??current.z,sx:patch.sx??size.x??size.X??current.sx,sy:patch.sy??size.y??size.Y??current.sy,sz:patch.sz??size.z??size.Z??current.sz};object.data=normalizeGamePart(id,merged);if(object.data.anchored)object.velocity.set(0,0,0);_replaceRuntimeMesh(object); }
 function _destroyGameScriptPart(id) { const object=runtimeObjects.get(id);if(!object)return;if(object.mesh&&object.mesh.parent)object.mesh.parent.remove(object.mesh);object.mesh?.geometry?.dispose();if(Array.isArray(object.mesh?.material))object.mesh.material.forEach(material=>material.dispose());else object.mesh?.material?.dispose();if(object.collider)gColliders=gColliders.filter(collider=>collider!==object.collider);runtimeObjects.delete(id); }
-function appendOutput(line, cls = '', meta = null) { const out = document.getElementById('code-output'); const span = document.createElement('span'); span.className = cls === 'err' ? 'code-out-err' : cls === 'warn' ? 'code-out-warn' : cls === 'sys' ? 'code-out-sys' : ''; span.textContent = (meta && meta.label ? '[' + meta.label + '] ' : '') + line + '\n'; out.appendChild(span); out.scrollTop = out.scrollHeight; try { if (window.CrixOutput) CrixOutput.fromLine(line, cls, meta); } catch (_) {} }
+function appendOutput(line, cls = '') {
+  // Además del panel del editor de código, todo va a la consola flotante (visible también en medio del juego).
+  try {
+    let text = String(line), lvl = cls === 'err' ? 'error' : cls === 'warn' ? 'warn' : 'info', source = 'Sistema';
+    if (/^\[error\]\s*/i.test(text)) { lvl = 'error'; text = text.replace(/^\[error\]\s*/i, ''); }
+    else if (/^\[warn(ing)?\]\s*/i.test(text)) { lvl = 'warn'; text = text.replace(/^\[warn(ing)?\]\s*/i, ''); }
+    const m = text.match(/^\[([^\]]{1,40})\]\s*([\s\S]*)$/); if (m) { source = m[1]; text = m[2]; }
+    if (!(cls === 'sys' && /^--/.test(text))) window.CrixConsole && CrixConsole.add(lvl, source, text);
+  } catch (_) { /* la consola nunca debe romper el juego */ }
+  const out = document.getElementById('code-output'); if (!out) return; const span = document.createElement('span'); span.className = cls === 'err' ? 'code-out-err' : cls === 'warn' ? 'code-out-warn' : cls === 'sys' ? 'code-out-sys' : ''; span.textContent = line + '\n'; out.appendChild(span); out.scrollTop = out.scrollHeight; }
 function applyNetworkPartUpsert(part,snap) {
   if(!gScene||!part||part.type==='Spawn'||part.isNPC)return;
   const id=String(part.id||'');if(!id)return;
@@ -4097,7 +4071,6 @@ function canPlayMap(m) {
   return true;
 }
 function playMap(mapId) {
-  try { if (window.CrixOutput) CrixOutput.mark('Partida iniciada'); } catch (_) {}
   const maps = getMaps(); const m = maps[mapId]; if (!m) { showToast('Mapa no encontrado'); return; }
   if (!canPlayMap(m)) { showToast('🔒 No tenés acceso a este juego'); return; }
   currentGameSession++; stopGameScripts();
@@ -4135,6 +4108,7 @@ function _loadMap(m) {
     if(part.isNPC){const model=makeHumanoidRig(part);gScene.add(model);gNPCs.push({mesh:model,data:part});if(part.canCollide!==false)gColliders.push({mesh:model,box:new THREE.Box3().setFromObject(model)});return;}
     const id=String(part.id||'map-part-'+index),data=normalizeGamePart(id,part),mesh=makeMesh(data);gScene.add(mesh);const object={id,data,mesh,collider:null,velocity:new THREE.Vector3()};runtimeObjects.set(id,object);_syncRuntimeCollider(object);
   });
+  try{if(window.CrixExt)CrixExt.gameLoad(m);}catch(err){appendOutput('[Objetos] '+err.message,'err');}
   _spawnPlayer(spawn);gSpawnPos={x:spawn.x,y:spawn.y,z:spawn.z};resetGameState(m);if(typeof buildGameGui==='function')buildGameGui(m);gCamTheta=0;gCamPhi=0.45;gChatMsgs=[];document.getElementById('g-chat-msgs').innerHTML='';addGMsg(`Bienvenido a ${m.name}`,'sys');
 }
 // Sin servidor (prueba desde el Studio) las esferas sueltas usan el mismo motor que el servidor: ruedan y se pueden empujar.
@@ -4149,7 +4123,7 @@ function _stepLocalSpheres() {
   const room = _localRoom, parts = room.worldParts, seen = new Set(), loose = [];
   for (const o of runtimeObjects.values()) {
     const d = o.data; if (!o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC) continue;
-    const free = d.type === 'Sphere' && d.anchored === false, id = String(o.id), m = o.mesh;
+    const free = d.type === 'Sphere' && d.anchored === false && !(window.gJointDriven && gJointDriven.has(String(o.id))), id = String(o.id), m = o.mesh;
     const p = parts[id] || (parts[id] = { id, name: d.name });
     seen.add(id);
     p.type = d.type; p.sx = d.sx; p.sy = d.sy; p.sz = d.sz; p.material = d.material; p.canCollide = d.canCollide !== false; p.anchored = !free;
@@ -4176,7 +4150,7 @@ function _stepLocalSpheres() {
   }
   for (const o of loose) if (!o._pp) o._pp = { x: o.mesh.position.x, y: o.mesh.position.y, z: o.mesh.position.z };
 }
-function _stepScriptParts() { _stepNetInterp();const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics;for(const object of runtimeObjects.values()){if(localSpheres&&object.data.type==='Sphere')continue;if(object.data.anchored||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
+function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gameStep();}catch(err){if(!window._cxStepErr){window._cxStepErr=1;appendOutput('[Uniones] '+err.message,'err');}}const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics;for(const object of runtimeObjects.values()){if(localSpheres&&object.data.type==='Sphere')continue;if(object.data.anchored||(window.gJointDriven&&gJointDriven.has(String(object.id)))||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
 // Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
 // así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
 // (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
@@ -4223,8 +4197,12 @@ function avatarChatCommand(text) {
   return true;
 }
 function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; const _nowT = performance.now(); const _frameDt = Math.min(0.1, Math.max(0, (_nowT - (_gameLoop._last || _nowT)) / 1000)); _gameLoop._last = _nowT; gAnimT += _frameDt; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; gAcc += Math.min(100, _frameDt * 1000); let _steps = 0; while (gAcc >= PHYS_STEP_MS && _steps < 6) { gAcc -= PHYS_STEP_MS; _steps++; _stepPlayer(mx, mz, moving); } if (_steps === 6) gAcc = 0; let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * Math.min(1, 12 * _frameDt); _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } { const _av = gPlayer.userData.avatar; if (_av) CrixAvatar.update(_av, _frameDt, { speed: Math.hypot(gVelX, gVelZ) * 60, onGround: gOnGround, vy: gVelY }); } gNPCs.forEach(npc => { const av = npc.mesh.userData.avatar; if (!av) return; if (npc.seed === undefined) npc.seed = String(npc.data.id || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
-    // Sin comportamiento predeterminado: el NPC no se mueve solo. Solo se anima (idle). TODO: los Scripts todavía no pueden moverlo (se resuelve cuando el NPC sea un Model con joints).
-    CrixAvatar.update(av, _frameDt, { speed: 0, onGround: true }); }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
+    // Reloj de pared: todos los jugadores ven al NPC en el mismo lugar. Un Script puede detenerlo con game.setNpcWander(nombre, false).
+    const t = Date.now() / 2000 + npc.seed * 0.3, hold = !!av.hold, nx = npc.data.x + (hold ? 0 : Math.sin(t) * 5), nz = npc.data.z + (hold ? 0 : Math.cos(t * 0.7) * 5);
+    const dx = nx - npc.mesh.position.x, dz = nz - npc.mesh.position.z, spd = npc.px === undefined ? 0 : Math.hypot(dx, dz) / Math.max(0.001, _frameDt);
+    npc.px = 1; npc.mesh.position.x = nx; npc.mesh.position.z = nz;
+    if (spd > 0.4) { let dr = Math.atan2(dx, dz) - npc.mesh.rotation.y; while (dr < -Math.PI) dr += Math.PI * 2; while (dr > Math.PI) dr -= Math.PI * 2; npc.mesh.rotation.y += dr * Math.min(1, 8 * _frameDt); }
+    CrixAvatar.update(av, _frameDt, { speed: Math.min(spd, 30), onGround: true }); }); const camTarget = gPlayer.position.y + AV_H * 0.5; const cx = gPlayer.position.x + gCamDist*Math.sin(gCamTheta)*Math.cos(gCamPhi); const cy = camTarget + gCamDist*Math.sin(gCamPhi); const cz = gPlayer.position.z + gCamDist*Math.cos(gCamTheta)*Math.cos(gCamPhi); gCamera.position.set(cx,cy,cz); gCamera.lookAt(gPlayer.position.x, camTarget, gPlayer.position.z); if(gRig)updateLightRigFocus(gRig, gPlayer.position); gRenderer.render(gScene, gCamera); }
 function _setupGameInput() { window.addEventListener('keydown', e => { if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return; gKeys[e.code] = true; if (e.code === 'Space') { e.preventDefault(); _tryJump(); } if (e.code === 'Escape') exitGame(); }); window.addEventListener('keyup', e => delete gKeys[e.code]); let cDrag = false, cx2=0, cy2=0; window.addEventListener('mousedown', e => { if (e.button===2 && document.getElementById('s-game').classList.contains('active')) { cDrag=true; cx2=e.clientX; cy2=e.clientY; } }); window.addEventListener('mouseup', e => { if (e.button===2) cDrag=false; }); window.addEventListener('mousemove', e => { if (!cDrag) return; gCamTheta -= (e.clientX-cx2)*0.01; gCamPhi = Math.max(0.08, Math.min(Math.PI/2.1, gCamPhi+(e.clientY-cy2)*0.01)); cx2=e.clientX; cy2=e.clientY; }); window.addEventListener('wheel', e => { if (document.getElementById('s-game').classList.contains('active')) gCamDist = Math.max(5,Math.min(60,gCamDist+e.deltaY*0.05)); }, {passive:true}); window.oncontextmenu = e => { if (document.getElementById('s-game').classList.contains('active')) e.preventDefault(); }; }
 
 // ═══ Física del jugador (paso fijo de 1/60 s: igual en pantallas de 60, 120 o 144 Hz) ═══
@@ -4386,7 +4364,7 @@ async function crixShare(kind, key) {
     try { document.getElementById('mo-game-page').classList.remove('open'); if (route) crixOpenRoute(route); else goTab0('home'); } finally { setTimeout(() => { window.__crixLock = false; }, 0); }
   });
 })();
-function exitGame() { try { if (window.CrixOutput) CrixOutput.mark('Partida terminada'); } catch (_) {} try{CrixAudio.stopAll();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
+function exitGame() { try{CrixAudio.stopAll();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
 const NET_RATE = 3;
 let remotePlayers = {};
@@ -4395,7 +4373,7 @@ function netConnect() {
   try{socket=io(serverUrl,{auth:{token:DB.get('token')},transports:['websocket','polling'],reconnection:true,reconnectionDelay:1500,reconnectionDelayMax:8000,reconnectionAttempts:Infinity,timeout:20000});}
   catch(error){console.warn('[NET] Socket.IO no disponible — modo offline');return;}
   socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
-  socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();});
+  socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();window.CrixConsole&&CrixConsole.warn('Red','Desconectado del servidor');});
   socket.on('connect_error',(err)=>{
     netConnected=false;updateNetPill('🟡','Sin servidor');
     if(err&&err.message==='Sesión inválida'&&ME&&!ME.guest){
@@ -4411,7 +4389,7 @@ function netConnect() {
     updateNetPill('🟢',`${players.length+1} jugadores`);
   });
   socket.on('script_runtime_status',({status,message,scriptCount,scriptChars})=>{
-    if(status==='error')addGMsg('⚠️ Script de servidor: '+(message||'error'),'sys');
+    if(status==='error'){addGMsg('⚠️ Script de servidor: '+(message||'error'),'sys');window.CrixConsole&&CrixConsole.error('Servidor','Script de servidor: '+(message||'error'));}
     else if(status==='ready'&&scriptCount)addGMsg(`🖥️ ${scriptCount} script(s) ejecutándose en el servidor`,'sys');
     // Quien edita el juego: si el servidor no tiene SUS scripts (guardado fallido o sin sesión), se lo decimos en vez de callar.
     if(status==='ready'&&netServerScriptsActive&&netCurrentMapId){
@@ -4428,13 +4406,14 @@ function netConnect() {
   });
   socket.on('runtime_scene',applyNetworkSceneEvent);
   // Lote de posiciones de piezas con física (un paquete por tick del servidor).
+  socket.on('joint_poses',d=>{try{if(window.CrixExt)CrixExt.netPoses(d);}catch(err){}});
   socket.on('world_delta',({parts=[]}={})=>{for(const part of parts)applyNetworkPartUpsert(part);});
   socket.on('part_collected',({id}={})=>_remoteCollect(id));
   // Resync periódico del servidor: solo corrige la posición de piezas que ya existen aquí. Nunca crea piezas.
   socket.on('world_sync',({parts=[]}={})=>{for(const part of parts){if(runtimeObjects.has(String(part.id)))applyNetworkPartUpsert(part);}});
   socket.on('script_remote',({name,data}={})=>{if(name)dispatchScriptEvent('remote:'+String(name),[data]);});
   socket.on('server_player_cmd',command=>{if(gPlayer&&command&&typeof command==='object')_playerCommand(command);});
-  socket.on('script_output',message=>appendOutput(message.text||'',message.cls||'',{src:'Servidor · '+(message.script||'Script'),label:message.script||'Servidor',detail:message.detail||''}));
+  socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
   socket.on('join_ack',({playerCount})=>{updateNetPill('🟢',`${playerCount} jugador${playerCount!==1?'es':''}`);addGMsg(`✅ Conectado (${playerCount} en sala)`,'sys');});
   socket.on('player_joined',playerData=>{spawnRemote(playerData);addGMsg(`→ ${playerData.username} entró`,'sys');updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('player_moved',({socketId,x,y,z,ry,anim,moving,og})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.targetRY=ry;rp.anim=anim;rp.moving=moving;rp.og=og!==false;});
@@ -6390,6 +6369,7 @@ function _playerCommand(c) {
 }
 function _handleExtendedCommand(run, message) {
   const c = message.command, payload = message.payload || {};
+  if (window.CrixExt && CrixExt.gameCommand(message)) return true;
   if (c === 'player') { _playerCommand(payload); return true; }
   if (c === 'guiSet') { if (typeof guiSet === 'function') guiSet(String(payload.name||''), String(payload.prop||''), payload.value); return true; }
   if (c === 'remote') { if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('script_remote', {name:String(payload.name||'').slice(0,40), data:payload.data}); return true; }
@@ -9358,151 +9338,7 @@ initGoogle();
 })();
 
 </script>
-<script>
-/* ═══ Output: consola de mensajes y errores (Crix Hub y partidas) ═══ */
-window.CrixOutput = (function () {
-  'use strict';
-  const MAX = 1500, LS = 'crix_out_prefs';
-  const prefs = { info: true, warn: true, error: true, sys: true, auto: true };
-  try { Object.assign(prefs, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (_) {}
-  let q = '', entries = [], nextId = 1, nWarn = 0, nErr = 0, unseen = 0, paused = false, isOpen = false;
-  const $ = id => document.getElementById(id);
-  const save = () => { try { localStorage.setItem(LS, JSON.stringify(prefs)); } catch (_) {} };
-  const two = n => (n < 10 ? '0' : '') + n;
-  const clock = t => { const d = new Date(t); return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds()); };
-  const inPlay = () => { const g = $('s-game'), st = $('s-studio'); return !!((g && g.classList.contains('active')) || (st && st.classList.contains('active'))); };
-  const vis = e => prefs[e.level] && (!q || (e.src + ' ' + e.text).toLowerCase().indexOf(q) >= 0);
-  const fmt = v => { if (v instanceof Error) return v.message; if (typeof v === 'string') return v; try { return JSON.stringify(v); } catch (_) { return String(v); } };
-
-  function buildRow(e) {
-    const d = document.createElement('div');
-    d.className = 'co-row co-' + e.level + (e.detail ? ' has-d' : '');
-    const t = document.createElement('span'); t.className = 'co-t'; t.textContent = clock(e.t);
-    const s = document.createElement('span'); s.className = 'co-s'; s.textContent = e.src; s.title = e.src;
-    const m = document.createElement('span'); m.className = 'co-m'; m.textContent = e.text;
-    const n = document.createElement('span'); n.className = 'co-n'; n.style.display = e.count > 1 ? '' : 'none'; if (e.count > 1) n.textContent = '×' + e.count;
-    d.append(t, s, m, n);
-    if (e.detail) {
-      const x = document.createElement('div'); x.className = 'co-d'; x.textContent = e.detail; d.appendChild(x);
-      d.addEventListener('click', () => { if (!String(getSelection())) d.classList.toggle('show'); });
-    }
-    e.el = d; e.nEl = n; e.tEl = t;
-    return d;
-  }
-  function counters() {
-    const w = $('co-nw'), er = $('co-ne'), c = $('co-count'), b = $('g-out-badge');
-    if (w) w.textContent = nWarn; if (er) er.textContent = nErr;
-    if (c) c.textContent = entries.length + (entries.length === 1 ? ' línea' : ' líneas');
-    if (b) { b.textContent = unseen > 99 ? '99+' : unseen; b.classList.toggle('on', unseen > 0); }
-  }
-  function render() {
-    const body = $('co-body'); if (!body) return;
-    body.textContent = '';
-    const frag = document.createDocumentFragment();
-    entries.forEach(e => { if (vis(e)) frag.appendChild(e.el || buildRow(e)); });
-    body.appendChild(frag);
-    body.scrollTop = body.scrollHeight;
-  }
-  function add(o) {
-    const level = ['info', 'warn', 'error', 'sys'].indexOf(o.level) >= 0 ? o.level : 'info';
-    const text = String(o.text == null ? '' : o.text).slice(0, 4000);
-    const src = String(o.src || 'Cliente').slice(0, 120);
-    const detail = o.detail ? String(o.detail).slice(0, 4000) : '';
-    const last = entries[entries.length - 1];
-    if (last && last.level === level && last.src === src && last.text === text && last.detail === detail) {
-      last.count++; last.t = Date.now();
-      if (last.nEl) { last.nEl.textContent = '×' + last.count; last.nEl.style.display = ''; }
-      if (last.tEl) last.tEl.textContent = clock(last.t);
-    } else {
-      const e = { id: nextId++, t: Date.now(), level, src, text, detail, count: 1 };
-      entries.push(e);
-      if (entries.length > MAX) { const old = entries.shift(); if (old.el && old.el.parentNode) old.el.remove(); }
-      if (isOpen && vis(e)) {
-        const body = $('co-body'), stick = !paused && body.scrollHeight - body.scrollTop - body.clientHeight < 40;
-        body.appendChild(buildRow(e));
-        if (stick || !paused) body.scrollTop = body.scrollHeight;
-      }
-    }
-    if (level === 'warn') nWarn++;
-    if (level === 'error') { nErr++; if (!isOpen) unseen++; if (prefs.auto && !isOpen && inPlay()) show(); }
-    counters();
-  }
-  function fromLine(line, cls, meta) {
-    let text = String(line == null ? '' : line);
-    let level = cls === 'err' ? 'error' : cls === 'warn' ? 'warn' : cls === 'sys' ? 'sys' : 'info';
-    let src = (meta && meta.src) || '', local = '';
-    for (let k = 0; k < 2; k++) {
-      const m = /^\[([^\]]{1,80})\]\s*/.exec(text); if (!m) break;
-      const tag = m[1].toLowerCase();
-      if (tag === 'error' || tag === 'warn') { level = tag === 'error' ? 'error' : 'warn'; text = text.slice(m[0].length); }
-      else if (!src && !local) { local = m[1]; text = text.slice(m[0].length); }
-      else break;
-    }
-    if (!src) src = local ? 'Cliente · ' + local : 'Cliente';
-    add({ level, src, text, detail: meta && meta.detail });
-  }
-  function mark(text) { add({ level: 'sys', src: 'Crix', text: '── ' + text + ' ──' }); }
-  function show() { const p = $('crix-out'); if (!p) return; isOpen = true; unseen = 0; p.classList.add('open'); const a = $('co-auto'); if (a) a.checked = !!prefs.auto; render(); counters(); }
-  function hide() { const p = $('crix-out'); if (p) p.classList.remove('open'); isOpen = false; }
-  function toggle() { isOpen ? hide() : show(); }
-  function clear() { entries = []; nWarn = 0; nErr = 0; unseen = 0; render(); counters(); }
-  function copyText() {
-    const text = entries.filter(vis).map(e => '[' + clock(e.t) + '] [' + e.level + '] [' + e.src + '] ' + e.text + (e.count > 1 ? ' (x' + e.count + ')' : '') + (e.detail ? '\n' + e.detail : '')).join('\n');
-    const done = () => { try { if (typeof showToast === 'function') showToast('Output copiado'); } catch (_) {} };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => {});
-    else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (_) {} ta.remove(); }
-  }
-
-  /* errores que nadie atrapó */
-  window.addEventListener('error', ev => {
-    if (!ev || (!ev.message && !ev.error)) return;
-    const where = ev.filename ? String(ev.filename).split('/').pop() + ':' + ev.lineno + ':' + ev.colno : '';
-    add({ level: 'error', src: 'Motor', text: ev.message || fmt(ev.error), detail: (ev.error && ev.error.stack) || where });
-  });
-  window.addEventListener('unhandledrejection', ev => {
-    const r = ev && ev.reason;
-    add({ level: 'error', src: 'Motor', text: 'Promesa rechazada: ' + (r && r.message ? r.message : fmt(r)), detail: (r && r.stack) || '' });
-  });
-  ['error', 'warn'].forEach(k => {
-    const orig = console[k];
-    console[k] = function () {
-      try { if (inPlay()) add({ level: k === 'error' ? 'error' : 'warn', src: 'Consola', text: Array.prototype.map.call(arguments, fmt).join(' ') }); } catch (_) {}
-      return orig.apply(console, arguments);
-    };
-  });
-
-  function init() {
-    document.querySelectorAll('#co-hd .co-f').forEach(b => {
-      b.classList.toggle('on', !!prefs[b.dataset.f]);
-      b.addEventListener('click', () => { prefs[b.dataset.f] = !prefs[b.dataset.f]; b.classList.toggle('on', prefs[b.dataset.f]); save(); render(); });
-    });
-    $('co-q').addEventListener('input', ev => { q = ev.target.value.trim().toLowerCase(); render(); });
-    $('co-clear').addEventListener('click', clear);
-    $('co-copy').addEventListener('click', copyText);
-    $('co-close').addEventListener('click', hide);
-    $('co-pause').addEventListener('click', ev => { paused = !paused; ev.currentTarget.textContent = paused ? '▶' : '⏸'; });
-    $('co-auto').checked = !!prefs.auto;
-    $('co-auto').addEventListener('change', ev => { prefs.auto = ev.target.checked; save(); });
-    /* arrastrar desde la barra superior */
-    const p = $('crix-out'), hd = $('co-hd'); let drag = null;
-    hd.addEventListener('pointerdown', ev => {
-      if (ev.target.closest('button,input,label')) return;
-      const r = p.getBoundingClientRect(); drag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
-      p.style.right = 'auto'; p.style.bottom = 'auto'; p.style.left = r.left + 'px'; p.style.top = r.top + 'px';
-      try { hd.setPointerCapture(ev.pointerId); } catch (_) {}
-    });
-    hd.addEventListener('pointermove', ev => {
-      if (!drag) return;
-      p.style.left = Math.max(0, Math.min(innerWidth - 80, ev.clientX - drag.dx)) + 'px';
-      p.style.top = Math.max(0, Math.min(innerHeight - 40, ev.clientY - drag.dy)) + 'px';
-    });
-    const end = () => { drag = null; }; hd.addEventListener('pointerup', end); hd.addEventListener('pointercancel', end);
-    document.addEventListener('keydown', ev => { if (ev.key === 'F9') { ev.preventDefault(); toggle(); } });
-    counters();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-  return { add, fromLine, mark, show, hide, toggle, clear, get open() { return isOpen; } };
-})();
-</script>
+<script src="/crix-fx.js"></script>
+<script src="/crix-ext.js"></script>
 </body>
 </html>

@@ -1,0 +1,184 @@
+'use strict';
+// CrixObjects — catálogo de clases y propiedades estilo Roblox Studio (los nombres pueden variar; ver `es`).
+// Todo lo que está acá es DATOS + esquema para el inspector. El comportamiento lo escriben los scripts:
+// ningún objeto trae IA, vida ni reglas propias (un Humanoid es un contenedor de valores; un NPC es un Model).
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./crix-joints.js'));
+  else root.CrixObjects = factory(root.CrixJoints);
+})(typeof self !== 'undefined' ? self : this, function (CrixJoints) {
+  const MATERIALS = ['SmoothPlastic', 'Plastic', 'Brick', 'Wood', 'WoodPlanks', 'Metal', 'DiamondPlate', 'Neon', 'Glass', 'Ice', 'Grass', 'Sand', 'Concrete', 'Rock', 'Marble', 'Cobblestone', 'Fabric'];
+  const SHAPES = ['Block', 'Sphere', 'Cylinder', 'Wedge', 'TrussPart'];
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+
+  // ── Propiedades de las piezas (BasePart) ─────────────────────────────────
+  // t: bool | num | int | str | color | enum | strlist | attrs ; group: sección del inspector
+  const PART_PROPS = [
+    { k: 'type', label: 'Shape', t: 'enum', opts: SHAPES, group: 'Apariencia', rebuild: true, hint: 'Forma de la pieza' },
+    { k: 'reflectance', label: 'Reflectance', t: 'num', min: 0, max: 1, step: 0.05, def: 0, group: 'Apariencia', hint: 'Brillo especular (0–1)' },
+    { k: 'castShadow', label: 'CastShadow', t: 'bool', def: true, group: 'Apariencia' },
+    { k: 'canCollide', label: 'CanCollide', t: 'bool', def: true, group: 'Colisión' },
+    { k: 'canTouch', label: 'CanTouch', t: 'bool', def: true, group: 'Colisión', hint: 'Si es false no dispara onTouched' },
+    { k: 'canQuery', label: 'CanQuery', t: 'bool', def: true, group: 'Colisión', hint: 'Si es false los raycast la atraviesan' },
+    { k: 'collisionGroup', label: 'CollisionGroup', t: 'str', def: 'Default', max: 40, group: 'Colisión', hint: 'Dos piezas del mismo grupo (distinto de Default) no chocan entre sí en cuerdas/resortes' },
+    { k: 'density', label: 'Density', t: 'num', min: 0.01, max: 100, step: 0.1, def: 0.7, group: 'Física', hint: 'Masa = volumen × densidad (resortes, cuerdas)' },
+    { k: 'friction', label: 'Friction', t: 'num', min: 0, max: 1, step: 0.01, group: 'Física', optional: true },
+    { k: 'bounce', label: 'Elasticity', t: 'num', min: 0, max: 1, step: 0.01, group: 'Física', optional: true },
+    { k: 'drag', label: 'Drag', t: 'num', min: 0, max: 1, step: 0.001, group: 'Física', optional: true },
+    { k: 'gravityScale', label: 'GravityScale', t: 'num', min: -5, max: 5, step: 0.1, group: 'Física', optional: true },
+    { k: 'massless', label: 'Massless', t: 'bool', def: false, group: 'Física', hint: 'Guardada para tus scripts (la física actual no la usa)' },
+    { k: 'locked', label: 'Locked', t: 'bool', def: false, group: 'Editor', hint: 'No se puede seleccionar con el visor 3D' },
+    { k: 'tags', label: 'Tags', t: 'strlist', group: 'Datos', hint: 'Separadas por coma · game.getPartsByTag()' },
+    { k: 'attributes', label: 'Attributes', t: 'attrs', group: 'Datos', hint: 'clave=valor por línea · game.getAttribute(id, clave)' },
+  ];
+
+  // ── Esquemas de otras clases ────────────────────────────────────────────
+  const AXES = ['x', 'y', 'z'];
+  const cfFields = (k, label) => ({ k, label, t: 'cf', group: 'Unión', hint: 'Desplazamiento (studs) y rotación (grados) respecto de la pieza' });
+  const jointCommon = [
+    { k: 'name', label: 'Name', t: 'str', max: 80, group: 'Datos' },
+    { k: 'enabled', label: 'Enabled', t: 'bool', def: true, group: 'Datos' },
+    { k: 'part0', label: 'Part0', t: 'part', group: 'Unión' },
+    { k: 'part1', label: 'Part1', t: 'part', group: 'Unión', hint: 'La pieza que sigue a Part0' },
+  ];
+  const drive = (angle) => [
+    { k: 'axis', label: 'Axis', t: 'enum', opts: AXES, group: 'Movimiento' },
+    { k: 'mode', label: 'ActuatorType', t: 'enum', opts: ['none', 'servo', 'velocity'], group: 'Movimiento', hint: 'none = libre · servo = va a un objetivo · velocity = gira sin parar' },
+    angle ? { k: 'targetAngle', label: 'TargetAngle (rad)', t: 'num', step: 0.1, group: 'Movimiento' } : { k: 'targetPosition', label: 'TargetPosition', t: 'num', step: 0.5, group: 'Movimiento' },
+    angle ? { k: 'angularVelocity', label: 'AngularVelocity (rad/s)', t: 'num', step: 0.5, group: 'Movimiento' } : { k: 'velocity', label: 'Velocity (studs/s)', t: 'num', step: 0.5, group: 'Movimiento' },
+    { k: 'maxVelocity', label: 'MaxVelocity', t: 'num', min: 0, step: 0.5, group: 'Movimiento' },
+    { k: 'limitsEnabled', label: 'LimitsEnabled', t: 'bool', group: 'Límites' },
+    angle ? { k: 'minAngle', label: 'LowerAngle (rad)', t: 'num', step: 0.1, group: 'Límites' } : { k: 'minPosition', label: 'LowerLimit', t: 'num', step: 0.5, group: 'Límites' },
+    angle ? { k: 'maxAngle', label: 'UpperAngle (rad)', t: 'num', step: 0.1, group: 'Límites' } : { k: 'maxPosition', label: 'UpperLimit', t: 'num', step: 0.5, group: 'Límites' },
+  ];
+  const JOINT_PROPS = {
+    Weld: [...jointCommon, cfFields('c0', 'C0'), cfFields('c1', 'C1')],
+    WeldConstraint: [...jointCommon],
+    Motor6D: [...jointCommon, cfFields('c0', 'C0'), cfFields('c1', 'C1'), cfFields('transform', 'Transform'), ...drive(true)],
+    Hinge: [...jointCommon, cfFields('c0', 'Attachment0'), cfFields('c1', 'Attachment1'), ...drive(true), { k: 'damping', label: 'Damping (libre)', t: 'num', min: 0, step: 0.1, group: 'Movimiento' }],
+    Prismatic: [...jointCommon, cfFields('c0', 'Attachment0'), cfFields('c1', 'Attachment1'), ...drive(false)],
+    BallSocket: [...jointCommon, cfFields('c0', 'Attachment0'), cfFields('c1', 'Attachment1')],
+    Rod: [...jointCommon, cfFields('c0', 'Attachment0'), cfFields('c1', 'Attachment1'), { k: 'length', label: 'Length', t: 'num', min: 0.01, step: 0.5, group: 'Movimiento' }],
+    Rope: [...jointCommon, cfFields('c0', 'Attachment0'), cfFields('c1', 'Attachment1'), { k: 'length', label: 'Length', t: 'num', min: 0.01, step: 0.5, group: 'Movimiento' }],
+    Spring: [...jointCommon, cfFields('c0', 'Attachment0'), cfFields('c1', 'Attachment1'), { k: 'freeLength', label: 'FreeLength', t: 'num', min: 0, step: 0.5, group: 'Movimiento' }, { k: 'stiffness', label: 'Stiffness', t: 'num', min: 0, step: 5, group: 'Movimiento' }, { k: 'damping', label: 'Damping', t: 'num', min: 0, step: 0.5, group: 'Movimiento' }, { k: 'maxForce', label: 'MaxForce', t: 'num', min: 0, step: 100, group: 'Movimiento' }],
+  };
+
+  const nameProp = { k: 'name', label: 'Name', t: 'str', max: 80, group: 'Datos' };
+  const lightProps = (spot) => [nameProp, { k: 'enabled', label: 'Enabled', t: 'bool', def: true, group: 'Luz' }, { k: 'color', label: 'Color', t: 'color', def: '#ffffff', group: 'Luz' }, { k: 'brightness', label: 'Brightness', t: 'num', min: 0, max: 20, step: 0.1, def: 1, group: 'Luz' }, { k: 'range', label: 'Range (studs)', t: 'num', min: 1, max: 200, step: 1, def: 16, group: 'Luz' }].concat(spot ? [{ k: 'angle', label: 'Angle (°)', t: 'num', min: 5, max: 120, step: 5, def: 45, group: 'Luz' }] : []);
+  const emitterProps = [nameProp, { k: 'enabled', label: 'Enabled', t: 'bool', def: true, group: 'Emisor' }, { k: 'rate', label: 'Rate (por s)', t: 'num', min: 0, max: 100, step: 1, def: 20, group: 'Emisor' }, { k: 'lifetime', label: 'Lifetime (s)', t: 'num', min: 0.1, max: 10, step: 0.1, def: 1.5, group: 'Emisor' }, { k: 'speed', label: 'Speed', t: 'num', min: 0, max: 50, step: 0.5, def: 4, group: 'Emisor' }, { k: 'spread', label: 'SpreadAngle (°)', t: 'num', min: 0, max: 180, step: 5, def: 25, group: 'Emisor' }, { k: 'size', label: 'Size', t: 'num', min: 0.05, max: 10, step: 0.05, def: 0.5, group: 'Emisor' }, { k: 'color', label: 'Color', t: 'color', def: '#ffaa33', group: 'Emisor' }, { k: 'color2', label: 'Color final', t: 'color', def: '#ff3300', group: 'Emisor' }, { k: 'acceleration', label: 'Acceleration Y', t: 'num', min: -50, max: 50, step: 0.5, def: 2, group: 'Emisor' }];
+
+  const INSTANCE_PROPS = {
+    Folder: [nameProp],
+    Model: [nameProp, { k: 'primaryPart', label: 'PrimaryPart', t: 'part', group: 'Model', hint: 'Pieza de referencia del modelo' }],
+    Humanoid: [nameProp, { k: 'displayName', label: 'DisplayName', t: 'str', max: 40, group: 'Humanoid' }, { k: 'health', label: 'Health', t: 'num', min: 0, step: 1, def: 100, group: 'Humanoid' }, { k: 'maxHealth', label: 'MaxHealth', t: 'num', min: 0, step: 1, def: 100, group: 'Humanoid' }, { k: 'walkSpeed', label: 'WalkSpeed', t: 'num', min: 0, step: 1, def: 16, group: 'Humanoid' }, { k: 'jumpPower', label: 'JumpPower', t: 'num', min: 0, step: 1, def: 50, group: 'Humanoid' }, { k: 'hipHeight', label: 'HipHeight', t: 'num', min: 0, step: 0.1, def: 2, group: 'Humanoid' }],
+    Attachment: [nameProp, { k: 'x', label: 'Position X', t: 'num', step: 0.25, def: 0, group: 'Attachment' }, { k: 'y', label: 'Position Y', t: 'num', step: 0.25, def: 0, group: 'Attachment' }, { k: 'z', label: 'Position Z', t: 'num', step: 0.25, def: 0, group: 'Attachment' }],
+    PointLight: lightProps(false),
+    SpotLight: lightProps(true),
+    SurfaceLight: lightProps(true),
+    ParticleEmitter: emitterProps,
+    Fire: emitterProps,
+    Smoke: emitterProps,
+    Sparkles: emitterProps,
+  };
+  const EMITTER_PRESETS = {
+    ParticleEmitter: {},
+    Fire: { rate: 40, lifetime: 0.9, speed: 2.5, spread: 20, size: 0.6, color: '#ffcc33', color2: '#ff3300', acceleration: 4 },
+    Smoke: { rate: 12, lifetime: 3, speed: 2, spread: 25, size: 1.2, color: '#999999', color2: '#333333', acceleration: 1 },
+    Sparkles: { rate: 25, lifetime: 1.2, speed: 5, spread: 180, size: 0.2, color: '#ffee88', color2: '#ffffff', acceleration: -4 },
+  };
+
+  // Catálogo para el menú «Objetos». `needs`: 'part' = requiere una pieza seleccionada como padre/Part0.
+  const CATALOG = [
+    { cat: 'Organización', items: [{ cls: 'Model', icon: '🗂', es: 'Model (agrupa piezas)' }, { cls: 'Folder', icon: '📁', es: 'Folder' }, { cls: 'Humanoid', icon: '🧍', es: 'Humanoid (datos)', needs: 'model' }, { cls: 'Attachment', icon: '📍', es: 'Attachment', needs: 'part' }] },
+    { cat: 'Uniones', items: [{ cls: 'Weld', icon: '🔗', es: 'Weld (soldadura con offsets)', needs: 'part' }, { cls: 'WeldConstraint', icon: '🧷', es: 'WeldConstraint', needs: 'part' }, { cls: 'Motor6D', icon: '⚙', es: 'Motor6D (articulación animable)', needs: 'part' }, { cls: 'Hinge', icon: '🚪', es: 'HingeConstraint (bisagra)', needs: 'part' }, { cls: 'BallSocket', icon: '⚽', es: 'BallSocketConstraint (rótula)', needs: 'part' }, { cls: 'Prismatic', icon: '↔', es: 'PrismaticConstraint (riel)', needs: 'part' }, { cls: 'Rod', icon: '📏', es: 'RodConstraint (varilla)', needs: 'part' }, { cls: 'Rope', icon: '🪢', es: 'RopeConstraint (cuerda)', needs: 'part' }, { cls: 'Spring', icon: '🌀', es: 'SpringConstraint (resorte)', needs: 'part' }] },
+    { cat: 'Luces', items: [{ cls: 'PointLight', icon: '💡', es: 'PointLight', needs: 'part' }, { cls: 'SpotLight', icon: '🔦', es: 'SpotLight', needs: 'part' }, { cls: 'SurfaceLight', icon: '🖥', es: 'SurfaceLight', needs: 'part' }] },
+    { cat: 'Efectos', items: [{ cls: 'ParticleEmitter', icon: '✨', es: 'ParticleEmitter', needs: 'part' }, { cls: 'Fire', icon: '🔥', es: 'Fire', needs: 'part' }, { cls: 'Smoke', icon: '💨', es: 'Smoke', needs: 'part' }, { cls: 'Sparkles', icon: '🎇', es: 'Sparkles', needs: 'part' }] },
+  ];
+  const ICONS = { Model: '🗂', Folder: '📁', Humanoid: '🧍', Attachment: '📍', Weld: '🔗', WeldConstraint: '🧷', Motor6D: '⚙', Hinge: '🚪', BallSocket: '⚽', Prismatic: '↔', Rod: '📏', Rope: '🪢', Spring: '🌀', PointLight: '💡', SpotLight: '🔦', SurfaceLight: '🖥', ParticleEmitter: '✨', Fire: '🔥', Smoke: '💨', Sparkles: '🎇' };
+  const isJoint = cls => CrixJoints.CLASSES.includes(cls);
+
+  function instanceDefaults(cls) {
+    const out = {};
+    for (const p of INSTANCE_PROPS[cls] || []) if (p.def !== undefined) out[p.k] = p.def;
+    Object.assign(out, EMITTER_PRESETS[cls] || {});
+    if (cls === 'Humanoid') out.displayName = '';
+    return out;
+  }
+  // Valida una instancia no-unión: { id, class, name, parent, props }.
+  function sanitizeInstance(src, fallbackId) {
+    const s = src && typeof src === 'object' ? src : {};
+    const cls = INSTANCE_PROPS[s.class] ? s.class : 'Folder';
+    const props = { ...instanceDefaults(cls) };
+    const given = s.props && typeof s.props === 'object' ? s.props : {};
+    for (const p of INSTANCE_PROPS[cls]) {
+      if (p.k === 'name' || given[p.k] === undefined) continue;
+      const v = given[p.k];
+      if (p.t === 'num') props[p.k] = clamp(num(v, p.def || 0), p.min === undefined ? -1e6 : p.min, p.max === undefined ? 1e6 : p.max);
+      else if (p.t === 'bool') props[p.k] = v !== false;
+      else if (p.t === 'color') props[p.k] = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(v)) ? String(v) : (p.def || '#ffffff');
+      else props[p.k] = String(v).slice(0, p.max || 120);
+    }
+    return { id: String(s.id || fallbackId || 'i' + Math.random().toString(36).slice(2, 9)).slice(0, 120), class: cls, name: String(s.name || cls).slice(0, 80), parent: String(s.parent || '').slice(0, 120), props };
+  }
+
+  // ── Humanoide R6 como Model + piezas + Motor6D (sin ningún comportamiento) ──
+  // Devuelve { parts, joints, instances, rootId, modelId }. Todo queda con nombres estilo Roblox.
+  function buildHumanoidRig(o = {}) {
+    const uid = String(o.id || Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36));
+    const name = String(o.name || 'Rig').slice(0, 60), ry = num(o.ry, 0);
+    const bx = num(o.x), by = num(o.y, 2.5), bz = num(o.z);
+    const skin = o.skin || '#f0bf98', shirt = o.shirt || '#4466aa', pants = o.pants || '#333a55';
+    const modelId = 'm' + uid, rootId = 'p' + uid + 'r';
+    const cos = Math.cos(ry), sin = Math.sin(ry);
+    const at = (dx, dy, dz) => ({ x: bx + dx * cos + dz * sin, y: by + dy, z: bz - dx * sin + dz * cos });
+    const mk = (suffix, nm, type, off, size, color, extra) => Object.assign({ id: 'p' + uid + suffix, type, name: nm, ...at(off[0], off[1], off[2]), sx: size[0], sy: size[1], sz: size[2], rx: 0, ry, rz: 0, color, material: 'SmoothPlastic', anchored: true, canCollide: false, transparent: 0, castShadow: true, parent: modelId }, extra || {});
+    // Alturas (suelo = by-2.5): piernas centro -1.5, torso +0.5, cabeza +2.0 respecto de la raíz.
+    const parts = [
+      mk('r', 'HumanoidRootPart', 'Block', [0, 0, 0], [2, 5, 1], '#ffffff', { transparent: 1, canCollide: true, anchored: o.anchored === true, castShadow: false }),
+      mk('t', 'Torso', 'Block', [0, 0.5, 0], [2, 2, 1], shirt),
+      mk('h', 'Head', 'Sphere', [0, 2.1, 0], [1.2, 1.2, 1.2], skin),
+      mk('la', 'Left Arm', 'Block', [-1.5, 0.5, 0], [1, 2, 1], skin),
+      mk('ra', 'Right Arm', 'Block', [1.5, 0.5, 0], [1, 2, 1], skin),
+      mk('ll', 'Left Leg', 'Block', [-0.5, -1.5, 0], [1, 2, 1], pants),
+      mk('rl', 'Right Leg', 'Block', [0.5, -1.5, 0], [1, 2, 1], pants),
+    ];
+    const P = suffix => 'p' + uid + suffix;
+    const J = (suffix, nm, p0, p1, c0, c1, axis) => CrixJoints.sanitize({ id: 'j' + uid + suffix, class: 'Motor6D', name: nm, part0: P(p0), part1: P(p1), c0: { x: c0[0], y: c0[1], z: c0[2] }, c1: { x: c1[0], y: c1[1], z: c1[2] }, axis, parent: modelId }, 'j' + uid + suffix);
+    const joints = [
+      J('rj', 'RootJoint', 'r', 't', [0, 0.5, 0], [0, 0, 0], 'y'),
+      J('nk', 'Neck', 't', 'h', [0, 1, 0], [0, -0.6, 0], 'y'),
+      J('ls', 'Left Shoulder', 't', 'la', [-1.5, 1, 0], [0, 1, 0], 'x'),
+      J('rs', 'Right Shoulder', 't', 'ra', [1.5, 1, 0], [0, 1, 0], 'x'),
+      J('lh', 'Left Hip', 't', 'll', [-0.5, -1, 0], [0, 1, 0], 'x'),
+      J('rh', 'Right Hip', 't', 'rl', [0.5, -1, 0], [0, 1, 0], 'x'),
+    ];
+    // Sin ningún Weld/Motor6D de más: el Torso cuelga de la raíz con RootJoint y el resto del Torso.
+    const instances = [
+      { id: modelId, class: 'Model', name, parent: '', props: { primaryPart: rootId } },
+      { id: 'i' + uid + 'hum', class: 'Humanoid', name: 'Humanoid', parent: modelId, props: { displayName: name, health: 100, maxHealth: 100, walkSpeed: 16, jumpPower: 50, hipHeight: 2 } },
+    ];
+    parts[0].attributes = { Health: 100, MaxHealth: 100, WalkSpeed: 16, JumpPower: 50, DisplayName: name };
+    return { parts, joints, instances, rootId, modelId };
+  }
+
+  // Valores de la ficha del Humanoid → atributos de la raíz del modelo (así los scripts los leen con getAttribute).
+  function humanoidAttributes(props) {
+    return { Health: num(props.health, 100), MaxHealth: num(props.maxHealth, 100), WalkSpeed: num(props.walkSpeed, 16), JumpPower: num(props.jumpPower, 50), HipHeight: num(props.hipHeight, 2), DisplayName: String(props.displayName || '') };
+  }
+
+  // Datos estáticos de cada Model para game.getModel(): ids de piezas y uniones por nombre + valores del Humanoid.
+  function buildModelsInfo(parts, joints, instances) {
+    const out = [];
+    for (const m of (instances || []).filter(i => i && i.class === 'Model').slice(0, 200)) {
+      const info = { id: m.id, name: m.name, root: (m.props && m.props.primaryPart) || '', parts: {}, joints: {}, humanoid: null };
+      for (const p of parts || []) if (p && p.parent === m.id && p.name) info.parts[p.name] = p.id;
+      for (const j of joints || []) if (j && j.parent === m.id && j.name) info.joints[j.name] = j.id;
+      const h = (instances || []).find(i => i && i.class === 'Humanoid' && i.parent === m.id);
+      if (h) info.humanoid = humanoidAttributes(h.props || {});
+      out.push(info);
+    }
+    return out;
+  }
+
+  return { buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };
+});
