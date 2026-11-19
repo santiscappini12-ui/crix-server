@@ -3380,13 +3380,14 @@ function refreshExplorer() {
     }
     html2 += '</div><div class="exp-children">';
     if (f.id === 'Workspace') {
-      html2 += stParts.map((p,i) => ({p,i})).filter(({p}) => !query || (p.data.name+' '+p.data.type).toLowerCase().includes(query)).map(({p,i}) =>
+      html2 += stParts.map((p,i) => ({p,i})).filter(({p}) => !(window.CrixExt && CrixExt.isModelMember(p))).filter(({p}) => !query || (p.data.name+' '+p.data.type).toLowerCase().includes(query)).map(({p,i}) =>
         '<div class="exp-item '+(selPart===p?'sel':'')+'" onclick="selectPart(stParts['+i+'])">'+
         '<span style="font-size:10px">'+typeIcon(p.data.type)+'</span>'+
         '<span style="flex:1">'+esc(p.data.name)+'</span>'+(p.data.type==='Spawn'||p.data.isNPC?'':(p.data.anchored!==false?'<span title="Anclada" style="font-size:9px;opacity:.7">🔒</span>':'<span title="Suelta: cae con la gravedad" style="font-size:9px">🔓</span>'))+
         '<span class="exp-ctx" onclick="event.stopPropagation();selPart=stParts['+i+'];stuDelete()">✕</span>'+
         '</div>'
       ).join('');
+      html2 += (window.CrixExt ? CrixExt.workspaceModelsHtml(query) : '');
     }
     html2 += scripts.map(s =>
       '<div class="exp-item" onclick="'+(s.type==='Sound'?'openSoundProps':'openCodeEditor')+'(\''+s.id+'\')">'+

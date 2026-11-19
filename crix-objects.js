@@ -180,5 +180,23 @@
     return out;
   }
 
-  return { buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };
+  // NPC antiguos (pieza con isNPC, IA y vida incorporadas) → Model de partes + Motor6D + Humanoid, sin comportamiento.
+  // Determinista: los ids salen del id viejo, así editor, cliente y servidor generan lo mismo.
+  function migrateLegacyNpcs(map) {
+    const src = map && Array.isArray(map.parts) ? map.parts : [];
+    if (!src.some(p => p && p.isNPC)) return { parts: src, joints: (map && map.joints) || [], instances: (map && map.instances) || [], converted: 0 };
+    const parts = [], joints = [], instances = []; let converted = 0;
+    for (const p of src) {
+      if (!p || !p.isNPC) { parts.push(p); continue; }
+      converted++;
+      const rig = buildHumanoidRig({ id: String(p.id || 'npc' + converted).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60), name: p.name || 'NPC', x: num(p.x), y: num(p.y) + 2, z: num(p.z), ry: num(p.ry), shirt: /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : undefined, skin: /^#[0-9a-f]{6}$/i.test(p.skinColor) ? p.skinColor : undefined, anchored: p.anchored === true });
+      const hp = Math.max(0, num(p.maxHp, num(p.hp, 100)));
+      const hum = rig.instances.find(i => i.class === 'Humanoid');
+      if (hum) { hum.props.maxHealth = hp; hum.props.health = Math.max(0, num(p.hp, hp)); rig.parts[0].attributes = humanoidAttributes(hum.props); }
+      parts.push(...rig.parts); joints.push(...rig.joints); instances.push(...rig.instances);
+    }
+    return { parts, joints: ((map && map.joints) || []).concat(joints), instances: ((map && map.instances) || []).concat(instances), converted };
+  }
+
+  return { migrateLegacyNpcs, buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };
 });

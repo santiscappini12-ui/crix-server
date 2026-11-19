@@ -362,6 +362,7 @@ function normalizeRoomPart(id, source = {}) {
 }
 
 function initializeRoomWorld(room, map) {
+  { const legacy=CrixObjects.migrateLegacyNpcs(map||{});if(legacy.converted)map={...map,parts:legacy.parts,joints:legacy.joints,instances:legacy.instances}; }   // NPC antiguos → Model sin comportamiento
   room.avatars={}; room.npcs={};
   room.worldParts={}; room.basePartIds=new Set(); room.changedPartIds=new Set(); room.removedPartIds=new Set(); room.physicsVelocities={};
   for(const [index,source] of (Array.isArray(map?.parts)?map.parts:[]).entries()){

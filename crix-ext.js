@@ -4,7 +4,7 @@
 (function () {
   const J = window.CrixJoints, O = window.CrixObjects;
   if (!J || !O) return;
-  const S = { joints: [], instances: [], sel: null, preview: null, fx: null };   // editor
+  const S = { joints: [], instances: [], sel: null, preview: null, fx: null, open: new Set() };   // editor
   const G = { joints: [], instances: [], state: {}, vel: {}, fx: null, t: 0, driven: new Set(), used: new Set(), errors: new Set(), targets: new Map() }; // juego
   const FX_CLASSES = ['PointLight', 'SpotLight', 'SurfaceLight', 'ParticleEmitter', 'Fire', 'Smoke', 'Sparkles'];
   const log = (lvl, src, txt) => { if (window.CrixConsole) CrixConsole.add(lvl, src, txt); };
@@ -64,20 +64,35 @@
   }
 
   // ── Explorador ──
-  function explorerHtml() {
-    const row = (kind, id, icon, name, extra) => `<div class="exp-item ${S.sel && S.sel.kind === kind && S.sel.id === id ? 'sel' : ''}" onclick="CrixExt.select('${kind}','${esc2(id)}')"><span style="font-size:10px">${icon}</span><span style="flex:1">${esc2(name)}</span>${extra || ''}<span class="exp-ctx" onclick="event.stopPropagation();CrixExt.remove('${kind}','${esc2(id)}')">✕</span></div>`;
-    const models = S.instances.filter(i => i.class === 'Model'), others = S.instances.filter(i => i.class !== 'Model');
-    const total = S.joints.length + S.instances.length;
-    let h = '<div class="exp-folder"><div class="exp-folder-hd open" onclick="toggleFolder(this)"><span class="exp-arrow">▶</span><span>🧩</span><span style="flex:1;font-size:11px">Objetos (Models, Joints, FX)</span>' + (total ? `<span style="font-size:9px;color:var(--text3)">${total}</span>` : '') + '<button class="exp-ctx" style="opacity:1;color:var(--acc);font-size:14px;font-weight:700;padding:0 5px;line-height:1" onclick="event.stopPropagation();CrixExt.openCatalog()">+</button></div><div class="exp-children">';
-    for (const m of models) {
-      const n = stParts.filter(e => e.data.parent === m.id).length;
-      h += row('inst', m.id, '🗂', m.name, `<span style="font-size:9px;color:var(--text3)">${n} piezas</span>`);
-      for (const c of S.instances.filter(i => i.parent === m.id)) h += row('inst', c.id, '　' + (O.ICONS[c.class] || '•'), c.name);
-      for (const j of S.joints.filter(j => j.parent === m.id)) h += row('joint', j.id, '　' + (O.ICONS[j.class] || '🔗'), j.name);
+  const rowHtml = (kind, id, icon, name, extra, click, indent) => `<div class="exp-item ${S.sel && S.sel.kind === kind && S.sel.id === id ? 'sel' : ''}" style="${indent ? 'padding-left:' + (12 + indent * 14) + 'px' : ''}" onclick="${click || `CrixExt.select('${kind}','${esc2(id)}')`}"><span style="font-size:10px">${icon}</span><span style="flex:1">${esc2(name)}</span>${extra || ''}<span class="exp-ctx" onclick="event.stopPropagation();CrixExt.remove('${kind}','${esc2(id)}')">✕</span></div>`;
+  const isModel = i => i.class === 'Model';
+  function isModelMember(p) { return !!p.data.parent && S.instances.some(i => isModel(i) && i.id === p.data.parent); }
+  // Los Model viven dentro de Workspace, con sus piezas, uniones y Humanoid anidados (como en Roblox Studio).
+  function workspaceModelsHtml(query) {
+    let h = ''; const q = (query || '').toLowerCase();
+    for (const m of S.instances.filter(isModel)) {
+      const members = stParts.map((e, i) => ({ e, i })).filter(({ e }) => e.data.parent === m.id);
+      const kids = S.instances.filter(i => i.parent === m.id), js = S.joints.filter(j => j.parent === m.id);
+      if (q && !(m.name + ' model').toLowerCase().includes(q) && !members.some(({ e }) => e.data.name.toLowerCase().includes(q))) continue;
+      const open = S.open.has(m.id) || !!q;
+      const arrow = `<span onclick="event.stopPropagation();CrixExt.toggleModel('${esc2(m.id)}')" style="cursor:pointer;display:inline-block;width:14px;font-size:9px">${open ? '▼' : '▶'}</span>`;
+      h += `<div class="exp-item ${S.sel && S.sel.id === m.id ? 'sel' : ''}" onclick="CrixExt.select('inst','${esc2(m.id)}')">${arrow}<span style="font-size:10px">🗂</span><span style="flex:1">${esc2(m.name)}</span><span style="font-size:9px;color:var(--text3)">${members.length} piezas</span><span class="exp-ctx" onclick="event.stopPropagation();CrixExt.remove('inst','${esc2(m.id)}')">✕</span></div>`;
+      if (!open) continue;
+      for (const { e, i } of members) h += `<div class="exp-item ${selPart === e ? 'sel' : ''}" style="padding-left:30px" onclick="selectPart(stParts[${i}])"><span style="font-size:10px">${typeIcon(e.data.type)}</span><span style="flex:1">${esc2(e.data.name)}</span><span class="exp-ctx" onclick="event.stopPropagation();selPart=stParts[${i}];stuDelete()">✕</span></div>`;
+      for (const j of js) h += rowHtml('joint', j.id, O.ICONS[j.class] || '🔗', j.name, `<span style="font-size:9px;color:var(--text3)">${j.class}</span>`, '', 2);
+      for (const c of kids) h += rowHtml('inst', c.id, O.ICONS[c.class] || '•', c.name, '', '', 2);
     }
-    for (const j of S.joints.filter(j => !models.some(m => m.id === j.parent))) h += row('joint', j.id, O.ICONS[j.class] || '🔗', j.name, `<span style="font-size:9px;color:var(--text3)">${j.class}</span>`);
-    for (const i of others.filter(i => !models.some(m => m.id === i.parent) || false)) if (!models.some(m => m.id === i.parent)) h += row('inst', i.id, O.ICONS[i.class] || '•', i.name, `<span style="font-size:9px;color:var(--text3)">${i.class}</span>`);
-    if (!total) h += '<div style="padding:6px 12px;font-size:10px;color:var(--text3)">Vacío — tocá + para insertar</div>';
+    return h;
+  }
+  function toggleModel(id) { if (S.open.has(id)) S.open.delete(id); else S.open.add(id); refreshExplorer(); }
+  function explorerHtml() {
+    const inModel = x => S.instances.some(m => isModel(m) && m.id === x.parent);
+    const joints = S.joints.filter(j => !inModel(j)), others = S.instances.filter(i => !isModel(i) && !inModel(i));
+    const total = joints.length + others.length;
+    let h = '<div class="exp-folder"><div class="exp-folder-hd open" onclick="toggleFolder(this)"><span class="exp-arrow">▶</span><span>🧩</span><span style="flex:1;font-size:11px">Objetos sueltos</span>' + (total ? `<span style="font-size:9px;color:var(--text3)">${total}</span>` : '') + '<button class="exp-ctx" style="opacity:1;color:var(--acc);font-size:14px;font-weight:700;padding:0 5px;line-height:1" onclick="event.stopPropagation();CrixExt.openCatalog()">+</button></div><div class="exp-children">';
+    for (const j of joints) h += rowHtml('joint', j.id, O.ICONS[j.class] || '🔗', j.name, `<span style="font-size:9px;color:var(--text3)">${j.class}</span>`);
+    for (const i of others) h += rowHtml('inst', i.id, O.ICONS[i.class] || '•', i.name, `<span style="font-size:9px;color:var(--text3)">${i.class}</span>`);
+    if (!total) h += '<div style="padding:6px 12px;font-size:10px;color:var(--text3)">Folders, uniones, luces y efectos sueltos · tocá + para insertar</div>';
     return h + '</div></div>';
   }
 
@@ -118,7 +133,9 @@
       const msgs = J.diagnose([o], partsDict());
       body = `<div style="padding:8px 12px;font-size:11px;color:var(--text2)">${O.ICONS[o.class] || '🔗'} <b>${o.class}</b></div>` + (msgs.length ? `<div style="margin:0 10px 6px;padding:6px 8px;border-radius:8px;background:rgba(239,68,68,.12);color:#ff9b9b;font-size:10px">${msgs.map(esc2).join('<br>')}</div>` : '') + groups('joint', o.id, O.JOINT_PROPS[o.class] || [], o, p => o[p.k]);
     } else {
-      body = `<div style="padding:8px 12px;font-size:11px;color:var(--text2)">${O.ICONS[o.class] || '•'} <b>${o.class}</b></div>` + groups('inst', o.id, O.INSTANCE_PROPS[o.class] || [], o, p => p.k === 'name' ? o.name : o.props[p.k]) + (o.class === 'Model' ? `<div style="padding:8px;display:grid;gap:4px"><button class="st-btn" onclick="CrixExt.addSelectedToModel('${o.id}')">＋ Meter la pieza seleccionada</button><button class="st-btn" onclick="CrixExt.addExampleScript('${o.id}')">📜 Agregar script de ejemplo</button></div>` : '');
+      const mp = o.class === 'Model' ? modelPos(o) : null;
+      const posHtml = mp ? `<div style="padding:6px 12px 2px;font-size:9px;letter-spacing:1px;color:var(--text3)">POSICIÓN (mueve todo el Model)</div><div class="prop-row"><div class="prop-grid3">${['x', 'y', 'z'].map(ax => `<input class="prop-inp" type="number" step="0.5" value="${mp[ax].toFixed(2)}" onchange="CrixExt.moveModelTo('${o.id}','${ax}',this.value)">`).join('')}</div></div>` : '';
+      body = `<div style="padding:8px 12px;font-size:11px;color:var(--text2)">${O.ICONS[o.class] || '•'} <b>${o.class}</b></div>` + posHtml + groups('inst', o.id, O.INSTANCE_PROPS[o.class] || [], o, p => p.k === 'name' ? o.name : o.props[p.k]) + (o.class === 'Model' ? `<div style="padding:8px;display:grid;gap:4px"><button class="st-btn" onclick="CrixExt.addSelectedToModel('${o.id}')">＋ Meter la pieza seleccionada</button><button class="st-btn" onclick="CrixExt.addExampleScript('${o.id}')">📜 Agregar script de ejemplo</button><button class="st-btn red" onclick="CrixExt.removeModelWithParts('${o.id}')">✕ Borrar Model y sus piezas</button></div>` : '');
     }
     PANEL().innerHTML = body + `<div style="padding:8px;display:flex;gap:4px"><button class="st-btn red" style="flex:1" onclick="CrixExt.remove('${sel.kind}','${esc2(sel.id)}')">✕ Borrar</button></div>`;
   }
@@ -180,6 +197,22 @@
     if (S.sel && S.sel.id === id) { S.sel = null; if (typeof deselect === 'function') deselect(); }
     refreshExplorer();
   }
+  function members(modelId) { return stParts.filter(e => e.data.parent === modelId); }
+  function modelPos(m) { const r = entryOf(m.props.primaryPart) || members(m.id)[0]; return r ? { x: r.data.x, y: r.data.y, z: r.data.z } : null; }
+  function moveModelTo(id, axis, raw) {
+    const m = S.instances.find(i => i.id === id); if (!m) return; const cur = modelPos(m); if (!cur) return;
+    const delta = (parseFloat(raw) || 0) - cur[axis]; if (!delta) return; snapshotChange();
+    for (const e of members(id)) { e.data[axis] += delta; syncMesh(e); }
+    updateSelectionOutline && updateSelectionOutline(); renderSel();
+  }
+  function removeModelWithParts(id) {
+    const ms = members(id); if (ms.length && !confirm('¿Borrar el Model y sus ' + ms.length + ' piezas?')) return;
+    snapshotChange(); const ids = new Set(ms.map(e => e.data.id));
+    ms.forEach(e => stScene.remove(e.mesh)); stParts = stParts.filter(e => !ids.has(e.data.id));
+    S.joints = S.joints.filter(j => j.parent !== id && !ids.has(j.part0) && !ids.has(j.part1));
+    S.instances = S.instances.filter(i => i.id !== id && i.parent !== id && !ids.has(i.parent));
+    S.sel = null; if (typeof deselect === 'function') deselect(); rebuildEditorFx(); refreshExplorer(); if (typeof updateStStatus === 'function') updateStStatus();
+  }
   function addSelectedToModel(modelId) {
     if (typeof selPart === 'undefined' || !selPart) { showToast('Seleccioná una pieza en el visor o el Explorador primero'); return; }
     const m = S.instances.find(i => i.id === modelId); if (!m) return; snapshotChange();
@@ -224,6 +257,7 @@
     wrap.onclick = e => { if (e.target === wrap) closeCatalog(); };
     const sel = (typeof selPart !== 'undefined' && selPart) ? selPart.data.name : null;
     wrap.innerHTML = `<div style="background:var(--bg2,#12141c);border:1px solid var(--border,#2a3350);border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:78vh;overflow:auto;padding:14px 14px 22px"><div style="display:flex;align-items:center;margin-bottom:6px"><b style="flex:1;font-size:14px">🧩 Insertar objeto</b><button class="st-btn" onclick="CrixExt.closeCatalog()">✕</button></div><div style="font-size:10px;color:var(--text3);margin-bottom:8px">${sel ? 'Pieza seleccionada: <b>' + esc2(sel) + '</b>' : 'Tip: seleccioná una pieza antes para uniones, luces y efectos'}</div>` +
+      '<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">PERSONAJES (Model + Motor6D, sin comportamiento)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><button class="st-btn" style="text-align:left;padding:9px 8px;font-size:11px" onclick="CrixExt.spawnPreset(\'__blank\')">🧍 Rig R6 vacío</button>' + (typeof NPC_LIB !== 'undefined' ? NPC_LIB.map(n => `<button class="st-btn" style="text-align:left;padding:9px 8px;font-size:11px" onclick="CrixExt.spawnPreset('${n.id}')">${n.icon} Rig ${esc2(n.name)}</button>`).join('') : '') + '</div>' +
       O.CATALOG.map(c => `<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">${c.cat.toUpperCase()}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${c.items.map(i => `<button class="st-btn" style="text-align:left;padding:9px 8px;font-size:11px" onclick="CrixExt.insert('${i.cls}')">${i.icon} ${esc2(i.es)}</button>`).join('')}</div>`).join('') + '</div>';
     document.body.appendChild(wrap);
   }
@@ -232,7 +266,9 @@
   // ── Panel de la pieza: propiedades extra estilo Roblox ──
   function extraPartHtml(entry) {
     const d = entry.data; const sch = O.PART_PROPS;
-    return '<div style="padding:8px 12px 2px;font-size:9px;letter-spacing:1px;color:var(--text3)">PROPIEDADES ROBLOX</div>' + groups('part', d.id, sch, d, p => {
+    const mdl = d.parent && S.instances.find(i => i.id === d.parent && i.class === 'Model');
+    const goModel = mdl ? `<div style="padding:6px 10px 0"><button class="st-btn" style="width:100%" onclick="CrixExt.select('inst','${esc2(mdl.id)}')">🗂 Ir al Model «${esc2(mdl.name)}»</button></div>` : '';
+    return goModel + '<div style="padding:8px 12px 2px;font-size:9px;letter-spacing:1px;color:var(--text3)">PROPIEDADES ROBLOX</div>' + groups('part', d.id, sch, d, p => {
       if (p.k === 'type') return d.type; if (p.k === 'tags') return d.tags || []; if (p.k === 'attributes') return d.attributes || {};
       return d[p.k] === undefined ? p.def : d[p.k];
     });
@@ -261,7 +297,13 @@
     rig.joints.forEach(j => S.joints.push(j)); rig.instances.forEach(i => S.instances.push(i));
     closeModalSafe('mo-npc'); refreshExplorer(); if (typeof updateStStatus === 'function') updateStStatus();
     showToast('🤖 «' + name + '» creado: un Model de partes con Motor6D. Sin comportamientos: se programa con Scripts');
-    select('inst', rig.modelId);
+    S.open.add(rig.modelId); select('inst', rig.modelId);
+  }
+  function spawnPreset(id) {
+    closeCatalog();
+    if (id === '__blank') return spawnRig('Rig');
+    const n = (typeof NPC_LIB !== 'undefined' ? NPC_LIB : []).find(x => x.id === id); if (!n) return;
+    spawnRig(n.name || 'Rig', { skin: n.skin, shirt: n.color, pants: n.pants });
   }
   function closeModalSafe(id) { try { closeModal(id); } catch (_) { /* nada */ } }
   function exampleScript(modelName) {
@@ -289,6 +331,7 @@
   // ── Barra: botones nuevos ──
   function addButtons() {
     const npc = document.querySelector('button[onclick="openNpcPanel()"]'); if (!npc || document.getElementById('cx-obj-btn')) return;
+    npc.style.display = 'none';   // los personajes ya no son un objeto especial: se insertan desde 🧩 Objetos → Personajes
     const mk = (id, html, fn, title) => { const b = document.createElement('button'); b.className = 'st-btn'; b.id = id; b.innerHTML = html; b.title = title; b.onclick = fn; return b; };
     const prev = mk('cx-prev-btn', '🔗 Uniones', () => (S.preview ? stopPreview() : startPreview()), 'Probar Motor6D, Weld, bisagras, resortes…');
     const obj = mk('cx-obj-btn', '🧩 Objetos', openCatalog, 'Insertar Model, uniones, luces, efectos…');
@@ -316,7 +359,9 @@
     wrap('refreshExplorer', (orig, a, t) => { const r = orig.apply(t, a); try { const el = document.getElementById('explorer'); if (el && typeof stParts !== 'undefined') el.insertAdjacentHTML('beforeend', explorerHtml()); } catch (e) { log('error', 'Explorador', e.message); } return r; });
     wrap('renderProps', (orig, a, t) => { const r = orig.apply(t, a); try { const body = PANEL(); if (body) body.insertAdjacentHTML('beforeend', '<div id="cx-extra">' + extraPartHtml(a[0]) + '</div>'); } catch (e) { log('error', 'Inspector', e.message); } return r; });
     wrap('deselect', (orig, a, t) => { S.sel = null; return orig.apply(t, a); });
-    wrap('loadMyMap', (orig, a, t) => { const r = orig.apply(t, a); try { const m = getMaps()[stMapId]; loadFromMap(m); refreshExplorer(); } catch (e) { log('error', 'Studio', 'No se pudieron cargar los objetos: ' + e.message); } return r; });
+    wrap('loadMyMap', (orig, a, t) => { try { const maps = getMaps(), mp = maps[stMapId]; if (mp) { const leg = O.migrateLegacyNpcs(mp); if (leg.converted) { mp.parts = leg.parts; mp.joints = leg.joints; mp.instances = leg.instances; setMaps(maps); setTimeout(() => showToast('🔄 ' + leg.converted + ' NPC antiguo(s) convertido(s) a Model sin comportamiento'), 600); } } } catch (e) { log('error', 'Migración', e.message); }
+      const r = orig.apply(t, a); try { const m = getMaps()[stMapId]; loadFromMap(m); refreshExplorer(); } catch (e) { log('error', 'Studio', 'No se pudieron cargar los objetos: ' + e.message); } return r; });
+    wrap('_loadMap', (orig, a, t) => { try { const m = a[0]; const leg = O.migrateLegacyNpcs(m || {}); if (leg.converted) { m.parts = leg.parts; m.joints = leg.joints; m.instances = leg.instances; } } catch (e) { log('error', 'Migración', e.message); } return orig.apply(t, a); });
     wrap('studioSnapshot', (orig, a, t) => { const s = orig.apply(t, a); if (!s) return s; const o = JSON.parse(s); o.joints = S.joints; o.instances = S.instances; return JSON.stringify(o); });
     wrap('applyStudioSnapshot', (orig, a, t) => { try { const st = JSON.parse(a[0]); const maps = getMaps(); if (maps[stMapId]) { maps[stMapId].joints = st.joints || []; maps[stMapId].instances = st.instances || []; setMaps(maps); S.joints = (st.joints || []).map(x => ({ ...x })); S.instances = (st.instances || []).map(x => JSON.parse(JSON.stringify(x))); } } catch (_) { /* snapshot viejo */ } const r = orig.apply(t, a); rebuildEditorFx(); refreshExplorer(); return r; });
     wrap('clearSt', (orig, a, t) => { if (S.fx) S.fx.clear(); return orig.apply(t, a); });
@@ -433,6 +478,6 @@
     return true;
   }
 
-  window.CrixExt = { select, set: setProp, setCf, setPartProp, remove, insert, openCatalog, closeCatalog, addSelectedToModel, addExampleScript, isDriven, modelsInfo, gameLoad, gameStep, gameCommand, netPoses, editorFrame, state: S, game: G };
+  window.CrixExt = { isModelMember, workspaceModelsHtml, toggleModel, moveModelTo, removeModelWithParts, spawnPreset, select, set: setProp, setCf, setPartProp, remove, insert, openCatalog, closeCatalog, addSelectedToModel, addExampleScript, isDriven, modelsInfo, gameLoad, gameStep, gameCommand, netPoses, editorFrame, state: S, game: G };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
