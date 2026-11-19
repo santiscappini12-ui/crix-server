@@ -87,12 +87,12 @@ function normalizePlayers(players) {
   }));
 }
 
-function output(room, script, text, cls = '') {
+function output(room, script, text, cls = '', detail = '') {
   const now = Date.now();
   room.logs = room.logs.filter(time => now - time < 2000);
   if (room.logs.length >= 40) return;
   room.logs.push(now);
-  send({ type:'output', roomId:room.id, script:String(script || 'Script').slice(0,80), text:String(text || '').slice(0,500), cls:cls === 'warn' ? 'warn' : cls === 'err' ? 'err' : '' });
+  send({ type:'output', roomId:room.id, script:String(script || 'Script').slice(0,80), text:String(text || '').slice(0,500), cls:cls === 'warn' ? 'warn' : cls === 'err' ? 'err' : '', detail:String(detail || '').slice(0,800) });
 }
 
 function emitSceneCommand(room, command, payload) {
@@ -566,8 +566,9 @@ function noteCallFailure(room,index,error) {
   const count=(room.callFails.get(index)||0)+1;
   room.callFails.set(index,count);
   const name=room.scripts[index]?.name;
-  if (count>=MAX_CONSECUTIVE_CALL_FAILS) { room.disabledScripts.add(index); output(room,name,error.message+' — script desactivado tras '+count+' fallos seguidos','err'); }
-  else if (count===1) output(room,name,error.message+' (se reintentará)','err');
+  const detail=String(error&&error.stack||'').split('\n').slice(0,6).join('\n');
+  if (count>=MAX_CONSECUTIVE_CALL_FAILS) { room.disabledScripts.add(index); output(room,name,error.message+' — script desactivado tras '+count+' fallos seguidos','err',detail); }
+  else if (count===1) output(room,name,error.message+' (se reintentará)','err',detail);
 }
 function noteCallOk(room,index) { if (room.callFails) room.callFails.delete(index); }
 

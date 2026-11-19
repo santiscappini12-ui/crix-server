@@ -329,6 +329,10 @@ El asistente no usa *tool calling* nativo: el modelo escribe bloques ` ```crix:a
 
 Al ser un modelo sin filtros, cualquier persona con sesión podría usarlo para generar lo que quiera dentro de sus propios proyectos: si hace falta, `CRIX_AI_ADMIN_ONLY=1` o `CRIX_AI_RPM` bajo lo acotan.
 
+### Output (consola de mensajes y errores)
+
+**📟 Output** (botón en la barra del Hub, botón dentro de la partida o tecla **F9**) es una ventana flotante que se puede arrastrar y redimensionar. Muestra, con hora y origen (*Cliente*, *Servidor · NombreDelScript*, *Motor*, *Consola*), todo lo que imprimen `print`, `warn` y `error`, los errores de `LocalScript` y de `Script` de servidor (con el detalle desplegable al tocar la línea), los errores del motor que nadie atrapó y los `console.error/warn` mientras juegas o editas. Filtros por Info / Avisos / Errores / Sistema, búsqueda, copiar, limpiar, pausar el desplazamiento y colapso de líneas repetidas (×N). Se abre sola cuando aparece un error durante la partida (se puede apagar abajo a la derecha). Guarda hasta 1.500 líneas.
+
 ## Sincronización del mundo entre jugadores
 
 Todo lo que cambia en una partida online se ve igual para todos los jugadores de la instancia:
