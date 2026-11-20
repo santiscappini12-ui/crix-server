@@ -257,7 +257,7 @@
     wrap.onclick = e => { if (e.target === wrap) closeCatalog(); };
     const sel = (typeof selPart !== 'undefined' && selPart) ? selPart.data.name : null;
     wrap.innerHTML = `<div style="background:var(--bg2,#12141c);border:1px solid var(--border,#2a3350);border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:78vh;overflow:auto;padding:14px 14px 22px"><div style="display:flex;align-items:center;margin-bottom:6px"><b style="flex:1;font-size:14px">🧩 Insertar objeto</b><button class="st-btn" onclick="CrixExt.closeCatalog()">✕</button></div><div style="font-size:10px;color:var(--text3);margin-bottom:8px">${sel ? 'Pieza seleccionada: <b>' + esc2(sel) + '</b>' : 'Tip: seleccioná una pieza antes para uniones, luces y efectos'}</div>` +
-      '<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">PERSONAJES (Model + Motor6D, sin comportamiento)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><button class="st-btn" style="text-align:left;padding:9px 8px;font-size:11px" onclick="CrixExt.spawnPreset(\'__blank\')">🧍 Rig R6 vacío</button>' + (typeof NPC_LIB !== 'undefined' ? NPC_LIB.map(n => `<button class="st-btn" style="text-align:left;padding:9px 8px;font-size:11px" onclick="CrixExt.spawnPreset('${n.id}')">${n.icon} Rig ${esc2(n.name)}</button>`).join('') : '') + '</div>' +
+      '<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">PERSONAJES (Model + Motor6D, sin comportamiento)</div><div style=\"display:grid;grid-template-columns:1fr 1fr;gap:6px\"><button class=\"st-btn\" style=\"text-align:left;padding:9px 8px;font-size:11px\" onclick=\"CrixExt.spawnPreset(\'player\')\">🧍 Personaje (como un jugador)</button></div>' +
       O.CATALOG.map(c => `<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">${c.cat.toUpperCase()}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${c.items.map(i => `<button class="st-btn" style="text-align:left;padding:9px 8px;font-size:11px" onclick="CrixExt.insert('${i.cls}')">${i.icon} ${esc2(i.es)}</button>`).join('')}</div>`).join('') + '</div>';
     document.body.appendChild(wrap);
   }
@@ -292,22 +292,22 @@
   function spawnRig(name, colors) {
     snapshotChange();
     const t = stCamTarget || { x: 0, y: 0, z: 0 };
-    const rig = O.buildHumanoidRig({ name, x: Math.round(t.x + (Math.random() * 6 - 3)), y: 2.5 + 0.05, z: Math.round(t.z + (Math.random() * 6 - 3)), ry: 0, skin: colors && colors.skin, shirt: colors && colors.shirt, pants: colors && colors.pants });
+    const rig = O.buildHumanoidRig({ name, x: Math.round(t.x + (Math.random() * 6 - 3)), y: 1.55 + 0.05, z: Math.round(t.z + (Math.random() * 6 - 3)), ry: 0, skin: colors && colors.skin, shirt: colors && colors.shirt, pants: colors && colors.pants });
     rig.parts.forEach(p => addPartMesh({ ...p }));
     rig.joints.forEach(j => S.joints.push(j)); rig.instances.forEach(i => S.instances.push(i));
     closeModalSafe('mo-npc'); refreshExplorer(); if (typeof updateStStatus === 'function') updateStStatus();
-    showToast('🤖 «' + name + '» creado: un Model de partes con Motor6D. Sin comportamientos: se programa con Scripts');
+    showToast('🤖 «' + name + '» creado: un Model con las 25 piezas del avatar unidas por Motor6D. Sin comportamientos: se programa con Scripts');
     S.open.add(rig.modelId); select('inst', rig.modelId);
   }
   function spawnPreset(id) {
     closeCatalog();
-    if (id === '__blank') return spawnRig('Rig');
+    if (id === '__blank') id = 'player';
     const n = (typeof NPC_LIB !== 'undefined' ? NPC_LIB : []).find(x => x.id === id); if (!n) return;
-    spawnRig(n.name || 'Rig', { skin: n.skin, shirt: n.color, pants: n.pants });
+    spawnRig(n.name || 'Personaje', { skin: n.skin, shirt: n.color, pants: n.pants });
   }
   function closeModalSafe(id) { try { closeModal(id); } catch (_) { /* nada */ } }
   function exampleScript(modelName) {
-    return '// Ejemplo (borralo o cambialo): el NPC camina hacia adelante balanceando brazos y piernas.\n// Nada de esto viene por defecto: el NPC solo hace lo que programes.\nconst npc = game.getModel(' + JSON.stringify(modelName) + ');\nlet t = 0, z = 0;\nfunction onStart() {\n  if (!npc) throw new Error("No existe el Model en el mapa");\n  z = npc.rootPart.z;\n}\nfunction onUpdate(dt) {\n  t += dt; z += 4 * dt;\n  game.updatePart(npc.root, { z: z });\n  const s = Math.sin(t * 6) * 0.8;\n  game.updateJoint(npc.joints["Left Shoulder"], { mode: "servo", targetAngle: s, maxVelocity: 20 });\n  game.updateJoint(npc.joints["Right Shoulder"], { mode: "servo", targetAngle: -s, maxVelocity: 20 });\n  game.updateJoint(npc.joints["Left Hip"], { mode: "servo", targetAngle: -s, maxVelocity: 20 });\n  game.updateJoint(npc.joints["Right Hip"], { mode: "servo", targetAngle: s, maxVelocity: 20 });\n}\n';
+    return '// Ejemplo (borralo o cambialo): el NPC camina hacia adelante balanceando brazos y piernas.\n// Nada de esto viene por defecto: el NPC solo hace lo que programes.\nconst npc = game.getModel(' + JSON.stringify(modelName) + ');\nlet t = 0, z = 0;\nfunction onStart() {\n  if (!npc) throw new Error("No existe el Model en el mapa");\n  z = npc.rootPart.z;\n}\nfunction onUpdate(dt) {\n  t += dt; z += 4 * dt;\n  game.updatePart(npc.root, { z: z });\n  const s = Math.sin(t * 6) * 0.8;\n  game.updateJoint(npc.joints["UpperArmL"], { mode: "servo", targetAngle: s, maxVelocity: 20 });\n  game.updateJoint(npc.joints["UpperArmR"], { mode: "servo", targetAngle: -s, maxVelocity: 20 });\n  game.updateJoint(npc.joints["UpperLegL"], { mode: "servo", targetAngle: -s, maxVelocity: 20 });\n  game.updateJoint(npc.joints["UpperLegR"], { mode: "servo", targetAngle: s, maxVelocity: 20 });\n}\n';
   }
   function addExampleScript(modelId) {
     const m = S.instances.find(i => i.id === modelId); if (!m) return;
@@ -379,11 +379,10 @@
     };
     window.openNpcPanel = function () {
       const grid = document.getElementById('npc-grid'); if (!grid) return;
-      grid.innerHTML = '<div class="npc-card" onclick="spawnNpc(\'__blank\')" style="grid-column:1/-1"><div class="npc-icon">🧍</div><div class="npc-name">Rig R6 vacío</div><div class="npc-type">Model · 7 piezas · 6 Motor6D · sin comportamiento</div></div>' +
-        NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${esc2(n.name)}</div><div class="npc-type">Rig R6 · sin IA</div></div>`).join('');
+      grid.innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')" style="grid-column:1/-1"><div class="npc-icon">${n.icon}</div><div class="npc-name">${esc2(n.name)}</div><div class="npc-type">Se ve igual que un jugador · sin comportamiento</div></div>`).join('');
       openModal('mo-npc');
     };
-    const origSpawn = window.spawnNpc; window.spawnNpc = function (id) { if (id === '__blank') return spawnRig('Rig'); return origSpawn(id); };
+    const origSpawn = window.spawnNpc; window.spawnNpc = function (id) { return origSpawn(id === '__blank' ? 'player' : id); };
     // La física de vista previa del editor ignora las piezas que mueve una unión.
     wrap('stepEditorPhysics', (orig, a, t) => { const drv = S.driven; if (!drv || !S.preview) return orig.apply(t, a); const saved = []; for (const e of stParts) if (drv.has(e.data.id) && e.data.anchored === false) { saved.push(e); e.data.anchored = true; } try { return orig.apply(t, a); } finally { saved.forEach(e => { e.data.anchored = false; }); } });
   }

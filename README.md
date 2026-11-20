@@ -299,7 +299,7 @@ const caja = game.getPart("Caja");                // estado actual, también por
 
 **Límites actuales:** JavaScript es el lenguaje con soporte completo. CrixScript conserva una conversión básica de sintaxis tipo Lua; no es un intérprete completo. Los `Script` sí se ejecutan en el servidor y replican el mundo de su instancia; `LocalScript` es local, por lo que el estado que crean (GUI, monedas, piezas creadas por un LocalScript) es de cada jugador y no se comparte con los demás. Todavía no hay `RemoteEvent` reales entre cliente y servidor, almacenamiento persistente por jugador (DataStore), sonido ni animaciones personalizadas; los elementos *Sound*, *Bloom*, *Blur* y *SunRays* del Explorador son marcadores. `ServerScriptService` y `LocalScriptService` distinguen el tipo de ejecución, aunque la jerarquía de servicios todavía es básica. `isolated-vm` limita memoria y tiempo, pero ejecutar código público requiere mantener Node y el módulo nativo actualizados; para alojar scripts de personas desconocidas a gran escala conviene correr `script-runner.js` en un contenedor sin privilegios separado del servidor web. Esto todavía no incluye todas las capacidades de Roblox Studio o Unity, ni intérpretes para todos los lenguajes, binario o ensamblador.
 
-Los NPC incluidos se construyen como humanoides 3D con articulaciones básicas y animación procedural; todavía no hay editor visual de rigging, huesos ni animación (ver *Lo que todavía no existe en avatares y NPC*).
+Hay un solo tipo de NPC (🧍 Personaje) y se ve igual que un jugador; se construye como humanoide 3D con articulaciones básicas y animación procedural; todavía no hay editor visual de rigging, huesos ni animación (ver *Lo que todavía no existe en avatares y NPC*).
 
 ### Asistente de IA en Crix Hub
 
@@ -336,7 +336,7 @@ Crix Hub ahora tiene un modelo de objetos parecido al de Roblox Studio. **Nada t
 
 **Menú 🧩 Objetos** (barra del Hub, junto a NPC): inserta `Model`, `Folder`, `Humanoid` (solo datos), `Attachment`, uniones (`Weld`, `WeldConstraint`, `Motor6D`, `Hinge`, `BallSocket`, `Prismatic`, `Rod`, `Rope`, `Spring`), luces (`PointLight`, `SpotLight`, `SurfaceLight`) y efectos (`ParticleEmitter`, `Fire`, `Smoke`, `Sparkles`). Para uniones, luces y efectos primero se selecciona la pieza (Part0 / padre). Al elegir Part1 en el inspector la unión conserva la pose actual (nada salta).
 
-**NPC = Model.** Los NPC de la biblioteca ya no son una pieza con IA: son un `Model` de 7 piezas (HumanoidRootPart, Torso, Head, brazos y piernas) unidas por 6 `Motor6D` (RootJoint, Neck, Left/Right Shoulder, Left/Right Hip) y un `Humanoid` con sus valores. No caminan, no tienen vida ni dañan: eso lo escribe el script. Los mapas viejos con `isNPC` se convierten solos a Model al abrirlos o jugarlos (nombre, posición, color y vida pasan al Model/Humanoid; ya no hay IA). Los personajes se insertan desde 🧩 Objetos → Personajes y viven dentro de Workspace como cualquier Model.
+**NPC = Model.** Los NPC de la biblioteca ya no son una pieza con IA: son un `Model` con el esqueleto completo del avatar: HumanoidRootPart + 25 piezas (Hips, Spine, Chest, Neck, Head, Jaw, Teeth, EyeL/R, ShoulderL/R, UpperArmL/R, LowerArmL/R, HandL/R, UpperLegL/R, LowerLegL/R, FootL/R, ToesL/R) unidas por 25 `Motor6D` con el mismo nombre que el hueso y un `Humanoid` con sus valores. No caminan, no tienen vida ni dañan: eso lo escribe el script. Los mapas viejos con `isNPC` se convierten solos a Model al abrirlos o jugarlos (nombre, posición, color y vida pasan al Model/Humanoid; ya no hay IA). Los personajes se insertan desde 🧩 Objetos → Personajes y viven dentro de Workspace como cualquier Model.
 
 **Propiedades de pieza** (sección «Propiedades Roblox» del inspector): Shape, Reflectance, CastShadow, CanCollide, CanTouch, CanQuery, CollisionGroup, Density, Friction, Elasticity, Drag, GravityScale, Massless, Locked, Tags y Attributes.
 
@@ -346,7 +346,7 @@ Crix Hub ahora tiene un modelo de objetos parecido al de Roblox Studio. **Nada t
 ```js
 const npc = game.getModel("Guardia");          // { id, name, root, rootPart, parts:{nombre:id}, joints:{nombre:id}, humanoid:{Health,…} }
 const j = game.createJoint("Motor6D", a, b, { axis: "y", mode: "velocity", angularVelocity: 3 });
-game.updateJoint(npc.joints["Left Shoulder"], { mode: "servo", targetAngle: 1.2, maxVelocity: 20 });
+game.updateJoint(npc.joints["UpperArmL"], { mode: "servo", targetAngle: 1.2, maxVelocity: 20 });
 game.destroyJoint(j);   game.weld(a, b);   game.motor6d(a, b, props);
 game.setAttribute(id, "equipo", "rojo");   game.getAttribute(id, "equipo");
 ```
