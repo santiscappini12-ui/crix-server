@@ -18,6 +18,7 @@ const worldPhysics = require('./world-physics');
 const rooms = new Map();
 const MAX_ROOMS = Infinity;
 const CrixAvatar = require('./crix-avatar.js');
+const CrixObjects = require('./crix-objects.js');
 const MAX_SCRIPTS_PER_ROOM = Infinity;
 const MAX_SOURCE_CHARS = Infinity;
 const MAX_PARTS = Infinity;
@@ -224,12 +225,32 @@ const ISOLATE_EXTRAS = String.raw`
       if (!game.JOINT_CLASSES.includes(String(cls))) throw new Error('Clase de unión desconocida: ' + cls + '. Usá una de: ' + game.JOINT_CLASSES.join(', '));
       return __emit('jointCreate', { data: Object.assign({}, props || {}, { class: String(cls), part0: __jid(part0), part1: __jid(part1) }) });
     };
-    game.updateJoint = (id, patch) => __emit('jointUpdate', { id: String(id), patch: patch || {} });
+    // Los jugadores también son un Model (mismos huesos que los NPC): sus uniones 'pj:<userId>:<Hueso>' giran el hueso del avatar.
+    const __RIG = ${JSON.stringify(CrixObjects.rigSpec())};
+    game.updateJoint = (id, patch) => {
+      const sid = String(id);
+      if (sid.slice(0, 3) === 'pj:') {
+        const a = sid.split(':'), row = __RIG.find(r => r[0] === a[2]); if (!row) throw new Error('No existe la unión ' + sid);
+        const pt = patch || {}, deg = v => Number(v) * 180 / Math.PI, rad = pt.targetAngle !== undefined ? pt.targetAngle : pt.angle; let rot;
+        if (rad !== undefined) { rot = [0, 0, 0]; rot['xyz'.indexOf(row[2])] = deg(rad); }
+        else if (pt.transform) rot = [deg(pt.transform.rx || 0), deg(pt.transform.ry || 0), deg(pt.transform.rz || 0)];
+        else return false;
+        const props = { rot: rot, mode: 'set' }; if (pt.duration !== undefined) props.duration = pt.duration;
+        return game.setBone(a[1], a[2], props);
+      }
+      return __emit('jointUpdate', { id: sid, patch: patch || {} });
+    };
     game.destroyJoint = id => __emit('jointDestroy', { id: String(id) });
     // game.getModel('Nombre') → { id, name, root (id de la pieza raíz), rootPart (estado actual), parts:{nombre:id}, joints:{nombre:id}, humanoid:{Health,…} }
     const __models = (() => { try { return JSON.parse(__crixModelsJson); } catch (_) { return []; } })();
     game.getModel = name => {
-      const m = __models.find(x => x.name === String(name) || x.id === String(name)); if (!m) return null;
+      const m = __models.find(x => x.name === String(name) || x.id === String(name));
+      if (!m) {   // un jugador: su Model con Motor6D y Humanoid
+        const pl = __getPlayers().find(p => p.username === String(name) || String(p.userId) === String(name) || 'player:' + p.userId === String(name)); if (!pl) return null;
+        const k = String(pl.userId), parts = { HumanoidRootPart: 'pp:' + k + ':HumanoidRootPart' }, joints = {};
+        for (const r of __RIG) { parts[r[0]] = 'pp:' + k + ':' + r[0]; joints[r[0]] = 'pj:' + k + ':' + r[0]; }
+        return { id: 'player:' + k, name: pl.username, isPlayer: true, userId: pl.userId, root: parts.HumanoidRootPart, rootPart: { id: parts.HumanoidRootPart, name: 'HumanoidRootPart', x: pl.x, y: pl.y + 1.525, z: pl.z, position: { x: pl.x, y: pl.y + 1.525, z: pl.z } }, parts: parts, joints: joints, humanoid: { Health: pl.health !== undefined ? pl.health : 100, MaxHealth: pl.maxHealth !== undefined ? pl.maxHealth : 100, WalkSpeed: 16, JumpPower: 50, HipHeight: 1.05, DisplayName: pl.username } };
+      }
       const out = JSON.parse(JSON.stringify(m)); out.rootPart = m.root ? __getPart(m.root) : null; return out;
     };
     game.weld = (a, b) => game.createJoint('WeldConstraint', a, b);

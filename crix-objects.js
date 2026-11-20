@@ -183,6 +183,29 @@
     return { parts, joints, instances, rootId, modelId };
   }
 
+
+  // [[hueso, padre, eje]] del rig humanoide. Es la MISMA tabla para los NPC y para el Model de cada jugador (scripts: game.getModel).
+  function rigSpec() { return RIG_BONES.map(b => [b[0], b[1], b[5]]); }
+  // Model de un jugador: mismos nombres de pieza/unión que el NPC. Sus ids son 'pp:<userId>:<Hueso>' (piezas) y 'pj:<userId>:<Hueso>' (Motor6D).
+  function playerModelInfo(userId, name, hum) {
+    const k = String(userId), h = hum || {}, root = 'pp:' + k + ':HumanoidRootPart';
+    const info = { id: 'player:' + k, name: String(name || k), isPlayer: true, userId: k, root, parts: { HumanoidRootPart: root }, joints: {}, humanoid: { Health: num(h.health, 100), MaxHealth: num(h.maxHealth, 100), WalkSpeed: num(h.walkSpeed, 16), JumpPower: num(h.jumpPower, 50), HipHeight: 1.05, DisplayName: String(name || k) } };
+    for (const [bone] of RIG_BONES) { info.parts[bone] = 'pp:' + k + ':' + bone; info.joints[bone] = 'pj:' + k + ':' + bone; }
+    return info;
+  }
+  // updateJoint sobre una unión de jugador → orden de hueso del avatar (grados). Devuelve { userId, bone, cmd } o null si no es una unión de jugador.
+  function playerJointCommand(jointId, patch) {
+    const a = String(jointId).split(':'); if (a.length !== 3 || a[0] !== 'pj') return null;
+    const row = RIG_BONES.find(b => b[0] === a[2]); if (!row) return null;
+    const pt = patch && typeof patch === 'object' ? patch : {}, deg = v => num(v) * 180 / Math.PI;
+    const rad = pt.targetAngle !== undefined ? pt.targetAngle : pt.angle; let rot;
+    if (rad !== undefined) { rot = [0, 0, 0]; rot['xyz'.indexOf(row[5])] = deg(rad); }
+    else if (pt.transform && typeof pt.transform === 'object') rot = [deg(pt.transform.rx), deg(pt.transform.ry), deg(pt.transform.rz)];
+    else return { userId: a[1], bone: a[2], cmd: null };
+    const props = { rot, mode: 'set' }; if (pt.duration !== undefined) props.duration = num(pt.duration);
+    return { userId: a[1], bone: a[2], cmd: { op: 'bone', bone: a[2], props } };
+  }
+
   // Valores de la ficha del Humanoid → atributos de la raíz del modelo (así los scripts los leen con getAttribute).
   function humanoidAttributes(props) {
     return { Health: num(props.health, 100), MaxHealth: num(props.maxHealth, 100), WalkSpeed: num(props.walkSpeed, 16), JumpPower: num(props.jumpPower, 50), HipHeight: num(props.hipHeight, 2), DisplayName: String(props.displayName || '') };
@@ -220,5 +243,5 @@
     return { parts, joints: ((map && map.joints) || []).concat(joints), instances: ((map && map.instances) || []).concat(instances), converted };
   }
 
-  return { migrateLegacyNpcs, buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };
+  return { rigSpec, playerModelInfo, playerJointCommand, migrateLegacyNpcs, buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };
 });
