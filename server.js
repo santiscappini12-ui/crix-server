@@ -10,7 +10,8 @@ const { fork } = require('node:child_process');
 const persist  = require('./persist');
 const worldPhysics = require('./world-physics');
 const CrixJoints = require('./crix-joints.js');
-const CrixObjects = require('./crix-objects.js');   // uniones Weld / Motor6D / Hinge… (el mismo módulo que usa el cliente)
+const CrixObjects = require('./crix-objects.js');
+const CrixAnim = require('./crix-anim.js');   // uniones Weld / Motor6D / Hinge… (el mismo módulo que usa el cliente)
 const classification = require('./classification');   // cuestionario de clasificación por país (juegos, apps y videos)
 
 if (persist.enabled && !persist.restored) {
@@ -346,7 +347,7 @@ function normalizeRoomPart(id, source = {}) {
     textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:number(source.texScale,4,0.001,1e6),texTint:source.texTint===true,
   };
   for(const [key,lo,hi,fallback] of [['friction',0,1,0.15],['bounce',0,1,0.05],['drag',0,1,0.003],['gravityScale',-5,5,1]])if(source[key]!==undefined&&source[key]!==null)part[key]=number(source[key],fallback,lo,hi);
-  if(Array.isArray(source.tags))part.tags=source.tags.slice(0,1000).map(tag=>String(tag).slice(0,40));
+  if(Array.isArray(source.tags))part.tags=source.tags.map(tag=>String(tag).slice(0,40));
   // Propiedades extra estilo Roblox (BasePart). Solo se guardan las que vienen definidas.
   if(source.reflectance!==undefined)part.reflectance=number(source.reflectance,0,0,1);
   if(source.density!==undefined)part.density=number(source.density,0.7,0.01,100);
@@ -372,10 +373,11 @@ function initializeRoomWorld(room, map) {
     const id=String(source.id||`map-part-${index}`),part=normalizeRoomPart(id,source);
     room.worldParts[id]=part;room.basePartIds.add(id);
   }
-  room.joints=(Array.isArray(map?.joints)?map.joints:[]).slice(0,500).map((joint,index)=>CrixJoints.sanitize(joint,'joint-'+index));
+  room.joints=(Array.isArray(map?.joints)?map.joints:[]).map((joint,index)=>CrixJoints.sanitize(joint,'joint-'+index));
   room.jointState={};room.jointVel={};room.jointDriven=null;room.jointAt=0;room.jointErrors=new Set();
-  room.instances=(Array.isArray(map?.instances)?map.instances:[]).slice(0,1000).map((item,index)=>CrixObjects.sanitizeInstance(item,'inst-'+index));
+  room.instances=(Array.isArray(map?.instances)?map.instances:[]).map((item,index)=>CrixObjects.sanitizeInstance(item,'inst-'+index));
   room.models=CrixObjects.buildModelsInfo(Object.values(room.worldParts||{}),room.joints,room.instances);
+  room.animations=(Array.isArray(map?.animations)?map.animations:[]).map(item=>CrixAnim.sanitize(item));   // biblioteca de animaciones del mapa (por id)
   room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];room.watched=new Set();room.appliedSeq=0;room.phys=null;room.collectedIds=new Set();
 }
 
@@ -409,7 +411,7 @@ function startRoomServerScripts(room,map) {
   if(!runner){room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError||'No se pudo iniciar el entorno de scripts.'});return;}
   room.scriptStarted=true;room.scriptStatus='starting';
   room.watched=new Set();room.appliedSeq=0;
-  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Object.values(room.worldParts||{}),joints:(room.joints||[]).map(joint=>({id:joint.id,class:joint.class,name:joint.name})),models:room.models||[],players:playersForRunner(room)});
+  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Object.values(room.worldParts||{}),joints:(room.joints||[]).map(joint=>({id:joint.id,class:joint.class,name:joint.name})),models:room.models||[],animations:room.animations||[],players:playersForRunner(room)});
 }
 
 function sendRoomPlayersToRunner(room) {
@@ -494,7 +496,7 @@ function applyServerScriptCommand(room,command,payload) {
     const index=room.joints.findIndex(joint=>joint.id===jid);
     if(command==='jointDestroy'){if(index>=0){room.joints.splice(index,1);delete room.jointState[jid];}return;}
     if(command==='jointCreate'){
-      if(index>=0||room.joints.length>=500)return;
+      if(index>=0)return;
       const joint=CrixJoints.sanitize({...(payload.data||{}),id:jid},jid);
       if(payload.preserve!==false&&joint.part0&&joint.part1&&room.worldParts[joint.part0]&&room.worldParts[joint.part1]&&!(payload.data&&payload.data.c0))CrixJoints.preserve(joint,room.worldParts[joint.part0],room.worldParts[joint.part1]);
       room.joints.push(joint);return;
@@ -947,7 +949,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-console.js','/crix-fx.js','/crix-ext.js',
+const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-console.js','/crix-fx.js','/crix-ext.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
 // Página para probar la API de clasificación desde el navegador (misma dirección que Crix, sin problemas de CORS): /probar-api

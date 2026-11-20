@@ -214,7 +214,7 @@
   // Datos estáticos de cada Model para game.getModel(): ids de piezas y uniones por nombre + valores del Humanoid.
   function buildModelsInfo(parts, joints, instances) {
     const out = [];
-    for (const m of (instances || []).filter(i => i && i.class === 'Model').slice(0, 200)) {
+    for (const m of (instances || []).filter(i => i && i.class === 'Model')) {
       const info = { id: m.id, name: m.name, root: (m.props && m.props.primaryPart) || '', parts: {}, joints: {}, humanoid: null };
       for (const p of parts || []) if (p && p.parent === m.id && p.name) info.parts[p.name] = p.id;
       for (const j of joints || []) if (j && j.parent === m.id && j.name) info.joints[j.name] = j.id;

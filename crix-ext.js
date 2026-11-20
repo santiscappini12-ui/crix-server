@@ -457,7 +457,6 @@
       const id = String(p.id || '').slice(0, 120);
       if (c === 'jointDestroy') { G.joints = G.joints.filter(j => j.id !== id); delete G.state[id]; refreshGameUsed(); return true; }
       if (c === 'jointCreate') {
-        if (G.joints.length >= 500) { log('error', 'Uniones', 'Máximo de uniones (500) alcanzado'); return true; }
         const j = J.sanitize({ ...(p.data || {}), id }, id); j.local = true;
         const A = runtimeObjects.get(j.part0), B = runtimeObjects.get(j.part1);
         if (!A || !B) { log('error', 'Uniones', `createJoint(${j.class}): no existe ${!A ? 'Part0' : 'Part1'} («${!A ? j.part0 : j.part1}»)`); return true; }
@@ -472,6 +471,28 @@
     return true;
   }
 
-  window.CrixExt = { isModelMember, workspaceModelsHtml, toggleModel, moveModelTo, removeModelWithParts, spawnPreset, select, set: setProp, setCf, setPartProp, remove, insert, openCatalog, closeCatalog, addSelectedToModel, addExampleScript, isDriven, modelsInfo, gameLoad, gameStep, gameCommand, netPoses, editorFrame, state: S, game: G };
+  // ── Vista previa de animaciones en el editor (CrixAnim): pone poses temporales y las restaura al terminar ──
+  function animPose(partPatches, jointPatches) {
+    if (S.preview) stopPreview(true);
+    if (!S.animPrev) S.animPrev = { joints: JSON.parse(JSON.stringify(S.joints)), poses: new Map(stParts.map(e => [e.data.id, { ...e.data }])), state: {}, vel: {} };
+    const A = S.animPrev;
+    for (const id in (partPatches || {})) { const e = entryOf(id); if (!e) continue; const p = partPatches[id]; for (const k in p) if (Number.isFinite(p[k])) e.data[k] = p[k]; const b0 = A.poses.get(id) || e.data, d = e.data; if (e.mesh && (p.sx !== undefined || p.sy !== undefined || p.sz !== undefined) && !d.avatarMesh) { if (d.type === 'ImportedMesh') e.mesh.scale.set((d.sx || 4) / 4, (d.sy || 4) / 4, (d.sz || 4) / 4); else e.mesh.scale.set((d.sx || 1) / (b0.sx || 1), (d.sy || 1) / (b0.sy || 1), (d.sz || 1) / (b0.sz || 1)); } if (e.mesh && p.transparent !== undefined && e.mesh.material && !Array.isArray(e.mesh.material)) { e.mesh.material.transparent = true; e.mesh.material.opacity = 1 - Math.max(0, Math.min(1, d.transparent || 0)); } syncMesh(e); }
+    let moved = false;
+    for (const id in (jointPatches || {})) { const i = S.joints.findIndex(j => j.id === id); if (i < 0) continue; S.joints[i] = J.sanitize({ ...S.joints[i], ...jointPatches[id], id, class: S.joints[i].class }, id); moved = true; }
+    if (moved) {
+      S.driven = drivenIds();
+      const world = { parts: partsDict(), joints: S.joints, state: A.state, vel: A.vel, partBox: window.CrixWorldPhysics && CrixWorldPhysics.partBox, onError: () => {} };
+      for (const e of stParts) { e.data.x = e.mesh.position.x; e.data.y = e.mesh.position.y; e.data.z = e.mesh.position.z; }
+      const res = J.step(world, 1 / 60); for (const id of res.changed) { const e = entryOf(id); if (e) syncMesh(e); }
+    }
+    try { updateSelectionOutline(); if (typeof updateGizmoPos === 'function') updateGizmoPos(); } catch (_) { /* nada seleccionado */ }
+  }
+  function animPoseEnd() {
+    const A = S.animPrev; if (!A) return;
+    for (const e of stParts) { const p = A.poses.get(e.data.id); if (p) { Object.assign(e.data, p); if (e.mesh && !e.data.avatarMesh) { if (e.data.type === 'ImportedMesh') e.mesh.scale.set((e.data.sx || 4) / 4, (e.data.sy || 4) / 4, (e.data.sz || 4) / 4); else e.mesh.scale.set(1, 1, 1); } try { if (typeof updatePartAppearance === 'function') updatePartAppearance(e); } catch (_) { /* nada */ } syncMesh(e); } }
+    S.joints = A.joints; S.driven = null; S.animPrev = null;
+    try { updateSelectionOutline(); } catch (_) { /* nada */ }
+  }
+  window.CrixExt = { animPose, animPoseEnd, isModelMember, workspaceModelsHtml, toggleModel, moveModelTo, removeModelWithParts, spawnPreset, select, set: setProp, setCf, setPartProp, remove, insert, openCatalog, closeCatalog, addSelectedToModel, addExampleScript, isDriven, modelsInfo, gameLoad, gameStep, gameCommand, netPoses, editorFrame, state: S, game: G };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

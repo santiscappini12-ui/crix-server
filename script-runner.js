@@ -14,6 +14,7 @@ try {
 
 const { compileCrixScript, CRIXSCRIPT_PRELUDE } = require('./crixscript');
 const worldPhysics = require('./world-physics');
+const CRIX_ANIM_SRC = require('fs').readFileSync(require('path').join(__dirname, 'crix-anim.js'), 'utf8');
 
 const rooms = new Map();
 const MAX_ROOMS = Infinity;
@@ -126,7 +127,6 @@ function emitSceneCommand(room, command, payload) {
   }
   if (command === 'jointCreate' || command === 'jointUpdate' || command === 'jointDestroy') {
     if (command === 'jointCreate') {
-      if (room.joints.size >= 500) throw new Error('La instancia alcanzó el máximo de uniones (500)');
       const data = safePayload.data && typeof safePayload.data === 'object' ? safePayload.data : {};
       for (const key of ['part0','part1']) if (!room.parts.has(String(data[key] || ''))) throw new Error('Unión: no existe ' + key + ' («' + String(data[key] || '') + '»)');
       const suffix = room.instanceId.replace(/[^a-z0-9]/ig,'').slice(-12) || 'room';
@@ -295,12 +295,88 @@ const ISOLATE_EXTRAS = String.raw`
       if (goal.size) { const sz = __v3(goal.size); set('sx', sz.x); set('sy', sz.y); set('sz', sz.z); }
       for (const key of ['x', 'y', 'z', 'sx', 'sy', 'sz', 'rx', 'ry', 'rz', 'transparent']) if (goal[key] !== undefined) set(key, goal[key]);
       if (!Object.keys(to).length) return null;
-      if (__tweens.length >= 60) throw new Error('Demasiados tweens a la vez (máx. 60)');
       for (let i = __tweens.length - 1; i >= 0; i--) if (__tweens[i].id === part.id) { for (const key of Object.keys(to)) delete __tweens[i].to[key]; if (!Object.keys(__tweens[i].to).length) __tweens.splice(i, 1); }
-      const tween = { id: part.id, from, to, t: 0, seconds: Math.max(0.05, Math.min(60, Number(seconds) || 1)), ease: __ease[easing] || __ease.quadInOut, done };
+      const tween = { id: part.id, from, to, t: 0, seconds: Math.max(0.001, Number(seconds) || 1), ease: __ease[easing] || __ease.quadInOut, done };
       __tweens.push(tween);
       return { cancel: () => { const index = __tweens.indexOf(tween); if (index >= 0) __tweens.splice(index, 1); } };
     };
+
+
+    // ── Animador (CrixAnim): capas con loop propio, símbolos, eventos y curvas por fotograma clave ──
+    // game.animate(id | definición, { model, targets, speed, weight, loop, layerLoop:{capa:true|false}, startTime, channel })
+    //   → manejador { stop, pause, resume, seek, setSpeed, setWeight, setLoop, setLayerLoop, setLayerWeight, setLayerSpeed, setLayerEnabled, onEvent, onEnded }
+    // Las animaciones del mapa se llaman por id; game.registerAnimation(id, def) agrega más en ejecución.
+    const __animLib = new Map();
+    (function () { try { for (const a of JSON.parse(__crixAnimsJson)) { const d = CrixAnim.sanitize(a); __animLib.set(d.id, d); } } catch (_) {} })();
+    const __animPlayers = [], __animBus = new Map(), __ANIM_PART = ['x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'transparent'];
+    game.registerAnimation = (idOrDef, def) => { const src = idOrDef && typeof idOrDef === 'object' ? idOrDef : Object.assign({}, def || {}, { id: String(idOrDef) }); const d = CrixAnim.sanitize(src); __animLib.set(d.id, d); return d.id; };
+    game.getAnimation = id => __animLib.get(String(id)) || null;
+    game.listAnimations = () => Array.from(__animLib.values()).map(a => ({ id: a.id, name: a.name, length: CrixAnim.animLength(a, __animLib), layers: a.layers.map(l => l.name) }));
+    game.onAnimationEvent = (name, fn) => { if (typeof fn !== 'function') throw new TypeError('onAnimationEvent necesita una función'); const key = String(name); if (!__animBus.has(key)) __animBus.set(key, []); __animBus.get(key).push(fn); return () => { const l = __animBus.get(key) || []; const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); }; };
+    function __animResolve(h, target, kind) {
+      const key = kind + ':' + target; if (h.cache.has(key)) return h.cache.get(key);
+      let id = null;
+      if (h.targets && h.targets[target] !== undefined) id = String(h.targets[target]);
+      else if (h.model) id = kind === 'joint' ? (h.model.joints || {})[target] : (h.model.parts || {})[target];
+      if (!id) { if (kind === 'part') { const p = __getPart(String(target)); id = p ? p.id : null; } else id = String(target); }
+      h.cache.set(key, id || null); return id || null;
+    }
+    function __animApply(h, values) {
+      const parts = new Map(), joints = new Map();
+      for (const k in values) { const e = values[k], id = __animResolve(h, e.target, e.kind); if (!id) continue; const m = e.kind === 'joint' ? joints : parts; let o = m.get(id); if (!o) m.set(id, o = {}); o[e.ch] = e; }
+      for (const [id, o] of parts) {
+        let base = h.base.get(id); if (!base) { const p = __getPart(id) || {}; base = {}; for (const c of __ANIM_PART) base[c] = Number(p[c]) || 0; h.base.set(id, base); }
+        const patch = {};
+        for (const c in o) { const e = o[c]; if (__ANIM_PART.indexOf(c) < 0) continue; const b = base[c]; patch[c] = (e.rel ? b + e.v * e.w : b + (e.v - b) * e.w) + e.add; }
+        if (Object.keys(patch).length) game.updatePart(id, patch);
+      }
+      for (const [id, o] of joints) {
+        const patch = {}, tf = {};
+        for (const c in o) { const e = o[c], v = (e.rel ? e.v * e.w : e.v * e.w) + e.add; if (c === 'angle') { patch.mode = 'servo'; patch.targetAngle = v; patch.maxVelocity = 200; } else if (['x', 'y', 'z', 'rx', 'ry', 'rz'].indexOf(c) >= 0) tf[c] = v; }
+        if (Object.keys(tf).length) patch.transform = tf;
+        if (Object.keys(patch).length) game.updateJoint(id, patch);
+      }
+    }
+    function __animFire(h, ev) {
+      const info = { name: ev.name, time: ev.t, layer: ev.layer, data: ev.data, animation: h.id, model: h.model, handle: h };
+      const run = list => { for (const fn of (list || []).slice()) { try { fn(info); } catch (err) { error('Evento de animación ' + ev.name + ': ' + (err && err.message || err)); } } };
+      run(h.evt.get(ev.name)); run(h.evt.get('*')); run(__animBus.get(ev.name)); run(__animBus.get('*'));
+      try { game.emit('animation:' + ev.name, info); } catch (_) {}
+    }
+    function __advanceAnims(dt) {
+      for (let i = 0; i < __animPlayers.length; i++) {
+        const h = __animPlayers[i]; if (h.dead || !h.player.playing) continue;
+        let r; try { r = h.player.update(dt); __animApply(h, r.values); } catch (err) { error('Animación ' + h.name + ': ' + (err && err.message || err)); h.dead = true; continue; }
+        for (const ev of r.events) __animFire(h, ev);
+        if (r.ended) { h.dead = true; for (const f of h.endedFns.slice()) { try { f(h); } catch (err) { error('Animación ' + h.name + ': ' + (err && err.message || err)); } } }
+      }
+      for (let i = __animPlayers.length - 1; i >= 0; i--) if (__animPlayers[i].dead) __animPlayers.splice(i, 1);
+    }
+    game.animate = (anim, opts) => {
+      opts = opts || {};
+      const def = anim && typeof anim === 'object' ? CrixAnim.sanitize(anim) : __animLib.get(String(anim));
+      if (!def) throw new Error('No existe la animación ' + anim);
+      let model = null;
+      if (opts.model !== undefined && opts.model !== null) { model = typeof opts.model === 'object' ? opts.model : game.getModel(opts.model); if (!model) throw new Error('No existe el Model ' + (typeof opts.model === 'object' ? opts.model.name : opts.model)); }
+      if (opts.channel !== undefined) for (const o of __animPlayers) if (!o.dead && o.channel === String(opts.channel) && (o.model && model ? o.model.id === model.id : !o.model && !model)) o.dead = true;   // misma «ranura» (idle, caminar…) → reemplaza a la anterior
+      const player = CrixAnim.createPlayer(def, { library: __animLib, speed: opts.speed, weight: opts.weight, loop: opts.loop, layerLoop: opts.layerLoop });
+      if (opts.startTime !== undefined) player.seek(opts.startTime);
+      const h = { id: def.id, name: def.name, player, model, targets: opts.targets || null, channel: opts.channel === undefined ? null : String(opts.channel), cache: new Map(), base: new Map(), evt: new Map(), endedFns: [], dead: false };
+      const api = {
+        id: def.id, name: def.name, length: player.length,
+        get time() { return player.time; }, get isPlaying() { return player.playing && !h.dead; },
+        stop: () => { h.dead = true; player.playing = false; }, pause: () => { player.playing = false; }, resume: () => { if (!h.dead) player.playing = true; },
+        seek: t => { player.seek(t); try { __animApply(h, player.sample()); } catch (_) {} },
+        setSpeed: v => { player.speed = Number(v) || 0; }, setWeight: v => { player.weight = Number(v) || 0; }, setLoop: v => { player.loop = !!v; },
+        setLayerLoop: (l, v) => player.setLayerLoop(l, v), setLayerWeight: (l, v) => player.setLayerWeight(l, v), setLayerSpeed: (l, v) => player.setLayerSpeed(l, v), setLayerEnabled: (l, v) => player.setLayerEnabled(l, v),
+        onEvent: (name, fn) => { if (typeof fn !== 'function') throw new TypeError('onEvent necesita una función'); const k = String(name); if (!h.evt.has(k)) h.evt.set(k, []); h.evt.get(k).push(fn); return api; },
+        onEnded: fn => { if (typeof fn !== 'function') throw new TypeError('onEnded necesita una función'); h.endedFns.push(fn); return api; }
+      };
+      h.api = api; __animPlayers.push(h);
+      return api;
+    };
+    game.stopAnimate = (target) => { for (const h of __animPlayers) { if (h.dead) continue; if (target === undefined || h.id === String(target) || (h.model && (h.model.id === String(target) || h.model.name === String(target)))) { h.dead = true; h.player.playing = false; } } };
+    game.stopAllAnimations = () => game.stopAnimate();
 
     // ── Eventos entre scripts ──
     const __bus = new Map();
@@ -466,6 +542,7 @@ function bootstrapSource(modules) {
     }
     function __crixAdvance(dt) {
       __advanceTweens(dt);
+      __advanceAnims(dt);
       for (let index=__waiters.length-1; index>=0; index--) {
         const waiter=__waiters[index]; if (!waiter) continue; waiter.left-=dt;
         if (waiter.left<=0) {
@@ -536,10 +613,12 @@ function createRoom(message) {
     if (!part || part.type === 'Spawn' || part.isNPC) continue;
     const id=String(part.id || 'map-part'); room.parts.set(id,normalizePart(id,part));
   }
-  for (const joint of (Array.isArray(message.joints) ? message.joints : []).slice(0,500)) if (joint && joint.id) room.joints.set(String(joint.id), { id:String(joint.id), class:String(joint.class || 'Weld') });
+  for (const joint of (Array.isArray(message.joints) ? message.joints : [])) if (joint && joint.id) room.joints.set(String(joint.id), { id:String(joint.id), class:String(joint.class || 'Weld') });
   const jail=context.global;
   jail.setSync('global',jail.derefInto());
-  try { jail.setSync('__crixModelsJson', JSON.stringify(Array.isArray(message.models) ? message.models.slice(0,200) : [])); } catch (_) { jail.setSync('__crixModelsJson', '[]'); }
+  try { jail.setSync('__crixAnimsJson', JSON.stringify(Array.isArray(message.animations) ? message.animations : [])); } catch (_) { jail.setSync('__crixAnimsJson', '[]'); }
+  try { context.evalSync(CRIX_ANIM_SRC); } catch (e) { output(room,'Animador','No se pudo cargar el motor de animación: '+e.message,'err'); }
+  try { jail.setSync('__crixModelsJson', JSON.stringify(Array.isArray(message.models) ? message.models : [])); } catch (_) { jail.setSync('__crixModelsJson', '[]'); }
   jail.setSync('__crixEmit',new ivm.Callback((command,payload)=>emitSceneCommand(room,String(command),payload),{sync:true}));
   jail.setSync('__crixGetPlayers',new ivm.Callback(()=>room.players,{sync:true}));
   jail.setSync('__crixGetParts',new ivm.Callback(()=>Array.from(room.parts.values()),{sync:true}));
