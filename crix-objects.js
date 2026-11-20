@@ -121,61 +121,63 @@
     return { id: String(s.id || fallbackId || 'i' + Math.random().toString(36).slice(2, 9)).slice(0, 120), class: cls, name: String(s.name || cls).slice(0, 80), parent: String(s.parent || '').slice(0, 120), props };
   }
 
-  // ── Humanoide completo como Model + piezas + Motor6D (sin ningún comportamiento) ──
-  // Mismo esqueleto que el avatar del jugador (crix-avatar.js): 24 huesos con su jerarquía, cada uno como pieza + Motor6D.
-  // Devuelve { parts, joints, instances, rootId, modelId }. Las piezas y uniones se llaman igual que los huesos (Hips, Spine, UpperArmL…).
-  // y = centro de la HumanoidRootPart; los pies quedan en y - RIG_ROOT_Y (el avatar mide ~3.1 studs).
-  const RIG_ROOT_Y = 1.55;
+  // ── NPC = el MISMO cuerpo que el jugador, como Model + piezas + Motor6D (sin ningún comportamiento) ──
+  // Esqueleto de 25 huesos de crix-avatar.js (mismas posiciones, escala BASE_SCALE y jerarquía). Las 16 piezas del cuerpo usan la malla
+  // REAL del avatar (propiedad avatarMesh = nombre del hueso; el cliente la toma de crix-avatar.glb). Ojos y boca son piezas simples y
+  // los huesos sin malla (Neck, Jaw, ShoulderL/R, ToesL/R) son piezas invisibles. Todas las piezas se centran en su articulación, así
+  // c1 = 0 y c0 = posición local del hueso. Devuelve { parts, joints, instances, rootId, modelId }. y = centro de la HumanoidRootPart.
+  const RIG_SCALE = 0.83, RIG_ROOT_Y = 1.525, RIG_CLAY = '#dcdad6';
+  const RIG_HEAD = { c: [0, 0.515, 0.047], R: 0.614 };
+  const rigHeadPoint = (yaw, pitch) => [RIG_HEAD.c[0] + RIG_HEAD.R * Math.sin(yaw) * Math.cos(pitch), RIG_HEAD.c[1] + RIG_HEAD.R * Math.sin(pitch), RIG_HEAD.c[2] + RIG_HEAD.R * Math.cos(yaw) * Math.cos(pitch)];
+  // [hueso, padre, posición local (unidades del rig), forma, tamaño aprox. (studs), eje del Motor6D, visible]
+  const RIG_BONES = [
+    ['Hips', 'Root', [0, 1.27, 0], 'Block', [0.9, 0.5, 0.7], 'y', 1], ['Spine', 'Hips', [0, 0.32, 0], 'Block', [0.8, 0.5, 0.6], 'y', 1],
+    ['Chest', 'Spine', [0, 0.405, 0], 'Block', [0.9, 0.7, 0.65], 'y', 1], ['Neck', 'Chest', [0, 0.548, 0], 'Block', [0.2, 0.2, 0.2], 'y', 0],
+    ['Head', 'Neck', [0, 0, 0], 'Block', [1.0, 1.0, 1.0], 'y', 1], ['Jaw', 'Head', [0, 0.18, 0.46], 'Block', [0.2, 0.1, 0.2], 'x', 0],
+    ['Teeth', 'Head', rigHeadPoint(0, -0.38), 'Block', [0.25, 0.04, 0.04], 'x', 2],
+    ['EyeL', 'Head', rigHeadPoint(-0.58, 0.42), 'Sphere', [0.13, 0.13, 0.13], 'y', 2], ['EyeR', 'Head', rigHeadPoint(0.58, 0.42), 'Sphere', [0.13, 0.13, 0.13], 'y', 2],
+  ];
+  for (const [L, sg] of [['L', -1], ['R', 1]]) RIG_BONES.push(
+    ['Shoulder' + L, 'Chest', [sg * 0.31, 0.294, 0], 'Block', [0.2, 0.2, 0.2], 'z', 0],
+    ['UpperArm' + L, 'Shoulder' + L, [sg * 0.29, 0, 0], 'Block', [0.3, 0.55, 0.3], 'x', 1], ['LowerArm' + L, 'UpperArm' + L, [0, -0.634, 0], 'Block', [0.28, 0.5, 0.28], 'x', 1],
+    ['Hand' + L, 'LowerArm' + L, [0, -0.52, 0], 'Block', [0.25, 0.35, 0.25], 'x', 1],
+    ['UpperLeg' + L, 'Hips', [sg * 0.275, 0.158, 0], 'Block', [0.4, 0.6, 0.4], 'x', 1], ['LowerLeg' + L, 'UpperLeg' + L, [0, -0.618, 0], 'Block', [0.35, 0.55, 0.35], 'x', 1],
+    ['Foot' + L, 'LowerLeg' + L, [0, -0.481, 0], 'Block', [0.35, 0.3, 0.55], 'x', 1], ['Toes' + L, 'Foot' + L, [0, -0.2, 0.3], 'Block', [0.2, 0.1, 0.2], 'x', 0]);
+
   function buildHumanoidRig(o = {}) {
     const uid = String(o.id || Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36));
     const name = String(o.name || 'Rig').slice(0, 60), ry = num(o.ry, 0);
     const bx = num(o.x), by = num(o.y, RIG_ROOT_Y), bz = num(o.z);
-    const skin = o.skin || '#ffd9b3', shirt = o.shirt || '#5b8def', pants = o.pants || '#3a4668', shoes = o.shoes || '#22262e', eyes = '#1b1f2a';
+    const body = /^#[0-9a-f]{6}$/i.test(o.color) ? o.color : RIG_CLAY, dark = '#1b1f2a';
     const modelId = 'm' + uid, rootId = 'p' + uid + 'r';
     const cos = Math.cos(ry), sin = Math.sin(ry);
-    // Posiciones en coordenadas del avatar (pies en y=0, centro en x=0,z=0) → mundo, relativas a la raíz.
-    const at = (c) => ({ x: bx + c[0] * cos + c[2] * sin, y: by + c[1] - RIG_ROOT_Y, z: bz - c[0] * sin + c[2] * cos });
-    // [hueso, padre, forma, centro de la pieza, tamaño, color, posición de la articulación, eje]
-    const BONES = [
-      ['Hips',  'Root',  'Block',  [0, 1.25, 0],    [0.98, 0.34, 0.70], pants,   [0, 1.30, 0],    'y'],
-      ['Spine', 'Hips',  'Block',  [0, 1.60, 0],    [0.92, 0.36, 0.68], shirt,   [0, 1.42, 0],    'y'],
-      ['Chest', 'Spine', 'Block',  [0, 2.10, 0],    [1.00, 0.62, 0.72], shirt,   [0, 1.80, 0],    'y'],
-      ['Neck',  'Chest', 'Block',  [0, 2.48, 0],    [0.26, 0.20, 0.26], skin,    [0, 2.40, 0],    'y'],
-      ['Head',  'Neck',  'Sphere', [0, 2.70, 0],    [0.84, 0.84, 0.84], skin,    [0, 2.52, 0],    'y'],
-      ['Jaw',   'Head',  'Block',  [0, 2.50, 0.30], [0.30, 0.08, 0.16], skin,    [0, 2.54, 0.22], 'x'],
-      ['Teeth', 'Head',  'Block',  [0, 2.56, 0.38], [0.24, 0.05, 0.05], '#ffffff', [0, 2.56, 0.38], 'x'],
-      ['EyeL',  'Head',  'Sphere', [-0.15, 2.78, 0.36], [0.16, 0.16, 0.16], eyes, [-0.15, 2.78, 0.36], 'y'],
-      ['EyeR',  'Head',  'Sphere', [0.15, 2.78, 0.36],  [0.16, 0.16, 0.16], eyes, [0.15, 2.78, 0.36],  'y'],
-    ];
-    for (const [L, sg] of [['L', -1], ['R', 1]]) {
-      BONES.push(
-        ['Shoulder' + L, 'Chest',            'Sphere', [sg * 0.56, 2.30, 0],  [0.32, 0.32, 0.32], shirt, [sg * 0.44, 2.30, 0], 'z'],
-        ['UpperArm' + L, 'Shoulder' + L,     'Block',  [sg * 0.71, 2.04, 0],  [0.26, 0.52, 0.26], shirt, [sg * 0.71, 2.30, 0], 'x'],
-        ['LowerArm' + L, 'UpperArm' + L,     'Block',  [sg * 0.71, 1.56, 0],  [0.22, 0.44, 0.22], skin,  [sg * 0.71, 1.78, 0], 'x'],
-        ['Hand' + L,     'LowerArm' + L,     'Block',  [sg * 0.71, 1.22, 0],  [0.20, 0.24, 0.18], skin,  [sg * 0.71, 1.34, 0], 'x'],
-        ['UpperLeg' + L, 'Hips',             'Block',  [sg * 0.24, 0.98, 0],  [0.34, 0.56, 0.34], pants, [sg * 0.24, 1.26, 0], 'x'],
-        ['LowerLeg' + L, 'UpperLeg' + L,     'Block',  [sg * 0.24, 0.43, 0],  [0.30, 0.54, 0.30], pants, [sg * 0.24, 0.70, 0], 'x'],
-        ['Foot' + L,     'LowerLeg' + L,     'Block',  [sg * 0.24, 0.08, 0.06], [0.30, 0.16, 0.46], shoes, [sg * 0.24, 0.16, 0], 'x'],
-        ['Toes' + L,     'Foot' + L,         'Block',  [sg * 0.24, 0.05, 0.36], [0.28, 0.10, 0.14], shoes, [sg * 0.24, 0.10, 0.30], 'x'],
-      );
-    }
+    // coordenadas con el origen en los pies → mundo
+    const at = c => ({ x: bx + c[0] * cos + c[2] * sin, y: by + c[1] - RIG_ROOT_Y, z: bz - c[0] * sin + c[2] * cos });
     const P = bone => 'p' + uid + bone;
     const mk = (id, nm, type, c, size, color, extra) => Object.assign({ id, type, name: nm, ...at(c), sx: size[0], sy: size[1], sz: size[2], rx: 0, ry, rz: 0, color, material: 'SmoothPlastic', anchored: true, canCollide: false, transparent: 0, castShadow: true, parent: modelId }, extra || {});
     const ROOT_C = [0, RIG_ROOT_Y, 0];
-    const parts = [mk(rootId, 'HumanoidRootPart', 'Block', ROOT_C, [1.2, 3.1, 0.8], '#ffffff', { transparent: 1, canCollide: true, anchored: o.anchored === true, castShadow: false })];
-    const centers = { Root: ROOT_C };
-    const joints = [];
-    for (const [bone, parent, type, c, size, color, jp, axis] of BONES) {
-      parts.push(mk(P(bone), bone, type, c, size, color));
-      centers[bone] = c;
+    const parts = [mk(rootId, 'HumanoidRootPart', 'Block', ROOT_C, [1.2, 3.05, 0.8], '#ffffff', { transparent: 1, canCollide: true, anchored: o.anchored === true, castShadow: false })];
+    const abs = { Root: ROOT_C }, joints = [];
+    for (const [bone, parent, lp, type, size, axis, vis] of RIG_BONES) {
+      const pa = abs[parent], c = [pa[0] + lp[0] * RIG_SCALE, pa[1] + lp[1] * RIG_SCALE - (parent === 'Root' ? RIG_ROOT_Y : 0), pa[2] + lp[2] * RIG_SCALE];
+      abs[bone] = parent === 'Root' ? [c[0], c[1] + RIG_ROOT_Y * 0 + 0, c[2]] : c;
     }
-    for (const [bone, parent, , c, , , jp, axis] of BONES) {
-      const pc = centers[parent];
-      joints.push(CrixJoints.sanitize({ id: 'j' + uid + bone, class: 'Motor6D', name: bone, part0: parent === 'Root' ? rootId : P(parent), part1: P(bone), c0: { x: jp[0] - pc[0], y: jp[1] - pc[1], z: jp[2] - pc[2] }, c1: { x: jp[0] - c[0], y: jp[1] - c[1], z: jp[2] - c[2] }, axis, parent: modelId }, 'j' + uid + bone));
+    // Hips: la raíz está en y=RIG_ROOT_Y pero lp[1] se mide desde los pies
+    abs.Hips = [0, 1.27 * RIG_SCALE, 0];
+    for (const [bone, parent, lp, type, size, axis, vis] of RIG_BONES) {
+      if (bone === 'Hips') continue;
+      const pa = abs[parent]; abs[bone] = [pa[0] + lp[0] * RIG_SCALE, pa[1] + lp[1] * RIG_SCALE, pa[2] + lp[2] * RIG_SCALE];
+    }
+    for (const [bone, parent, lp, type, size, axis, vis] of RIG_BONES) {
+      const extra = vis === 1 ? { avatarMesh: bone } : vis === 0 ? { transparent: 1, castShadow: false } : {};
+      parts.push(mk(P(bone), bone, type, abs[bone], size, vis === 2 ? dark : body, extra));
+      const pa = abs[parent === 'Root' ? 'Root' : parent], c0 = parent === 'Root'
+        ? [0, abs.Hips[1] - ROOT_C[1], 0] : [lp[0] * RIG_SCALE, lp[1] * RIG_SCALE, lp[2] * RIG_SCALE];
+      joints.push(CrixJoints.sanitize({ id: 'j' + uid + bone, class: 'Motor6D', name: bone, part0: parent === 'Root' ? rootId : P(parent), part1: P(bone), c0: { x: c0[0], y: c0[1], z: c0[2] }, c1: { x: 0, y: 0, z: 0 }, axis, parent: modelId }, 'j' + uid + bone));
     }
     const instances = [
       { id: modelId, class: 'Model', name, parent: '', props: { primaryPart: rootId } },
-      { id: 'i' + uid + 'hum', class: 'Humanoid', name: 'Humanoid', parent: modelId, props: { displayName: name, health: 100, maxHealth: 100, walkSpeed: 16, jumpPower: 50, hipHeight: 1.3 } },
+      { id: 'i' + uid + 'hum', class: 'Humanoid', name: 'Humanoid', parent: modelId, props: { displayName: name, health: 100, maxHealth: 100, walkSpeed: 16, jumpPower: 50, hipHeight: 1.05 } },
     ];
     parts[0].attributes = { Health: 100, MaxHealth: 100, WalkSpeed: 16, JumpPower: 50, DisplayName: name };
     return { parts, joints, instances, rootId, modelId };
@@ -200,9 +202,22 @@
     return out;
   }
 
-  // Los NPC son piezas isNPC dibujadas con el MISMO avatar que el jugador (crix-avatar.js): ya no se convierten a Model de bloques.
+  // NPC antiguos (pieza con isNPC, IA y vida incorporadas) → Model de partes + Motor6D + Humanoid, sin comportamiento.
+  // Determinista: los ids salen del id viejo, así editor, cliente y servidor generan lo mismo.
   function migrateLegacyNpcs(map) {
-    return { parts: (map && map.parts) || [], joints: (map && map.joints) || [], instances: (map && map.instances) || [], converted: 0 };
+    const src = map && Array.isArray(map.parts) ? map.parts : [];
+    if (!src.some(p => p && p.isNPC)) return { parts: src, joints: (map && map.joints) || [], instances: (map && map.instances) || [], converted: 0 };
+    const parts = [], joints = [], instances = []; let converted = 0;
+    for (const p of src) {
+      if (!p || !p.isNPC) { parts.push(p); continue; }
+      converted++;
+      const rig = buildHumanoidRig({ id: String(p.id || 'npc' + converted).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60), name: p.name || 'NPC', x: num(p.x), y: num(p.y) + 2, z: num(p.z), ry: num(p.ry), anchored: p.anchored === true });
+      const hp = Math.max(0, num(p.maxHp, num(p.hp, 100)));
+      const hum = rig.instances.find(i => i.class === 'Humanoid');
+      if (hum) { hum.props.maxHealth = hp; hum.props.health = Math.max(0, num(p.hp, hp)); rig.parts[0].attributes = humanoidAttributes(hum.props); }
+      parts.push(...rig.parts); joints.push(...rig.joints); instances.push(...rig.instances);
+    }
+    return { parts, joints: ((map && map.joints) || []).concat(joints), instances: ((map && map.instances) || []).concat(instances), converted };
   }
 
   return { migrateLegacyNpcs, buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };

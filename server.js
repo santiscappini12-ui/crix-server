@@ -358,6 +358,7 @@ function normalizeRoomPart(id, source = {}) {
     part.attributes=attrs;
   }
   if(type==='ImportedMesh'&&typeof source.meshData==='string')part.meshData=source.meshData;
+  if(typeof source.avatarMesh==='string'&&/^[A-Za-z]{2,20}$/.test(source.avatarMesh))part.avatarMesh=source.avatarMesh;
   return part;
 }
 

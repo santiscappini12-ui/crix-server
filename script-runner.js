@@ -81,6 +81,7 @@ function normalizePart(id, source = {}) {
     part.attributes = attrs;
   }
   if(type==='ImportedMesh'&&typeof source.meshData==='string'&&source.meshData.length<=2*1024*1024)part.meshData=source.meshData;
+  if(typeof source.avatarMesh==='string'&&/^[A-Za-z]{2,20}$/.test(source.avatarMesh))part.avatarMesh=source.avatarMesh;
   return part;
 }
 

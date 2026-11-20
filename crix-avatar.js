@@ -222,12 +222,23 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (MODEL.state !== 'idle') return;
     if (!THREE.GLTFLoader) { MODEL.state = 'failed'; return; }
     MODEL.state = 'loading';
-    const done = () => { for (const av of Array.from(LIVE)) { if (!av.root.parent && av.root.userData.avatar !== av) LIVE.delete(av); else upgradeAvatar(av); } };
+    const done = () => { MODEL.callbacks.splice(0).forEach(f => { try { f(MODEL.state); } catch (_) { /* callback ajeno */ } }); for (const av of Array.from(LIVE)) { if (!av.root.parent && av.root.userData.avatar !== av) LIVE.delete(av); else upgradeAvatar(av); } };
     new THREE.GLTFLoader().load(url || MODEL_URL, gltf => {
       try { extractModel(gltf); MODEL.state = 'ready'; } catch (e) { console.warn('[CrixAvatar] modelo inválido, uso el muñeco básico:', e); MODEL.state = 'failed'; }
       done();
     }, undefined, e => { console.warn('[CrixAvatar] no se pudo cargar el modelo, uso el muñeco básico', e); MODEL.state = 'failed'; done(); });
   }
+  // Malla REAL de una pieza del avatar (la del .glb), ya en el espacio del hueso y a escala de juego (BASE_SCALE), para que un Model
+  // de piezas + Motor6D (los NPC) use exactamente las mismas piezas que el jugador. Devuelve null si el modelo aún no cargó.
+  const BAKED = {};
+  function modelBoneGeometry(bone) {
+    if (MODEL.state !== 'ready' || !MODEL.parts) return null;
+    if (BAKED[bone]) return BAKED[bone];
+    const part = MODEL.parts.find(q => q.bone === bone); if (!part) return null;
+    const m = new THREE.Matrix4().makeScale(BASE_SCALE, BASE_SCALE, BASE_SCALE).multiply(new THREE.Matrix4().compose(part.p, part.q, part.s));
+    return (BAKED[bone] = part.geo.clone().applyMatrix4(m));
+  }
+  function onModelReady(fn) { if (MODEL.state === 'ready' || MODEL.state === 'failed') fn(MODEL.state); else MODEL.callbacks.push(fn); }
   function layoutBones(av, model) {
     for (const [name, , pos] of BONES) {
       const b = av.bones[name], p = model && MODEL_POS[name] ? MODEL_POS[name] : pos;
@@ -905,7 +916,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   function dispose(av) { LIVE.delete(av); av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
 
   global.CrixAvatar = Object.assign({}, Shared, { ANIMATIONS: Object.keys(EMOTES),
-    build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
+    build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, modelBoneGeometry, onModelReady, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
   global.CrixAvatarShared = Shared;
   loadModel(MODEL_URL);
 })(typeof window !== 'undefined' ? window : globalThis);

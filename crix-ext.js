@@ -257,7 +257,7 @@
     wrap.onclick = e => { if (e.target === wrap) closeCatalog(); };
     const sel = (typeof selPart !== 'undefined' && selPart) ? selPart.data.name : null;
     wrap.innerHTML = `<div style="background:var(--bg2,#12141c);border:1px solid var(--border,#2a3350);border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:78vh;overflow:auto;padding:14px 14px 22px"><div style="display:flex;align-items:center;margin-bottom:6px"><b style="flex:1;font-size:14px">🧩 Insertar objeto</b><button class="st-btn" onclick="CrixExt.closeCatalog()">✕</button></div><div style="font-size:10px;color:var(--text3);margin-bottom:8px">${sel ? 'Pieza seleccionada: <b>' + esc2(sel) + '</b>' : 'Tip: seleccioná una pieza antes para uniones, luces y efectos'}</div>` +
-      '<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">PERSONAJES</div><div style=\"display:grid;grid-template-columns:1fr 1fr;gap:6px\"><button class=\"st-btn\" style=\"text-align:left;padding:9px 8px;font-size:11px\" onclick=\"CrixExt.closeCatalog();spawnNpc(\'player\')\">🧍 Personaje (igual que el jugador)</button></div>' +
+      '<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">PERSONAJES (Model + Motor6D, sin comportamiento)</div><div style=\"display:grid;grid-template-columns:1fr 1fr;gap:6px\"><button class=\"st-btn\" style=\"text-align:left;padding:9px 8px;font-size:11px\" onclick=\"CrixExt.spawnPreset(\'player\')\">🧍 Personaje (igual que el jugador)</button></div>' +
       O.CATALOG.map(c => `<div style="font-size:9px;letter-spacing:1px;color:var(--text3);margin:10px 0 4px">${c.cat.toUpperCase()}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${c.items.map(i => `<button class="st-btn" style="text-align:left;padding:9px 8px;font-size:11px" onclick="CrixExt.insert('${i.cls}')">${i.icon} ${esc2(i.es)}</button>`).join('')}</div>`).join('') + '</div>';
     document.body.appendChild(wrap);
   }
@@ -292,18 +292,16 @@
   function spawnRig(name, colors) {
     snapshotChange();
     const t = stCamTarget || { x: 0, y: 0, z: 0 };
-    const rig = O.buildHumanoidRig({ name, x: Math.round(t.x + (Math.random() * 6 - 3)), y: 1.55 + 0.05, z: Math.round(t.z + (Math.random() * 6 - 3)), ry: 0, skin: colors && colors.skin, shirt: colors && colors.shirt, pants: colors && colors.pants });
+    const rig = O.buildHumanoidRig({ name, x: Math.round(t.x + (Math.random() * 6 - 3)), y: 1.525 + 0.05, z: Math.round(t.z + (Math.random() * 6 - 3)), ry: 0, color: colors && colors.color });
     rig.parts.forEach(p => addPartMesh({ ...p }));
     rig.joints.forEach(j => S.joints.push(j)); rig.instances.forEach(i => S.instances.push(i));
     closeModalSafe('mo-npc'); refreshExplorer(); if (typeof updateStStatus === 'function') updateStStatus();
-    showToast('🤖 «' + name + '» creado: un Model con las 25 piezas del avatar unidas por Motor6D. Sin comportamientos: se programa con Scripts');
+    showToast('🧍 «' + name + '» creado: Model con las piezas del avatar unidas por Motor6D y un Humanoid. Sin comportamientos: se programa con Scripts');
     S.open.add(rig.modelId); select('inst', rig.modelId);
   }
   function spawnPreset(id) {
     closeCatalog();
-    if (id === '__blank') id = 'player';
-    const n = (typeof NPC_LIB !== 'undefined' ? NPC_LIB : []).find(x => x.id === id); if (!n) return;
-    spawnRig(n.name || 'Personaje', { skin: n.skin, shirt: n.color, pants: n.pants });
+    spawnRig('Personaje');
   }
   function closeModalSafe(id) { try { closeModal(id); } catch (_) { /* nada */ } }
   function exampleScript(modelName) {
@@ -331,6 +329,7 @@
   // ── Barra: botones nuevos ──
   function addButtons() {
     const npc = document.querySelector('button[onclick="openNpcPanel()"]'); if (!npc || document.getElementById('cx-obj-btn')) return;
+    npc.style.display = 'none';   // los personajes ya no son un objeto especial: se insertan desde 🧩 Objetos → Personajes
     const mk = (id, html, fn, title) => { const b = document.createElement('button'); b.className = 'st-btn'; b.id = id; b.innerHTML = html; b.title = title; b.onclick = fn; return b; };
     const prev = mk('cx-prev-btn', '🔗 Uniones', () => (S.preview ? stopPreview() : startPreview()), 'Probar Motor6D, Weld, bisagras, resortes…');
     const obj = mk('cx-obj-btn', '🧩 Objetos', openCatalog, 'Insertar Model, uniones, luces, efectos…');
@@ -372,12 +371,19 @@
     wrap('stuDelete', (orig, a, t) => { const e = typeof selPart !== 'undefined' && selPart; const id = e && e.data.id; const r = orig.apply(t, a); if (id) { S.joints = S.joints.filter(j => j.part0 !== id && j.part1 !== id); S.instances = S.instances.filter(i => i.parent !== id); rebuildEditorFx(); refreshExplorer(); } return r; });
     wrap('makeMesh', (orig, a, t) => { const m = orig.apply(t, a); try { applyLook(m, a[0] || {}); } catch (_) { /* material sin specular */ } return m; });
     wrap('stuTest', (orig, a, t) => { if (S.preview) stopPreview(true); const d = J.diagnose(S.joints, partsDict()); d.forEach(x => log('warn', 'Uniones', x)); return orig.apply(t, a); });
+    window.spawnNpc = function () { spawnRig('Personaje'); };
+    window.openNpcPanel = function () {
+      const grid = document.getElementById('npc-grid'); if (!grid) return;
+      grid.innerHTML = '<div class="npc-card" onclick="spawnNpc()" style="grid-column:1/-1"><div class="npc-icon">🧍</div><div class="npc-name">Personaje</div><div class="npc-type">Model · piezas del avatar · Motor6D · Humanoid</div></div>';
+      openModal('mo-npc');
+    };
     // La física de vista previa del editor ignora las piezas que mueve una unión.
     wrap('stepEditorPhysics', (orig, a, t) => { const drv = S.driven; if (!drv || !S.preview) return orig.apply(t, a); const saved = []; for (const e of stParts) if (drv.has(e.data.id) && e.data.anchored === false) { saved.push(e); e.data.anchored = true; } try { return orig.apply(t, a); } finally { saved.forEach(e => { e.data.anchored = false; }); } });
   }
   // El panel del NPC tiene id 'mo-npc'? (si no, openModal falla de forma visible en Output)
   function init() {
     installEditorHooks(); addButtons();
+    try { if (window.CrixAvatar && CrixAvatar.onModelReady) CrixAvatar.onModelReady(() => { try { stParts.forEach(e => { if (e.data && e.data.avatarMesh && e.mesh) { stScene.remove(e.mesh); e.mesh = makeMesh(e.data); stScene.add(e.mesh); syncMesh(e); } }); } catch (_) { /* editor aún no listo */ } }); } catch (_) { /* sin avatar */ }
     const timer = setInterval(addButtons, 1500); setTimeout(() => clearInterval(timer), 30000);
     (function loop() { try { editorFrame(); } catch (e) { if (!S._err) { S._err = 1; log('error', 'Editor', e.message); } } requestAnimationFrame(loop); })();
   }
