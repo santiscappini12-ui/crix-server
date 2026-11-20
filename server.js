@@ -340,7 +340,7 @@ function normalizeRoomPart(id, source = {}) {
     rx:number(source.rx),ry:number(source.ry),rz:number(source.rz),
     color:/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?String(source.color):'#5b8def',
     material:materials.includes(source.material)?source.material:'SmoothPlastic',
-    anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:number(source.transparent,0,0,0.95),
+    anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:number(source.transparent,0,0,1),
     behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',
     behaviorValue:number(source.behaviorValue,0,-1e9,1e9),target:String(source.target||'').slice(0,80),
     textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:number(source.texScale,4,0.001,1e6),texTint:source.texTint===true,

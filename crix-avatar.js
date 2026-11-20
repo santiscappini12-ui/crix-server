@@ -457,6 +457,44 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (Math.abs(c.open - (f._lo === undefined ? -1 : f._lo)) > 0.008 || Math.abs(c.curve - (f._lc === undefined ? -9 : f._lc)) > 0.008 || Math.abs(c.w - (f._lw === undefined ? -1 : f._lw)) > 0.003 || Math.abs(c.tongue - (f._lt === undefined ? -1 : f._lt)) > 0.01) { f._lo = c.open; f._lc = c.curve; f._lw = c.w; f._lt = c.tongue; updateMouthModel(av); }
   }
 
+  // ── Cara del avatar sobre la pieza Head de un Model de piezas (NPC) ─────────────────────────────────────────
+  // Reutiliza EXACTAMENTE la cara del jugador (ojos con pupila y brillo, cejas, boca, dientes, parpadeo, mirada y expresiones),
+  // colgada de la malla de la cabeza. `look` es opcional: { face, eyes }; sin él usa la cara por defecto del jugador.
+  const RIG_FACES = new Set(); let rigRaf = 0, rigLast = 0;
+  function attachRigFace(head, lookIn) {
+    if (!head || !head.isObject3D) return null;
+    detachRigFace(head);
+    const look = sanitizeLook(lookIn && typeof lookIn === 'object' ? lookIn : {});
+    const mk = c => new THREE.MeshBasicMaterial({ color: c });
+    const mats = { eyeW: mk(0xffffff), eye: mk(look.eyes || '#1b1f2a'), line: mk(0x1b1f2a), mouthIn: new THREE.MeshBasicMaterial({ color: 0x6a1d2a, side: THREE.DoubleSide }), mouthW: mk(0x2b1118),
+      teeth: new THREE.MeshBasicMaterial({ color: 0xfaf6ea, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), tongue: mk(0xe5566f), heart: new THREE.MeshBasicMaterial({ color: 0xff3b5c, side: THREE.DoubleSide }), tear: mk(0x7fd0ff) };
+    mats.head = mats.eyeW;
+    const holder = new THREE.Group(); holder.name = 'CrixFace'; holder.scale.setScalar(BASE_SCALE); holder.userData.noShadow = true; head.add(holder);   // la malla de la cabeza ya viene a escala BASE_SCALE
+    const visuals = {}; for (const n of BONE_NAMES) visuals[n] = new THREE.Group();
+    visuals.Head = holder;
+    for (const n of ['EyeL', 'EyeR', 'Teeth']) { const g = visuals[n]; g.position.fromArray(MODEL_POS[n]); g.quaternion.copy(MODEL_ROT[n]); holder.add(g); }
+    const av = { head, holder, visuals, mats, look, face: null, teethMode: null, layers: { anim: null, emote: null, over: {}, face: null }, state: { t: Math.random() * 10, blinkT: 1 + Math.random() * 3, blink: 0, face: look.face, faceT: 0, talk: 0, loco: 'idle' } };
+    buildModelFace(av); head.userData.rigFace = av; RIG_FACES.add(av);
+    if (!rigRaf && typeof requestAnimationFrame === 'function') { rigLast = 0; rigRaf = requestAnimationFrame(rigFaceTick); }
+    return av;
+  }
+  function detachRigFace(head) {
+    const av = head && head.userData && head.userData.rigFace; if (!av) return;
+    RIG_FACES.delete(av); if (av.holder.parent) av.holder.parent.remove(av.holder); delete head.userData.rigFace;
+    for (const k in av.mats) av.mats[k].dispose && av.mats[k].dispose();
+  }
+  function rigFaceTick(now) {
+    rigRaf = 0; const dt = rigLast ? Math.min(0.1, (now - rigLast) / 1000) : 0.016; rigLast = now;
+    for (const av of Array.from(RIG_FACES)) {
+      let top = av.head; while (top.parent) top = top.parent;
+      if (!top.isScene) { RIG_FACES.delete(av); continue; }   // la pieza ya no está en ninguna escena (se recreó o se borró)
+      if (!av.head.visible) continue;
+      av.state.t += dt;
+      try { updateFaceModel(av, dt, null, 0, undefined); } catch (e) { RIG_FACES.delete(av); console.warn('[CrixAvatar] cara de NPC:', e); }
+    }
+    if (RIG_FACES.size && typeof requestAnimationFrame === 'function') rigRaf = requestAnimationFrame(rigFaceTick);
+  }
+
   // ── Geometría (r128: no hay CapsuleGeometry) ──────────────────────────────────────────────────
   function capsuleGeo(radius, length, seg = 10) {
     // Perfil de abajo hacia arriba (y ascendente, x: 0 → r → 0): así las normales de LatheGeometry salen hacia afuera.
@@ -916,7 +954,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   function dispose(av) { LIVE.delete(av); av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
 
   global.CrixAvatar = Object.assign({}, Shared, { ANIMATIONS: Object.keys(EMOTES),
-    build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, modelBoneGeometry, onModelReady, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
+    build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, modelBoneGeometry, onModelReady, attachRigFace, detachRigFace, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
   global.CrixAvatarShared = Shared;
   loadModel(MODEL_URL);
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -134,8 +134,8 @@
     ['Hips', 'Root', [0, 1.27, 0], 'Block', [0.9, 0.5, 0.7], 'y', 1], ['Spine', 'Hips', [0, 0.32, 0], 'Block', [0.8, 0.5, 0.6], 'y', 1],
     ['Chest', 'Spine', [0, 0.405, 0], 'Block', [0.9, 0.7, 0.65], 'y', 1], ['Neck', 'Chest', [0, 0.548, 0], 'Block', [0.2, 0.2, 0.2], 'y', 0],
     ['Head', 'Neck', [0, 0, 0], 'Block', [1.0, 1.0, 1.0], 'y', 1], ['Jaw', 'Head', [0, 0.18, 0.46], 'Block', [0.2, 0.1, 0.2], 'x', 0],
-    ['Teeth', 'Head', rigHeadPoint(0, -0.38), 'Block', [0.25, 0.04, 0.04], 'x', 2],
-    ['EyeL', 'Head', rigHeadPoint(-0.58, 0.42), 'Sphere', [0.13, 0.13, 0.13], 'y', 2], ['EyeR', 'Head', rigHeadPoint(0.58, 0.42), 'Sphere', [0.13, 0.13, 0.13], 'y', 2],
+    ['Teeth', 'Head', rigHeadPoint(0, -0.38), 'Block', [0.25, 0.04, 0.04], 'x', 0],
+    ['EyeL', 'Head', rigHeadPoint(-0.58, 0.42), 'Sphere', [0.13, 0.13, 0.13], 'y', 0], ['EyeR', 'Head', rigHeadPoint(0.58, 0.42), 'Sphere', [0.13, 0.13, 0.13], 'y', 0],
   ];
   for (const [L, sg] of [['L', -1], ['R', 1]]) RIG_BONES.push(
     ['Shoulder' + L, 'Chest', [sg * 0.31, 0.294, 0], 'Block', [0.2, 0.2, 0.2], 'z', 0],
@@ -243,5 +243,7 @@
     return { parts, joints: ((map && map.joints) || []).concat(joints), instances: ((map && map.instances) || []).concat(instances), converted };
   }
 
-  return { rigSpec, playerModelInfo, playerJointCommand, migrateLegacyNpcs, buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };
+  // Ojos y dientes de NPC guardados antes (piezas oscuras sueltas): ahora la cara real va sobre la cabeza, así que se dibujan invisibles.
+  const isRigFacePiece = d => !!d && !!d.parent && !d.avatarMesh && (d.name === 'EyeL' || d.name === 'EyeR' || d.name === 'Teeth') && String(d.color).toLowerCase() === '#1b1f2a';
+  return { isRigFacePiece, rigSpec, playerModelInfo, playerJointCommand, migrateLegacyNpcs, buildModelsInfo, MATERIALS, SHAPES, PART_PROPS, JOINT_PROPS, INSTANCE_PROPS, EMITTER_PRESETS, CATALOG, ICONS, isJoint, instanceDefaults, sanitizeInstance, buildHumanoidRig, humanoidAttributes };
 });

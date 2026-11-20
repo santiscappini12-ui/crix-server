@@ -64,7 +64,7 @@ function normalizePart(id, source = {}) {
     rx:finite(source.rx), ry:finite(source.ry), rz:finite(source.rz),
     color, material:materials.includes(source.material) ? source.material : 'SmoothPlastic',
     anchored:source.anchored === undefined ? true : source.anchored === true, canCollide:source.canCollide !== false,
-    transparent:finite(source.transparent,0,0,0.95),
+    transparent:finite(source.transparent,0,0,1),
   };
   if (source.friction !== undefined && source.friction !== null) part.friction = finite(source.friction,0.15,0,1);
   if (source.bounce !== undefined && source.bounce !== null) part.bounce = finite(source.bounce,0.05,0,1);
