@@ -58,9 +58,13 @@ Cosas a tener en cuenta con Supabase:
 
 Sin estas variables Crix funciona como antes, solo con disco local.
 
+## Sin moderación automática
+
+Crix **no filtra ni modera contenido automáticamente**: no hay filtros de palabras, detección de imágenes, censura de chat ni bloqueos o baneos automáticos. Lo único que se rechaza es lo **ilegal** (cuestionario de legalidad al subir un medio, ver abajo); lo demás se **clasifica por edad**, no se prohíbe. Los baneos son siempre una decisión manual de un admin. Los límites de ritmo (anti-flood de comentarios, comandos, etc.) son técnicos y no miran el contenido.
+
 ## Clasificación de medios por país
 
-Crix solo prohíbe lo **ilegal**. Antes de subir un video, un juego o una app hay que completar un cuestionario propio de Crix para que el medio lleve la insignia de edad de **tu país**: Crix AR, Crix EUU, Crix EU, Crix DE, Crix BR, Crix JP, Crix KR, Crix AU, Crix MX, Crix CL, Crix CO, o Crix Global para el resto. Cada una tiene su propia forma y código. Se clasifica el medio **entero** (un video, o un juego completo con sus texturas y sonidos), nunca cada textura o archivo suelto.
+Crix solo prohíbe lo **ilegal**. Antes de subir un video, un juego o una app hay que completar un cuestionario propio de Crix para que el medio lleve la insignia de edad de **tu país**: Crix AR, Crix EUU, Crix EU, Crix DE, Crix BR, Crix JP, Crix KR, Crix AU, Crix MX, Crix CL, Crix CO, o Crix Global para el resto. Cada una tiene su propia forma y código. Si se declara «para niños» junto con contenido de 13+ no se rechaza: se clasifica por el contenido y se quita la marca infantil. Se clasifica el medio **entero** (un video, o un juego completo con sus texturas y sonidos), nunca cada textura o archivo suelto.
 
 - **Legalidad:** si se responde "sí" a algo ilegal (contenido sexual con menores, imágenes íntimas sin consentimiento, terrorismo, amenazas/doxxing, malware) o "no" a "tengo los derechos", el medio **no se sube**. Algunos países agregan preguntas propias (p. ej. símbolos nazis y negación del Holocausto en Alemania/Austria).
 - **Contenido:** violencia, miedo, sexo y desnudez, lenguaje, discriminación, drogas, apuestas, compras con dinero real, interacción entre usuarios y público infantil. La edad mínima sale de la respuesta más alta (0, 7, 12, 16, 18). Lo explícito para adultos se permite, pero queda como **18+** y para abrirlo hay que tener la edad verificada (ver *Contenido +18* más abajo).
@@ -473,3 +477,42 @@ En la ficha de cada juego público hay un botón **📌 Acceso directo**: agrega
 
 - **Comentarios en todo lo que se crea**: juegos y apps (`GET/POST /api/maps/:id/comments`, `DELETE /api/maps/:id/comments/:cid`), videos (`POST /api/videos/:id/comment`, `DELETE .../comments/:cid`) y publicaciones del foro (`POST /api/posts/:id/reply`, `DELETE .../replies/:rid`). Pueden borrar un comentario su autor, el creador del contenido y los admins. Para leer o comentar un juego +18 hay que poder abrirlo. Los comentarios de un juego se guardan en `map.comments` (máx. 1000) y no viajan dentro del registro del juego: el catálogo solo trae `commentCount`.
 - **Novedades como notificación** (push al PWA cuando la app no está a la vista; con la app abierta se ven como aviso en pantalla): comentario o respuesta en lo tuyo (y en hilos donde ya respondiste), me gusta, seguidor nuevo, juego/app/video/publicación nuevos de a quienes seguís o de tus amigos (lo +18 solo a quien puede abrirlo), te sumaron a un equipo, cambio de tu acceso +18, suspensión o reactivación de tu cuenta; además de lo que ya existía (mensajes, llamadas, solicitudes de amistad). Al tocar el aviso se abre el juego, video, foro o perfil correspondiente. Los avisos repetidos de lo mismo se reemplazan (mismo `tag`) en vez de apilarse.
+
+
+## Animador: prioridades por capa (estilo Roblox, pero por pieza)
+
+Cada capa de una animación tiene una **prioridad**: `Core 0 · Idle 1 · Movement 2 · Action 3 · Action2 4 · Action3 5 · Action4 6` (o cualquier número). Como cada pista anima *una pieza o unión*, la prioridad vale **pieza por pieza y canal por canal**: una capa `Action2` que mueve el brazo manda sobre el brazo, y las piernas siguen con la capa `Movement`.
+
+- **Mezcla:** de mayor a menor prioridad, cada capa toma su `peso` del hueco libre y el resto pasa a la siguiente (peso 1 = tapa a las de abajo; peso 0.5 = mitad y mitad). A igual prioridad manda la capa de más abajo en la lista, o la animación que empezó después. Las capas **Suma** (additive) se agregan siempre encima.
+- **Entre animaciones:** varias `game.animate` a la vez se mezclan juntas con estas reglas (antes la última pisaba a las demás). Una animación en pausa sigue mandando con su pose.
+- **Editor:** en 🎞 Animador, panel de la capa → *Prioridad* (nombre o número). Se ve como ⬆Nombre junto a la capa.
+- **Scripts:** `game.animate('id', { model, priority:'Action', layerPriority:{ Brazos:'Action2' } })`; `priority` pisa todas las capas, `layerPriority` solo las nombradas. El manejador tiene `setPriority(p)`, `setLayerPriority(capa, p)` y `getLayerPriority(capa)`. `game.PRIORITIES` lista los nombres y `game.listAnimations()` devuelve `priorities` por capa.
+- Las animaciones viejas (sin prioridad) usan todas `Action`, así que se comportan como antes: manda la capa de más abajo.
+
+### Todo es una pista suelta (nada viene armado)
+
+En el Animador cada cosa animable es **una pista independiente** que se pone en la capa que se quiera; la capa trae la prioridad. Nada está agrupado de antemano:
+
+| Pista | Destino | Canales |
+|---|---|---|
+| 🧊 Objeto (`part`) | una pieza | x y z rx ry rz sx sy sz transparent |
+| 🔗 Unión (`joint`) | una unión | x y z rx ry rz angle |
+| 🦴 Hueso (`bone`) | un hueso del avatar de un jugador/NPC | rx ry rz x y z sx sy sz |
+| 😀 Cara (`face`) + elemento | **un elemento de la cara por separado** | ver abajo |
+
+Elementos de la cara (cada uno es su propia pista y se puede poner en otra capa/prioridad): `Mouth` (open, curve, w, tongue, teeth, talk) · `EyeL` y `EyeR` (close, cover, ps, big, lookX, lookY, tear) · `BrowL` y `BrowR` (angle, y) · `Expression` (emotion: elige una expresión por nombre; usá peso 1).
+
+- **Prioridad por canal:** `EyeL.close` en una capa `Action2` manda sobre `EyeL.close` de una capa `Idle`, mientras `Mouth.open` sigue con la suya. Lo mismo para huesos y piezas.
+- **Peso:** el valor animado se mezcla con la cara/pose automática (peso 1 = manda la animación, 0 = automático). Cuando ninguna animación toca un destino, vuelve solo a lo automático.
+- **Editor:** botones **＋ Objeto, ＋ Unión, ＋ Hueso, ＋ Cara** (la cara pide el elemento). La vista previa mueve piezas, uniones y la cara; los huesos de avatar se ven en el juego.
+- **Scripts:** `game.animate('id', { model:'Bot' })` manda las caras a la pieza Head del Model. Para jugadores/NPC con avatar (huesos y cara): `game.animate('id', { avatar: jugador })` o `avatar:'NombreNPC'`.
+
+## Editor: selección múltiple, Models y Folders, unión de piezas
+
+- **Seleccionar varias:** `Shift` (o `Ctrl`) + clic izquierdo en el visor o el Explorador. Shift + arrastrar sigue moviendo la cámara. En pantallas táctiles, el botón **☑ Multi** del visor hace que cada toque sume o quite.
+- **Un Model se selecciona entero** al tocar cualquiera de sus piezas, y el gizmo lo mueve/gira entero. Las piezas de un **Folder** se seleccionan de una en una: el Folder solo organiza. `Alt` + clic entra a una pieza de un Model; en el Explorador siempre se elige exactamente lo que tocás.
+- **Model y Folder sirven para cualquier cosa** (no solo personajes): se anidan entre sí y se arman con cualquier selección (piezas, otros Models, Folders). `game.getModel()` incluye las piezas y uniones de los Models anidados.
+- **Agrupar NO suelda.** Hacer un Model no une las piezas: siguen con físicas separadas. Para que se muevan juntas se pone una unión **dentro del Model**: con varias piezas elegidas, 🔗 Weld, 🧷 WeldConstraint, ⚙ Motor6D u «Otra unión…» (Hinge, BallSocket, Prismatic, Rod, Rope, Spring) crean una unión entre la **primera** pieza que elegiste (Part0) y cada una de las demás, conservando la pose. Si todas están en el mismo Model, la unión queda dentro de él.
+- **Barra del visor:** 🗂 Model · 📁 Folder · ⤴ Sacar del grupo · ⤓ Desagrupar · ⬡ Unir · ➖ Restar · ◐ Negar · uniones · ⧉ Duplicar · ✕ Borrar (todo con Ctrl+Z).
+- **Unión de piezas (como Roblox):** ⬡ **Unir** funde las piezas elegidas en una sola malla; las marcadas ◐ **negativas** (rojas translúcidas) se **restan** al unir. ➖ **Restar** = la primera menos todas las demás. El resultado es una pieza `ImportedMesh` que conserva color/material del primer positivo y **colisiona como su caja envolvente**. Límite de complejidad para que el editor no se cuelgue (si es demasiado, avisa). Las uniones de las piezas originales se quitan.
+- **Explorador:** árbol de Models y Folders anidados con sus piezas, uniones y objetos.

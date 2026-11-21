@@ -125,9 +125,31 @@
     const em = normalizeHex(spec.emissive, null); if (em) o.emissive = em;
     return o;
   }
+  // ── Animación de la cara (CrixAnim kind:'face') ──
+  // faceAnim = { canal: [v, w, rd, add] } con el valor ya resuelto por prioridades (ver CrixAnim.resolve): el objetivo final del canal es
+  //   base + (v − base)·w + rd + add, donde `base` es lo que pediría la expresión/parpadeo/mirada automáticos. Peso 0 = cara automática.
+  const FACE_SUBS = { Mouth: ['open', 'curve', 'w', 'tongue', 'teeth', 'talk'], EyeL: ['close', 'cover', 'ps', 'big', 'lookX', 'lookY', 'tear'], EyeR: ['close', 'cover', 'ps', 'big', 'lookX', 'lookY', 'tear'], BrowL: ['angle', 'y'], BrowR: ['angle', 'y'], Expression: ['emotion'] };
+  const FACE_ANIM_CHANNELS = Object.keys(FACE_SUBS).flatMap(sub => FACE_SUBS[sub].map(c => sub + '.' + c));   // «EyeL.close»: cada elemento de la cara es un destino aparte
+  const BONE_ANIM_CHANNELS = ['rx', 'ry', 'rz', 'x', 'y', 'z', 'sx', 'sy', 'sz'];
+  function sanitizeFaceAnim(src) {
+    if (!src || typeof src !== 'object') return null; const o = {};
+    for (const ch of FACE_ANIM_CHANNELS) { const a = src[ch]; if (!Array.isArray(a)) continue; o[ch] = [clamp(num(a[0]), -100, 100), clamp(num(a[1], 1), 0, 1), clamp(num(a[2]), -100, 100), clamp(num(a[3]), -100, 100)]; }
+    return Object.keys(o).length ? o : null;
+  }
+  // boneAnim = { Hueso: { rx|ry|rz|x|y|z|sx|sy|sz: [v, w, rd, add] } }: igual que faceAnim pero por hueso del avatar (rotación en radianes).
+  function sanitizeBoneAnim(src) {
+    if (!src || typeof src !== 'object') return null; const o = {}; let n = 0;
+    for (const name of Object.keys(src)) {
+      const bone = resolveBone(name); if (!bone || n >= 40) continue; const ch = src[name]; if (!ch || typeof ch !== 'object') continue; const e = {};
+      for (const c of BONE_ANIM_CHANNELS) { const a = ch[c]; if (!Array.isArray(a)) continue; e[c] = [clamp(num(a[0]), -1000, 1000), clamp(num(a[1], 1), 0, 1), clamp(num(a[2]), -1000, 1000), clamp(num(a[3]), -1000, 1000)]; }
+      if (Object.keys(e).length) { o[bone] = e; n++; }
+    }
+    return n ? o : null;
+  }
+  const faceVal = (fa, ch, base) => { const e = fa && fa[ch]; return e ? base + (e[0] - base) * e[1] + e[2] + e[3] : base; };
   const accId = v => String(v || '').replace(/[^\w.-]/g, '').slice(0, 40);
   // Orden recibida (de un script o de un cliente) → diferencia validada, en el formato que entiende applyState.
-  //   cmd: { op, ... }.  ops: anim, stop, bone, pose, reset, resetBone, face, look, addAcc, removeAcc, hold
+  //   cmd: { op, ... }.  ops: anim, stop, bone, pose, reset, resetBone, face, faceAnim, boneAnim, look, addAcc, removeAcc, hold
   function sanitizeCommand(cmd) {
     if (!cmd || typeof cmd !== 'object') return null; const op = String(cmd.op || '');
     switch (op) {
@@ -141,6 +163,8 @@
       case 'look': { if (!cmd.look || typeof cmd.look !== 'object') return null; const full = sanitizeLook(cmd.look, {}), l = {}; for (const k of Object.keys(cmd.look)) if (k in full) l[k] = full[k]; return Object.keys(l).length ? { look: l } : null; }
       case 'addAcc': { const id = accId(cmd.id), a = sanitizeAccessory(cmd.bone, cmd.spec); return id && a ? { acc: { [id]: a } } : null; }
       case 'removeAcc': { const id = accId(cmd.id); return id ? { acc: { [id]: null } } : null; }
+      case 'boneAnim': { if (cmd.values === null) return { boneAnim: null }; const v = sanitizeBoneAnim(cmd.values); return v ? { boneAnim: v } : null; }
+      case 'faceAnim': { if (cmd.values === null) return { faceAnim: null }; const v = sanitizeFaceAnim(cmd.values); return v ? { faceAnim: v } : null; }
       case 'hold': return { hold: !!cmd.value };
       default: return null;
     }
@@ -148,17 +172,19 @@
   // Mezcla una diferencia en el estado completo (el que el servidor guarda para quien entra tarde).
   function mergeState(full, diff) {
     if (!diff) return full;
-    if (diff.reset) { delete full.anim; delete full.face; delete full.talk; delete full.hold; full.bones = {}; full.acc = {}; }
+    if (diff.reset) { delete full.anim; delete full.face; delete full.talk; delete full.hold; delete full.faceAnim; delete full.boneAnim; full.bones = {}; full.acc = {}; }
     if (diff.stop) { if (diff.stop === true || (full.anim && full.anim.name === diff.stop)) delete full.anim; }
     if (diff.anim) full.anim = diff.anim;
     if (diff.face !== undefined) { if (diff.face === null) delete full.face; else full.face = diff.face; full.talk = !!diff.talk; }
     if (diff.hold !== undefined) full.hold = diff.hold;
+    if (diff.faceAnim !== undefined) { if (diff.faceAnim === null) delete full.faceAnim; else full.faceAnim = diff.faceAnim; }
+    if (diff.boneAnim !== undefined) { if (diff.boneAnim === null) delete full.boneAnim; else full.boneAnim = diff.boneAnim; }
     if (diff.look) full.look = Object.assign(full.look || {}, diff.look);
     if (diff.bones) { full.bones = full.bones || {}; for (const k of Object.keys(diff.bones)) { const p = diff.bones[k]; if (p.reset) delete full.bones[k]; else full.bones[k] = Object.assign(full.bones[k] || {}, p); } }
     if (diff.acc) { full.acc = full.acc || {}; for (const k of Object.keys(diff.acc)) { if (diff.acc[k] === null) delete full.acc[k]; else if (Object.keys(full.acc).length < MAX_ACCESSORIES || full.acc[k]) full.acc[k] = diff.acc[k]; } }
     return full;
   }
-  const Shared = { BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, mergeState };
+  const Shared = { BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, sanitizeFaceAnim, sanitizeBoneAnim, FACE_SUBS, mergeState };
   if (typeof module !== 'undefined' && module.exports) module.exports = Shared;
 
   // ══ PARTE GRÁFICA (solo navegador, necesita THREE r128) ══════════════════════════════════════════════════════
@@ -354,7 +380,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   // Dientes de arriba: tira lisa que sigue exactamente el contorno de la boca (mismas fórmulas que updateMouthModel); se afina hacia las comisuras
   function updateTeeth(av) {
     const f = av.face, m = f && f.teeth; if (!m) return;
-    const c = f.cur, R = HEAD.R, w = c.w, cv = c.curve * 0.1, op = c.open * 0.2, th = 0.045, g = m.userData.grid, pos = m.geometry.attributes.position.array, nor = m.geometry.attributes.normal.array, forced = av.teethMode === 'on';
+    const c = f.mo || f.cur, R = HEAD.R, w = c.w, cv = c.curve * 0.1, op = c.open * 0.2, th = 0.045, g = m.userData.grid, pos = m.geometry.attributes.position.array, nor = m.geometry.attributes.normal.array, forced = av.teethMode === 'on';
     let maxH = 0;
     for (let i = 0; i <= g.cols; i++) {
       const t = (i / g.cols * 2 - 1) * 0.9, q = 1 - t * t, yb = -cv * q, tt = th * (0.35 + 0.65 * q) * 0.5, yU = yb + tt, yD = yb - tt - op * Math.pow(q, 0.7);
@@ -364,7 +390,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     m.geometry.attributes.position.needsUpdate = true; m.geometry.attributes.normal.needsUpdate = true; m.visible = maxH > 0.012; f._tm = av.teethMode || null;
   }
   function updateMouthModel(av) {
-    const f = av.face, c = f.cur, R = HEAD.R, m = f.mouth, g = m.userData.grid, pos = m.geometry.attributes.position.array, nor = m.geometry.attributes.normal.array;
+    const f = av.face, c = f.mo || f.cur, R = HEAD.R, m = f.mouth, g = m.userData.grid, pos = m.geometry.attributes.position.array, nor = m.geometry.attributes.normal.array;
     const w = c.w, cv = c.curve * 0.1, op = c.open * 0.2, th = 0.045;
     for (let i = 0; i <= g.cols; i++) {
       const t = i / g.cols * 2 - 1, q = 1 - t * t, yb = -cv * q, tt = th * (0.35 + 0.65 * q) * 0.5, yU = yb + tt, yD = yb - tt - op * Math.pow(q, 0.7);
@@ -408,8 +434,10 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   function updateFaceModel(av, dt, hint, talk, ctx) {
     const S = av.state, f = av.face, c = f.cur, R = HEAD.R; S.faceT += dt;
     let name = av.layers.face || hint || (av.layers.anim && EMOTES[av.layers.anim.name] && EMOTES[av.layers.anim.name].fn(0, 1)._face) || (S.loco === 'fall' ? 'scared' : S.face);
+    const fa = av.faceAnim, fv = (ch, base) => faceVal(fa, ch, base);
+    const fe = fa && fa['Expression.emotion']; if (fe && fe[1] > 0.5) { const en = FACES[clamp(Math.round(fe[0]), 0, FACES.length - 1)]; if (en) name = en; }   // animación de la cara: la expresión por fotograma clave
     if (!MFACE[name]) name = 'neutral';
-    const pr = MFACE[name], k = 1 - Math.exp(-dt * 12), talking = Math.max(talk || 0, av.layers.talk ? 1 : 0, name === 'talk' ? 1 : 0);
+    const pr = MFACE[name], k = 1 - Math.exp(-dt * 12), talking = clamp(fv('Mouth.talk', Math.max(talk || 0, av.layers.talk ? 1 : 0, name === 'talk' ? 1 : 0)), 0, 1);
     // visemas: la boca salta a aperturas al azar mientras habla, con suavizado
     S.visT = (S.visT || 0) - dt; if (S.visT <= 0) { S.visT = 0.07 + Math.random() * 0.09; S.visA = 0.1 + Math.random() * 0.9; }
     S.visS = (S.visS || 0) + ((S.visA || 0) - (S.visS || 0)) * (1 - Math.exp(-dt * 22));
@@ -418,6 +446,8 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (pr.bounce) open *= 0.75 + 0.25 * Math.abs(Math.sin(S.t * 16));
     c.open += (open - c.open) * k; c.curve += (pr.curve - c.curve) * k; c.w += (w - c.w) * k; c.browA += (pr.browA - c.browA) * k; c.browY += (pr.browY - c.browY) * k;
     c.cover += ((pr.cover || 0) - c.cover) * k; c.ps += ((pr.ps || 1) - c.ps) * k; c.big += ((pr.big || 0) - c.big) * k; c.tongue += ((pr.tongue || 0) - c.tongue) * k;
+    // lo que dicen las pistas de animación (cada elemento por separado) se aplica encima de la cara automática, sin suavizado extra
+    const mo = f.mo = { open: fv('Mouth.open', c.open), curve: fv('Mouth.curve', c.curve), w: fv('Mouth.w', c.w), tongue: fv('Mouth.tongue', c.tongue) };
     // parpadeo (a veces doble) y mirada con sacádicos
     S.blinkT -= dt; if (S.blinkT <= 0) { S.blink = 1; S.blinkT = Math.random() < 0.22 ? 0.22 : 2 + Math.random() * 4; }
     if (S.blink > 0) S.blink = Math.max(0, S.blink - dt * 7);
@@ -427,8 +457,8 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     c.lx += (tx - c.lx) * lk; c.ly += (ty - c.ly) * lk;
     const mode = pr.eye || 'n', shake = pr.shake ? Math.sin(S.t * 38) * 0.012 * pr.shake : 0;
     for (const s of ['L', 'R']) {
-      const e = f.eyes[s], sx = e.sx, normal = mode === 'n', closeAmt = clamp(Math.max(normal ? blinkK : 0, pr.close || 0, pr.wink === s ? 1 : 0), 0, 1);
-      const sq = Math.max(0.08, 1 - closeAmt * 0.92), big = 1 + c.big;
+      const e = f.eyes[s], sx = e.sx, P = 'Eye' + s + '.', Q = 'Brow' + s + '.', normal = mode === 'n', closeAmt = clamp(fv(P + 'close', Math.max(normal ? blinkK : 0, pr.close || 0, pr.wink === s ? 1 : 0)), 0, 1);
+      const sq = Math.max(0.08, 1 - closeAmt * 0.92), big = 1 + fv(P + 'big', c.big);
       e.bone.scale.set(big, sq * big, 1);
       e.white.visible = normal || mode === 'heart' || mode === 'spiral'; e.pupil.visible = normal; e.glint.visible = normal;
       for (const m of eyeModes) e[m].visible = false; if (!normal) e[modeKey[mode]].visible = true;
@@ -440,21 +470,21 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       if (shut) e.arc.visible = true;   // ojo cerrado (parpadeo/guiño) = una línea curva oscura; se compensa el aplastado del hueso para que no desaparezca
       e.arc.scale.y = shut ? 0.45 / (sq * big) : 1;
       // pupila: se mueve con la mirada, se achica o agranda
-      const ps = c.ps, [px, py] = fitPupil(c.lx * 0.035 - sx * PUPIL_IN + shake, c.ly * 0.028 - 0.03, PUPIL_R * ps);   // PUPIL_IN: las dos pupilas se acercan a la nariz (convergen) para que no miren cada una hacia un lado   // mirada contenida: la pupila nunca se acerca al borde
+      const ps = fv(P + 'ps', c.ps), elx = clamp(fv(P + 'lookX', c.lx), -1, 1), ely = clamp(fv(P + 'lookY', c.ly), -1, 1), [px, py] = fitPupil(elx * 0.035 - sx * PUPIL_IN + shake, ely * 0.028 - 0.03, PUPIL_R * ps);   // PUPIL_IN: las dos pupilas se acercan a la nariz (convergen) para que no miren cada una hacia un lado   // mirada contenida: la pupila nunca se acerca al borde
       e.pupil.position.set(px, py, sagZ(px, py, R) + 0.016); e.pupil.scale.set(ps, ps, 1); e.glint.position.set(px + 0.034 * ps, py + 0.038 * ps, sagZ(px, py, R) + 0.02);
       // párpado negro: baja desde arriba e inclina según la emoción (enojo: lado interior abajo; tristeza: al revés)
-      const cov = clamp(c.cover, 0, 0.95); e.lid.visible = normal && cov > 0.01;
-      if (e.lid.visible) { if (Math.abs(cov - e.lid._cov) > 0.004) { e.lid._cov = cov; updateLid(e, cov, R); } e.lid.rotation.z = sx * c.browA * 0.5; }
+      const cov = clamp(fv(P + 'cover', c.cover), 0, 0.95); e.lid.visible = normal && cov > 0.01;
+      if (e.lid.visible) { if (Math.abs(cov - e.lid._cov) > 0.004) { e.lid._cov = cov; updateLid(e, cov, R); } e.lid.rotation.z = sx * fv(Q + 'angle', c.browA) * 0.5; }
       // lágrima que cae
-      e.tear.visible = !!pr.tear; if (pr.tear) { const ph = (S.t * 0.9 + (s === 'L' ? 0 : 0.5)) % 1; e.tear.position.set(sx * 0.07, -0.16 - ph * 0.34, sagZ(0, -0.2 - ph * 0.34, R) + 0.03); e.tear.scale.set(1, 1.5, 0.4).multiplyScalar(1 - ph * 0.4); }
+      const tearOn = fv(P + 'tear', pr.tear ? 1 : 0) > 0.5; e.tear.visible = tearOn; if (tearOn) { const ph = (S.t * 0.9 + (s === 'L' ? 0 : 0.5)) % 1; e.tear.position.set(sx * 0.07, -0.16 - ph * 0.34, sagZ(0, -0.2 - ph * 0.34, R) + 0.03); e.tear.scale.set(1, 1.5, 0.4).multiplyScalar(1 - ph * 0.4); }
       // ceja
-      const b = f.brows[s]; b.piv.visible = !!pr.brows;   // las cejas solo se ven en las expresiones que las usan
-      b.brow.position.y = BROW_Y + c.browY + (pr.wink === s ? -0.025 : 0); b.brow.position.z = sagZ(0, b.brow.position.y, R); b.brow.rotation.z = sx * c.browA * 0.55;
+      const b = f.brows[s]; b.piv.visible = !!pr.brows || !!(fa && (fa[Q + 'angle'] || fa[Q + 'y']));   // las cejas solo se ven en las expresiones que las usan
+      b.brow.position.y = BROW_Y + fv(Q + 'y', c.browY) + (pr.wink === s ? -0.025 : 0); b.brow.position.z = sagZ(0, b.brow.position.y, R); b.brow.rotation.z = sx * fv(Q + 'angle', c.browA) * 0.55;
     }
     // dientes: av.teethMode = 'on' | 'off' (forzado con setBone('Teeth', { visible })) o null (automático)
     const tm = av.teethMode, autoTeeth = (pr.teeth ? c.open > 0.14 : talking > 0 && c.open > 0.3);   // solo en caras que los piden, o al hablar con la boca bien abierta if ((tm || null) !== f._tm) updateTeeth(av);
-    av.visuals.Teeth.visible = (tm === 'on' ? true : tm === 'off' ? false : autoTeeth) && av.visuals.Head.visible;
-    if (Math.abs(c.open - (f._lo === undefined ? -1 : f._lo)) > 0.008 || Math.abs(c.curve - (f._lc === undefined ? -9 : f._lc)) > 0.008 || Math.abs(c.w - (f._lw === undefined ? -1 : f._lw)) > 0.003 || Math.abs(c.tongue - (f._lt === undefined ? -1 : f._lt)) > 0.01) { f._lo = c.open; f._lc = c.curve; f._lw = c.w; f._lt = c.tongue; updateMouthModel(av); }
+    av.visuals.Teeth.visible = (tm === 'on' ? true : tm === 'off' ? false : fv('Mouth.teeth', autoTeeth ? 1 : 0) > 0.5) && av.visuals.Head.visible;
+    if (Math.abs(mo.open - (f._lo === undefined ? -1 : f._lo)) > 0.008 || Math.abs(mo.curve - (f._lc === undefined ? -9 : f._lc)) > 0.008 || Math.abs(mo.w - (f._lw === undefined ? -1 : f._lw)) > 0.003 || Math.abs(mo.tongue - (f._lt === undefined ? -1 : f._lt)) > 0.01) { f._lo = mo.open; f._lc = mo.curve; f._lw = mo.w; f._lt = mo.tongue; updateMouthModel(av); }
   }
 
   // ── Cara del avatar sobre la pieza Head de un Model de piezas (NPC) ─────────────────────────────────────────
@@ -638,7 +668,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     dead:      { open: 0.15, curve: -0.3, width: 0.10, browA: -0.2, browY: 0,   lid: 0,   blushA: 0.0 },
   };
   function updateMouth(av) {
-    const f = av.face, c = f.cur, w = c.width, cv = c.curve * 0.09, op = c.open * 0.16, N = 14, pts = [];
+    const f = av.face, c = f.mo || f.cur, w = c.width, cv = c.curve * 0.09, op = c.open * 0.16, N = 14, pts = [];
     // curva > 0: sonrisa (el centro baja respecto de las comisuras); curva < 0: boca triste
     for (let i = 0; i <= N; i++) { const t = i / N * 2 - 1; pts.push(new THREE.Vector3(t * w, -cv * (1 - t * t), 0)); }
     f.mouthLine.geometry.dispose(); f.mouthLine.geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.018, 5, false);
@@ -844,14 +874,29 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       if (o.mode === 'add') addInto(av, name, eulerQ(rr), o.w); else blendInto(av, name, eulerQ(rr), o.w);
     }
 
+    // — pistas de animación por hueso (CrixAnim kind:'bone'): cada canal se mezcla sobre lo que haya debajo (pose base, gestos, overrides) —
+    const ba = av.boneAnim;
+    if (ba) for (const name of Object.keys(ba)) {
+      if (!BONE_SET.has(name)) continue; const o = ba[name];
+      if (o.rx || o.ry || o.rz) {
+        const T = av.target[name] || (av.target[name] = { q: new THREE.Quaternion(), has: false });
+        E.setFromQuaternion(T.has ? T.q : IDENT, 'XYZ');
+        if (o.rx) E.x = faceVal(o, 'rx', E.x); if (o.ry) E.y = faceVal(o, 'ry', E.y); if (o.rz) E.z = faceVal(o, 'rz', E.z);
+        T.q.setFromEuler(E); T.has = true;
+      }
+    }
+
     // — aplicar a los huesos (suavizado exponencial → transiciones fluidas entre cualquier par de poses) —
     const lerpK = 1 - Math.exp(-dt * (ctx.snap ? 200 : 18));
     for (const n of BONE_NAMES) {
       const b = av.bones[n], P = av.pose[n], T = av.target[n], o = av.layers.over[n], rp = b.userData.rest.p;
       P.q.slerp(T && T.has ? T.q : IDENT, lerpK);
       b.quaternion.copy(b.userData.rest.q).multiply(P.q);
-      if (o && o.pos) b.position.set(rp.x + o.pos[0], rp.y + o.pos[1], rp.z + o.pos[2]); else if (b.position.x !== rp.x || b.position.y !== rp.y || b.position.z !== rp.z) b.position.copy(rp);
-      if (o && o.scl) b.scale.set(o.scl[0], o.scl[1], o.scl[2]); else if (b.scale.x !== 1 || b.scale.y !== 1 || b.scale.z !== 1) b.scale.set(1, 1, 1);
+      const an = ba && ba[n], op0 = o && o.pos ? o.pos : [0, 0, 0], os0 = o && o.scl ? o.scl : [1, 1, 1];
+      if (an && (an.x || an.y || an.z)) b.position.set(rp.x + faceVal(an, 'x', op0[0]), rp.y + faceVal(an, 'y', op0[1]), rp.z + faceVal(an, 'z', op0[2]));
+      else if (o && o.pos) b.position.set(rp.x + o.pos[0], rp.y + o.pos[1], rp.z + o.pos[2]); else if (b.position.x !== rp.x || b.position.y !== rp.y || b.position.z !== rp.z) b.position.copy(rp);
+      if (an && (an.sx || an.sy || an.sz)) b.scale.set(faceVal(an, 'sx', os0[0]), faceVal(an, 'sy', os0[1]), faceVal(an, 'sz', os0[2]));
+      else if (o && o.scl) b.scale.set(o.scl[0], o.scl[1], o.scl[2]); else if (b.scale.x !== 1 || b.scale.y !== 1 || b.scale.z !== 1) b.scale.set(1, 1, 1);
     }
     S._y = S._y === undefined ? y : S._y + (y - S._y) * (1 - Math.exp(-dt * 14));
     av.bones.Hips.position.y += S._y;
@@ -862,26 +907,30 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (!av.face) return; if (av.face.kind === 'model') return updateFaceModel(av, dt, hint, talk, ctx);
     const S = av.state, f = av.face, cur = f.cur; S.faceT += dt;
     let name = av.layers.face || hint || (av.layers.anim && EMOTES[av.layers.anim.name] && EMOTES[av.layers.anim.name].fn(0, 1)._face) || (S.loco === 'fall' ? 'scared' : S.face);
+    const fa = av.faceAnim, fv = (ch, base) => faceVal(fa, ch, base);
+    const fe = fa && fa['Expression.emotion']; if (fe && fe[1] > 0.5) { const en = FACES[clamp(Math.round(fe[0]), 0, FACES.length - 1)]; if (en) name = en; }
     if (!FACE_PRESETS[name]) name = 'neutral';
     const pr = FACE_PRESETS[name], k = 1 - Math.exp(-dt * 12);
     let open = pr.open;
     if (talk || av.layers.talk || name === 'talk') { open = 0.15 + Math.abs(sin(S.t * 14)) * 0.35 * Math.max(talk, av.layers.talk ? 1 : 0, name === 'talk' ? 1 : 0); }
     cur.open += (open - cur.open) * k; cur.curve += (pr.curve - cur.curve) * k; cur.width += (pr.width - cur.width) * k;
     cur.browA += (pr.browA - cur.browA) * k; cur.browY += (pr.browY - cur.browY) * k; cur.lid += (pr.lid - cur.lid) * k; cur.blushA += (pr.blushA - cur.blushA) * k;
+    const mo = f.mo = { open: fv('Mouth.open', cur.open), curve: fv('Mouth.curve', cur.curve), width: fv('Mouth.w', cur.width) };
     // parpadeo
     S.blinkT -= dt; if (S.blinkT <= 0) { S.blink = 1; S.blinkT = 2 + Math.random() * 4; }
     if (S.blink > 0) S.blink = Math.max(0, S.blink - dt * 7);
     const blinkK = Math.sin(S.blink * Math.PI);
     // mirada (hacia dirección de movimiento si se indica)
-    const lx = clamp(num(ctx && ctx.lookX), -1, 1) * 0.04, ly = clamp(num(ctx && ctx.lookY), -1, 1) * 0.03;
+    const lx0 = clamp(num(ctx && ctx.lookX), -1, 1), ly0 = clamp(num(ctx && ctx.lookY), -1, 1);
     for (const s of ['L', 'R']) {
-      const e = f.eyes[s], sx = s === 'L' ? -1 : 1;
-      const closeAmt = clamp(Math.max(blinkK, cur.lid, name === 'wink' && s === 'R' ? 1 : 0, name === 'dead' ? 1 : 0), 0, 1);
-      e.bone.scale.set(1, Math.max(0.08, 1 - closeAmt * 0.92 + Math.max(0, -cur.lid) * 0.25), 1);
+      const e = f.eyes[s], sx = s === 'L' ? -1 : 1, P = 'Eye' + s + '.', Q = 'Brow' + s + '.';
+      const lx = clamp(fv(P + 'lookX', lx0), -1, 1) * 0.04, ly = clamp(fv(P + 'lookY', ly0), -1, 1) * 0.03, lid = fv(P + 'cover', cur.lid);
+      const closeAmt = clamp(fv(P + 'close', Math.max(blinkK, cur.lid, name === 'wink' && s === 'R' ? 1 : 0, name === 'dead' ? 1 : 0)), 0, 1);
+      e.bone.scale.set(1, Math.max(0.08, 1 - closeAmt * 0.92 + Math.max(0, -lid) * 0.25), 1);
       e.pupil.position.x = lx; e.pupil.position.y = ly; e.glint.position.x = 0.025 + lx; e.glint.position.y = 0.03 + ly;
-      f.brows[s].position.y = 0.60 + cur.browY + (name === 'wink' && s === 'R' ? -0.03 : 0); f.brows[s].rotation.z = Math.PI / 2 + sx * cur.browA * 0.55;   // browA > 0 (enojo): extremo interior hacia abajo
+      f.brows[s].position.y = 0.60 + fv(Q + 'y', cur.browY) + (name === 'wink' && s === 'R' ? -0.03 : 0); f.brows[s].rotation.z = Math.PI / 2 + sx * fv(Q + 'angle', cur.browA) * 0.55;   // browA > 0 (enojo): extremo interior hacia abajo
     }
-    if (Math.abs(cur.open - (f._lo ?? -1)) > 0.01 || Math.abs(cur.curve - (f._lc ?? -9)) > 0.01 || Math.abs(cur.width - (f._lw ?? -1)) > 0.003) { f._lo = cur.open; f._lc = cur.curve; f._lw = cur.width; updateMouth(av); }
+    if (Math.abs(mo.open - (f._lo ?? -1)) > 0.01 || Math.abs(mo.curve - (f._lc ?? -9)) > 0.01 || Math.abs(mo.width - (f._lw ?? -1)) > 0.003) { f._lo = mo.open; f._lc = mo.curve; f._lw = mo.width; updateMouth(av); }
   }
 
   // ── API de control (la usan scripts, servidor y editor) ─────────────────────────────────────
@@ -943,7 +992,9 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (!st || typeof st !== 'object') return;
     if (st.look) setLook(av, st.look);
     if (st.hold !== undefined) av.hold = !!st.hold;
-    if (st.reset) { stopAnimation(av); av.layers.face = null; av.layers.talk = false; av.hold = false; for (const id of Object.keys(av.accessories)) removeAccessory(av, id); resetBone(av); }
+    if (st.faceAnim !== undefined) av.faceAnim = st.faceAnim || null;
+    if (st.boneAnim !== undefined) av.boneAnim = st.boneAnim || null;
+    if (st.reset) { av.faceAnim = null; av.boneAnim = null; stopAnimation(av); av.layers.face = null; av.layers.talk = false; av.hold = false; for (const id of Object.keys(av.accessories)) removeAccessory(av, id); resetBone(av); }
     if (st.stop) stopAnimation(av, st.stop === true ? null : st.stop);
     if (st.anim) playAnimation(av, st.anim.name, st.anim);
     if (st.face !== undefined) setFace(av, st.face, st.talk);

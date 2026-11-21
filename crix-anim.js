@@ -2,9 +2,20 @@
 // CrixAnim — motor de animación de Crix (sin dependencias; lo usan el servidor, los scripts y el editor).
 //
 //  Animación = { id, name, length?, loop?, speed?, layers:[Capa], events:[{t,name,data?}] }
-//  Capa      = { id, name, loop?, weight, speed, mode:'override'|'additive', length?, enabled,
+//  Capa      = { id, name, loop?, weight, speed, priority, mode:'override'|'additive', length?, enabled,
 //                tracks:[Pista], clips:[Clip], events:[...] }
-//  Pista     = { target, kind:'part'|'joint', rel:bool, channels:{ x|y|z|rx|ry|rz|sx|sy|sz|transparent|angle: [Key] } }
+//
+//  PRIORIDADES (como en Roblox, pero por pieza): cada capa tiene `priority` (nombre o número: Core 0 · Idle 1 · Movement 2 ·
+//  Action 3 · Action2 4 · Action3 5 · Action4 6; se admite cualquier número). Como cada pista apunta a UNA pieza/unión, una capa
+//  con prioridad alta solo manda sobre las piezas/canales que anima; el resto sigue con las capas de menor prioridad.
+//  Se resuelve por canal: de mayor a menor prioridad cada capa toma `peso` del hueco que queda y el resto pasa a la siguiente
+//  (a igual prioridad manda la capa de más arriba / la animación que empezó después). Las capas 'additive' se suman encima siempre.
+//  Pista     = { target, kind:'part'|'joint'|'bone'|'face', sub?, rel:bool, channels:{ canal: [Key] } }
+//              part  → una pieza (x,y,z,rx,ry,rz,sx,sy,sz,transparent)       joint → una unión (… y angle)
+//              bone  → UN hueso del avatar de un jugador/NPC (rx,ry,rz,x,y,z,sx,sy,sz); target = nombre del hueso
+//              face  → UN elemento de la cara (sub): Mouth · EyeL · EyeR · BrowL · BrowR · Expression; target = pieza Head / avatar
+//              Nada viene agrupado: cada pieza, unión, hueso y elemento de la cara es una pista suelta que el usuario pone en la capa
+//              que quiera y con la prioridad que quiera (cada pista de una capa hereda la prioridad de ESA capa).
 //  Key       = { t (s), v, ease, bez?:[x1,y1,x2,y2] }   ← la curva `ease` vale para el tramo que EMPIEZA en esa clave
 //  Clip      = { symbol:'<id de otra animación>', start, length?, loop, speed, weight, targets:{interno:externo} }  ← SÍMBOLO (como Adobe Animate)
 //
@@ -16,6 +27,37 @@
   else root.CrixAnim = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   const CHANNELS = ['x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'transparent', 'angle'];
+  // La cara NO es un bloque: cada elemento es un destino aparte (sub) con sus propios canales. Se pone cada uno en la capa que se quiera.
+  const FACE_SUBS = {
+    Mouth: ['open', 'curve', 'w', 'tongue', 'teeth', 'talk'],
+    EyeL: ['close', 'cover', 'ps', 'big', 'lookX', 'lookY', 'tear'],
+    EyeR: ['close', 'cover', 'ps', 'big', 'lookX', 'lookY', 'tear'],
+    BrowL: ['angle', 'y'],
+    BrowR: ['angle', 'y'],
+    Expression: ['emotion'],
+  };
+  const FACE_DEFAULTS = { open: 0, curve: 0.12, w: 0.15, tongue: 0, teeth: 0, talk: 0, close: 0, cover: 0, ps: 1, big: 0, lookX: 0, lookY: 0, tear: 0, angle: 0, y: 0, emotion: 0 };
+  const FACE_EMOTIONS = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'sleepy', 'wink', 'smug', 'scared', 'talk', 'dead', 'laugh', 'cry', 'love', 'dizzy', 'hurt', 'yawn', 'tongue', 'evil'];
+  const FACE_STEP = ['emotion', 'talk', 'tear', 'teeth'];                       // canales on/off o de índice: claves escalonadas
+  const BONE_CHANNELS = ['rx', 'ry', 'rz', 'x', 'y', 'z', 'sx', 'sy', 'sz'];    // huesos del avatar (rotación en radianes, posición = desplazamiento)
+  const faceSub = v => Object.prototype.hasOwnProperty.call(FACE_SUBS, v) ? v : 'Mouth';
+  const channelsOf = (kind, sub) => kind === 'face' ? FACE_SUBS[faceSub(sub)] : kind === 'bone' ? BONE_CHANNELS : CHANNELS;
+  // Nombre del canal dentro del acumulador: los de la cara llevan el elemento delante («EyeL.close») para que cada uno tenga su propia prioridad.
+  const chKey = (tr, c) => tr.kind === 'face' ? tr.sub + '.' + c : c;
+  const PRIORITIES = { Core: 0, Idle: 1, Movement: 2, Action: 3, Action2: 4, Action3: 5, Action4: 6 };
+  const DEFAULT_PRIORITY = PRIORITIES.Action;
+  const PRIORITY_NAMES = Object.keys(PRIORITIES);
+  // Acepta 'Movement' (sin importar mayúsculas), 'action 2', un número o un {name}; cualquier otra cosa → Action.
+  function priorityValue(p, d) {
+    if (typeof p === 'number' && Number.isFinite(p)) return p;
+    if (typeof p === 'string' && p.trim() !== '') {
+      const k = p.trim().replace(/[\s_-]+/g, '').toLowerCase();
+      for (const n of PRIORITY_NAMES) if (n.toLowerCase() === k) return PRIORITIES[n];
+      const n = Number(p); if (Number.isFinite(n)) return n;
+    }
+    return d === undefined ? DEFAULT_PRIORITY : d;
+  }
+  function priorityName(v) { for (const n of PRIORITY_NAMES) if (PRIORITIES[n] === v) return n; return String(v); }
   const MAX_DEPTH = 24;   // solo corta ciclos de símbolos (A contiene a B que contiene a A)
   const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
   const clamp01 = t => t < 0 ? 0 : t > 1 ? 1 : t;
@@ -75,9 +117,11 @@
   }
   const sanitizeEvents = ev => (Array.isArray(ev) ? ev : []).filter(e => e && Number.isFinite(Number(e.t))).map(e => { const o = { t: Math.max(0, Number(e.t)), name: sid(e.name, 'Evento') }; if (e.data !== undefined) o.data = e.data; return o; }).sort((a, b) => a.t - b.t);
   function sanitizeTrack(src) {
-    const t = { target: sid(src && src.target, ''), kind: src && src.kind === 'joint' ? 'joint' : 'part', rel: !!(src && src.rel), channels: {} };
+    const kind = src && (src.kind === 'joint' || src.kind === 'face' || src.kind === 'bone') ? src.kind : 'part';
+    const t = { target: sid(src && src.target, ''), kind, rel: kind === 'face' ? false : !!(src && src.rel), channels: {} };
+    if (kind === 'face') t.sub = faceSub(src && src.sub);
     const ch = src && src.channels && typeof src.channels === 'object' ? src.channels : {};
-    for (const c of CHANNELS) { const keys = sanitizeKeys(ch[c]); if (keys.length) t.channels[c] = keys; }
+    for (const c of channelsOf(kind, t.sub)) { const keys = sanitizeKeys(ch[c]); if (keys.length) t.channels[c] = keys; }
     return t;
   }
   function sanitizeClip(src) {
@@ -87,7 +131,7 @@
     return c;
   }
   function sanitizeLayer(src, i) {
-    const l = { id: sid(src && src.id, 'L' + (i + 1)), name: sid(src && src.name, 'Capa ' + (i + 1)), weight: num(src && src.weight, 1), speed: num(src && src.speed, 1), mode: src && src.mode === 'additive' ? 'additive' : 'override', enabled: !(src && src.enabled === false), tracks: (src && Array.isArray(src.tracks) ? src.tracks : []).map(sanitizeTrack), clips: (src && Array.isArray(src.clips) ? src.clips : []).map(sanitizeClip), events: sanitizeEvents(src && src.events) };
+    const l = { id: sid(src && src.id, 'L' + (i + 1)), name: sid(src && src.name, 'Capa ' + (i + 1)), weight: num(src && src.weight, 1), speed: num(src && src.speed, 1), priority: priorityValue(src && src.priority), mode: src && src.mode === 'additive' ? 'additive' : 'override', enabled: !(src && src.enabled === false), tracks: (src && Array.isArray(src.tracks) ? src.tracks : []).map(sanitizeTrack), clips: (src && Array.isArray(src.clips) ? src.clips : []).map(sanitizeClip), events: sanitizeEvents(src && src.events) };
     if (src && typeof src.loop === 'boolean') l.loop = src.loop;
     if (src && src.length !== undefined && Number(src.length) > 0) l.length = Number(src.length);
     return l;
@@ -125,24 +169,46 @@
     const a = keys[lo], b = keys[hi], k = (t - a.t) / Math.max(1e-9, b.t - a.t);
     return a.ease === 'step' ? a.v : a.v + (b.v - a.v) * ease(a.ease, k, a.bez);
   }
-  // acumulador: key `target\u0001kind\u0001channel` → { target, kind, ch, rel, v, w, add }
-  function put(acc, target, kind, ch, rel, v, w, additive) {
+  // Acumulador: key `target\u0001kind\u0001channel` → { target, kind, ch, items:[{ rel, v, w, pr, ord }], add }.
+  // Las contribuciones se guardan sin mezclar y `resolve` las mezcla por prioridad al final (así una capa puede ganarle a otra aunque
+  // se muestree antes). `ord` desempata prioridades iguales: más alto = más arriba.
+  function put(acc, target, kind, ch, rel, v, w, additive, pr, ord) {
     const key = target + '\u0001' + kind + '\u0001' + ch; let e = acc[key];
-    if (!e) e = acc[key] = { target, kind, ch, rel, v: 0, w: 0, add: 0 };
+    if (!e) e = acc[key] = { target, kind, ch, rel: false, v: 0, w: 0, rd: 0, add: 0, items: [] };
     if (additive) { e.add += v * w; return; }
-    if (e.w <= 0) { e.v = v; e.w = clamp01(w); } else { e.v = e.v + (v - e.v) * clamp01(w); e.w = e.w + (1 - e.w) * clamp01(w); }
-    e.rel = rel;
+    e.items.push({ rel: !!rel, v, w: clamp01(w), pr: pr === undefined ? DEFAULT_PRIORITY : pr, ord: ord || 0 });
   }
-  function sampleAnimInto(anim, times, lib, acc, weight, map, depth, additiveAll) {
+  // Mezcla en cascada: de mayor a menor prioridad, cada contribución toma `w` de lo que queda libre. Resultado por canal:
+  //   absoluto: base + (v − base)·w   ·   relativo: + rd   ·   aditivo: + add   →  valor final = base + (v − base)·w + rd + add
+  function resolve(acc) {
+    for (const key in acc) {
+      const e = acc[key], items = e.items; if (!items) continue;
+      items.sort((a, b) => b.pr - a.pr || b.ord - a.ord);
+      let free = 1, wAbs = 0, vAbs = 0, rd = 0;
+      for (const it of items) {
+        if (free <= 1e-9) break;
+        const f = free * it.w; free -= f;
+        if (it.rel) rd += it.v * f; else { wAbs += f; vAbs += it.v * f; }
+      }
+      e.w = wAbs; e.v = wAbs > 0 ? vAbs / wAbs : 0; e.rd = rd; e.rel = wAbs === 0 && items.length > 0;
+      delete e.items;
+    }
+    return acc;
+  }
+  // Valor final de una entrada resuelta sobre la pose base `base` (las uniones usan base 0).
+  const apply = (e, base) => base + (e.v - base) * e.w + e.rd + e.add;
+  function sampleAnimInto(anim, times, lib, acc, weight, map, depth, additiveAll, pr0, ord0) {
     for (let i = 0; i < anim.layers.length; i++) {
       const l = anim.layers[i]; if (!l.enabled) continue;
-      sampleLayerInto(l, times[i], lib, acc, weight * l.weight, map, depth, additiveAll || l.mode === 'additive');
+      // dentro de un símbolo manda la prioridad de la capa que lo contiene (el símbolo hereda), salvo que la capa interna sea más alta
+      sampleLayerInto(l, times[i], lib, acc, weight * l.weight, map, depth, additiveAll || l.mode === 'additive', pr0 === undefined ? l.priority : Math.max(pr0, l.priority), (ord0 || 0) + i * 1e-6);
     }
   }
-  function sampleLayerInto(layer, t, lib, acc, w, map, depth, additive) {
+  function sampleLayerInto(layer, t, lib, acc, w, map, depth, additive, pr, ord) {
+    if (pr === undefined) pr = layer.priority;
     for (const tr of layer.tracks) {
       const target = map && map[tr.target] !== undefined ? map[tr.target] : tr.target;
-      for (const c in tr.channels) { const v = sampleKeys(tr.channels[c], t); if (v !== undefined) put(acc, target, tr.kind, c, tr.rel, v, w, additive); }
+      for (const c in tr.channels) { const v = sampleKeys(tr.channels[c], t); if (v !== undefined) put(acc, target, tr.kind, chKey(tr, c), tr.rel, v, w, additive, pr, ord); }
     }
     if (depth >= MAX_DEPTH) return;
     for (const clip of layer.clips) {
@@ -154,7 +220,7 @@
       const inner = {}; if (clip.targets) for (const k in clip.targets) inner[k] = clip.targets[k];
       const merged = map ? Object.assign({}, inner) : inner;
       if (map) for (const k in merged) if (map[merged[k]] !== undefined) merged[k] = map[merged[k]];
-      sampleAnimInto(sym, sym.layers.map(sl => symbolLayerTime(sl, lt, slen, lib, depth + 1, sym.loop)), lib, acc, w * clip.weight, merged, depth + 1, additive);
+      sampleAnimInto(sym, sym.layers.map(sl => symbolLayerTime(sl, lt, slen, lib, depth + 1, sym.loop)), lib, acc, w * clip.weight, merged, depth + 1, additive, pr, ord);
     }
   }
   // dentro de un símbolo cada capa respeta su propio loop (si no define loop, hereda el del símbolo)
@@ -176,10 +242,13 @@
     opts = opts || {};
     const lib = opts.library || null, anim = def && def.layers && def.events && def.fps ? def : sanitize(def);
     const len = animLength(anim, lib, 0);
+    // prioridad de cada capa: opts.layerPriority {capa: prioridad} > opts.priority (toda la animación, como en Roblox) > la que trae la capa
+    const lpo = opts.layerPriority && typeof opts.layerPriority === 'object' ? opts.layerPriority : null;
+    const layerPrio = l => lpo && lpo[l.id] !== undefined ? priorityValue(lpo[l.id], l.priority) : lpo && lpo[l.name] !== undefined ? priorityValue(lpo[l.name], l.priority) : opts.priority !== undefined && opts.priority !== null ? priorityValue(opts.priority, l.priority) : l.priority;
     const p = {
       anim, id: anim.id, name: anim.name, length: len, time: 0, speed: num(opts.speed, 1), weight: num(opts.weight, 1), playing: true, ended: false, started: false,
-      loop: opts.loop === undefined ? anim.loop : !!opts.loop, map: opts.targets || null,
-      layers: anim.layers.map(l => ({ layer: l, time: 0, loop: opts.layerLoop && opts.layerLoop[l.id] !== undefined ? !!opts.layerLoop[l.id] : opts.layerLoop && opts.layerLoop[l.name] !== undefined ? !!opts.layerLoop[l.name] : (l.loop === undefined ? anim.loop : l.loop), weight: 1, speed: 1, enabled: l.enabled, len: layerLength(l, lib, 0), done: false })),
+      loop: opts.loop === undefined ? anim.loop : !!opts.loop, map: opts.targets || null, order: num(opts.order, 0),
+      layers: anim.layers.map(l => ({ layer: l, time: 0, loop: opts.layerLoop && opts.layerLoop[l.id] !== undefined ? !!opts.layerLoop[l.id] : opts.layerLoop && opts.layerLoop[l.name] !== undefined ? !!opts.layerLoop[l.name] : (l.loop === undefined ? anim.loop : l.loop), weight: 1, speed: 1, enabled: l.enabled, len: layerLength(l, lib, 0), done: false, priority: layerPrio(l) })),
     };
     const find = key => p.layers.find(x => x.layer.id === String(key) || x.layer.name === String(key));
     p.layer = find;
@@ -187,15 +256,21 @@
     p.setLayerWeight = (key, v) => { const x = find(key); if (x) x.weight = num(v, 1); return !!x; };
     p.setLayerSpeed = (key, v) => { const x = find(key); if (x) x.speed = num(v, 1); return !!x; };
     p.setLayerEnabled = (key, v) => { const x = find(key); if (x) x.enabled = !!v; return !!x; };
+    p.setLayerPriority = (key, v) => { const x = find(key); if (x) x.priority = priorityValue(v, x.priority); return !!x; };
+    p.setPriority = v => { for (const x of p.layers) x.priority = priorityValue(v, x.priority); };
+    p.getLayerPriority = key => { const x = find(key); return x ? x.priority : undefined; };
     p.seek = t => { t = Math.max(0, num(t, 0)); p.time = p.loop && len > 0 ? t % len : t; p.ended = false; p.started = false; for (const x of p.layers) { x.time = x.loop && x.len > 0 ? t % x.len : Math.min(t, x.len); x.done = false; } };
-    p.sample = () => {
-      const acc = {}, times = p.layers.map(x => x.time);
-      for (let i = 0; i < p.layers.length; i++) { const x = p.layers[i]; if (!x.enabled) continue; sampleLayerInto(x.layer, times[i], lib, acc, p.weight * x.weight * x.layer.weight, p.map, 0, x.layer.mode === 'additive'); }
+    // Suma las contribuciones de TODAS las capas a `acc` SIN resolver las prioridades: sirve para mezclar varias animaciones a la vez
+    // (la que tenga la capa de más prioridad sobre una pieza, gana esa pieza). Luego se llama a resolve(acc).
+    p.sampleInto = acc => {
+      const n = p.layers.length + 1;
+      for (let i = 0; i < p.layers.length; i++) { const x = p.layers[i]; if (!x.enabled) continue; sampleLayerInto(x.layer, x.time, lib, acc, p.weight * x.weight * x.layer.weight, p.map, 0, x.layer.mode === 'additive', x.priority, p.order + (i + 1) / n); }
       return acc;
     };
-    p.update = dt => {
+    p.sample = () => resolve(p.sampleInto({}));
+    p.update = (dt, skipSample) => {
       const events = [];
-      if (!p.playing) return { values: p.sample(), events, ended: p.ended };
+      if (!p.playing) return { values: skipSample ? null : p.sample(), events, ended: p.ended };
       dt = Math.max(0, num(dt, 0)) * p.speed * anim.speed;
       const first = !p.started; p.started = true;
       // reloj maestro (eventos de la animación)
@@ -215,10 +290,10 @@
       if (!p.layers.length) anyRunning = false;
       const looping = p.loop || p.layers.some(x => x.loop && x.len > 0);
       if (!anyRunning && !looping && t1 >= len) { p.ended = true; p.playing = false; }
-      return { values: p.sample(), events, ended: p.ended };
+      return { values: skipSample ? null : p.sample(), events, ended: p.ended };
     };
     return p;
   }
 
-  return { CHANNELS, EASINGS, ease, bezier, sanitize, blank, sampleKeys, animLength, layerLength, createPlayer };
+  return { CHANNELS, BONE_CHANNELS, FACE_SUBS, FACE_DEFAULTS, FACE_EMOTIONS, FACE_STEP, channelsOf, EASINGS, PRIORITIES, DEFAULT_PRIORITY, priorityValue, priorityName, ease, bezier, sanitize, blank, sampleKeys, animLength, layerLength, createPlayer, put, resolve, apply };
 });

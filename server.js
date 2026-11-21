@@ -351,7 +351,7 @@ function normalizeRoomPart(id, source = {}) {
   // Propiedades extra estilo Roblox (BasePart). Solo se guardan las que vienen definidas.
   if(source.reflectance!==undefined)part.reflectance=number(source.reflectance,0,0,1);
   if(source.density!==undefined)part.density=number(source.density,0.7,0.01,100);
-  for(const key of ['castShadow','canTouch','canQuery','massless','locked'])if(source[key]!==undefined)part[key]=source[key]!==false;
+  for(const key of ['castShadow','canTouch','canQuery','massless','locked','negate'])if(source[key]!==undefined)part[key]=source[key]!==false;
   if(source.collisionGroup!==undefined)part.collisionGroup=String(source.collisionGroup||'Default').slice(0,40);
   if(source.parent!==undefined&&source.parent!==null)part.parent=String(source.parent).slice(0,120);
   if(source.attributes&&typeof source.attributes==='object'&&!Array.isArray(source.attributes)){
@@ -458,6 +458,7 @@ function handleScriptRunnerMessage(message) {
     else{
       const player=roomPlayers(room).find(item=>String(item.userId)===raw||String(item.socketId)===raw);
       if(player)keys.push(player.socketId);
+      else if(raw.startsWith('p:')&&room.worldParts&&room.worldParts[raw.slice(2)])keys.push(raw);   // cara de la pieza Head de un Model (animación de cara)
       else for(const npc of Object.values(room.npcs||{}))if(npc.id===raw||npc.name===raw)keys.push('n:'+npc.id);
     }
     const channel=gameChannel(room.mapId,room.instanceId);
@@ -949,7 +950,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-console.js','/crix-fx.js','/crix-ext.js',
+const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/crix-fx.js','/crix-ext.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png'];
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
 // Página para probar la API de clasificación desde el navegador (misma dirección que Crix, sin problemas de CORS): /probar-api

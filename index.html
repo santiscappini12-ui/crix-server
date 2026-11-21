@@ -3298,7 +3298,7 @@ function loadMyMap() { if (!stMapId) { const mine = Object.values(getMaps()).fin
   setTimeout(applyLighting, 100);
 }
 function clearSt() { stParts.forEach(p => p.mesh && stScene.remove(p.mesh)); stParts = []; if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; }
-function makeMesh(d) { let geo; if (window.CrixObjects && CrixObjects.isRigFacePiece && CrixObjects.isRigFacePiece(d)) d = Object.assign({}, d, { transparent: 1 }); const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.avatarMesh && window.CrixAvatar && CrixAvatar.modelBoneGeometry && (geo = CrixAvatar.modelBoneGeometry(d.avatarMesh))) { /* pieza real del avatar del jugador */ } else if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,1,2,0,2,3, 3,2,5,3,5,4, 0,3,4, 1,5,2, 0,4,1,1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo = geo.toNonIndexed(); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); applyPartUVs(geo, d, sx, sy, sz); const mat = buildPartMaterial(d); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); setShadowFlags(mesh); if (d.avatarMesh === 'Head' && window.CrixAvatar && CrixAvatar.attachRigFace && geo === CrixAvatar.modelBoneGeometry('Head')) { try { CrixAvatar.attachRigFace(mesh, d.look); } catch (e) { console.warn('[Cara NPC]', e); } } return mesh; }
+function makeMesh(d) { let geo; if (window.CrixObjects && CrixObjects.isRigFacePiece && CrixObjects.isRigFacePiece(d)) d = Object.assign({}, d, { transparent: 1 }); const sx = d.sx||4, sy = d.sy||1, sz = d.sz||4; if (d.avatarMesh && window.CrixAvatar && CrixAvatar.modelBoneGeometry && (geo = CrixAvatar.modelBoneGeometry(d.avatarMesh))) { /* pieza real del avatar del jugador */ } else if (d.type === 'ImportedMesh' && d.meshData) { const binary=atob(d.meshData),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);const positions=new Float32Array(bytes.buffer);geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));geo.computeVertexNormals();geo.computeBoundingSphere(); } else if (d.type === 'Sphere') geo = new THREE.SphereGeometry(Math.min(sx,sy,sz)/2, 18, 14); else if (d.type === 'Cylinder') geo = new THREE.CylinderGeometry(sx/2, sx/2, sy, 18); else if (d.type === 'Wedge') { geo = new THREE.BufferGeometry(); const w=sx/2,h=sy,de=sz/2; const v = new Float32Array([-w,0,-de, w,0,-de, w,0,de, -w,0,de, -w,h,de, w,h,de]); const idx = new Uint16Array([0,1,2,0,2,3, 3,2,5,3,5,4, 0,3,4, 1,5,2, 0,4,1,1,4,5]); geo.setAttribute('position', new THREE.BufferAttribute(v,3)); geo.setIndex(new THREE.BufferAttribute(idx,1)); geo = geo.toNonIndexed(); geo.computeVertexNormals(); } else if (d.type === 'TrussPart') geo = new THREE.BoxGeometry(sx*0.25, sy, sz*0.25); else geo = new THREE.BoxGeometry(sx, sy, sz); applyPartUVs(geo, d, sx, sy, sz); const mat = buildPartMaterial(d); const mesh = new THREE.Mesh(geo, mat); mesh.position.set(d.x||0, d.y||0, d.z||0); mesh.rotation.set(d.rx||0, d.ry||0, d.rz||0); if(d.type==='ImportedMesh')mesh.scale.set((d.sx||4)/4,(d.sy||4)/4,(d.sz||4)/4); setShadowFlags(mesh); if (d.avatarMesh === 'Head' && window.CrixAvatar && CrixAvatar.attachRigFace && geo === CrixAvatar.modelBoneGeometry('Head')) { try { CrixAvatar.attachRigFace(mesh, d.look); const _pk = 'p:' + d.id, _pl = _avatarPending[_pk]; if (_pl && mesh.userData.rigFace) { _pl.forEach(x => CrixAvatar.applyState(mesh.userData.rigFace, x)); delete _avatarPending[_pk]; } } catch (e) { console.warn('[Cara NPC]', e); } } return mesh; }
 const NPC_LOOKS = { dummy:{ hair:'short' }, zombie:{ skin:'#8fb57a', hair:'none', face:'angry', pants:'#3d4a3a' }, robot:{ style:'stick', hair:'none', face:'neutral', eyes:'#2fd4ff' }, merchant:{ hair:'long', hairColor:'#8a5a2b', face:'happy' }, guard:{ hair:'cap', face:'neutral' }, cat:{ hair:'bun', face:'smug', scale:0.8 } };
 function makeHumanoidRig(d) {
   const root = new THREE.Group(), look = Object.assign({}, d.look || {}); if (d.skinColor && !look.skin) look.skin = d.skinColor;
@@ -3381,6 +3381,7 @@ function refreshExplorer() {
     }
     html2 += '</div><div class="exp-children">';
     if (f.id === 'Workspace') {
+      if (window.CrixEdit) { html2 += CrixEdit.workspaceTreeHtml(query); } else {
       html2 += stParts.map((p,i) => ({p,i})).filter(({p}) => !(window.CrixExt && CrixExt.isModelMember(p))).filter(({p}) => !query || (p.data.name+' '+p.data.type).toLowerCase().includes(query)).map(({p,i}) =>
         '<div class="exp-item '+(selPart===p?'sel':'')+'" onclick="selectPart(stParts['+i+'])">'+
         '<span style="font-size:10px">'+typeIcon(p.data.type)+'</span>'+
@@ -3389,6 +3390,7 @@ function refreshExplorer() {
         '</div>'
       ).join('');
       html2 += (window.CrixExt ? CrixExt.workspaceModelsHtml(query) : '');
+      }
     }
     html2 += scripts.map(s =>
       '<div class="exp-item" onclick="'+(s.type==='Sound'?'openSoundProps':'openCodeEditor')+'(\''+s.id+'\')">'+
@@ -4173,6 +4175,7 @@ function _avatarFor(key) {
   if (typeof key !== 'string') return null;
   if (socket && key === socket.id) return gPlayer && gPlayer.userData.avatar || null;
   if (key.startsWith('n:')) { const id = key.slice(2), npc = gNPCs.find(n => String(n.data.id) === id); return npc ? npc.mesh.userData.avatar : null; }
+  if (key.startsWith('p:')) { const o = runtimeObjects.get(key.slice(2)); return o && o.mesh && o.mesh.userData.rigFace || null; }   // cara de la cabeza de un Model
   return remotePlayers[key] ? remotePlayers[key].av : null;
 }
 const _avatarPending = {};
@@ -9344,5 +9347,7 @@ initGoogle();
 <script src="/crix-fx.js"></script>
 <script src="/crix-ext.js"></script>
 <script src="/crix-animator.js"></script>
+<script src="/crix-csg.js"></script>
+<script src="/crix-edit.js"></script>
 </body>
 </html>

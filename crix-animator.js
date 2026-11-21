@@ -1,10 +1,10 @@
 'use strict';
 // CrixAnimator — panel «🎞 Animador» del editor: capas con loop propio, pistas por objeto/unión, fotogramas clave con curvas,
 // eventos, símbolos (clips de otras animaciones) y vista previa en vivo. Las animaciones se guardan en el mapa (map.animations)
-// y se usan desde scripts por id:  game.animate('id', { model:'Bot' })
+// (también la CARA de los personajes: pistas «😀 Cara» con boca, cejas, párpados, mirada y expresión) y se usan desde scripts por id:  game.animate('id', { model:'Bot' }). Cada capa tiene prioridad (Core…Action4) y manda sobre las piezas que anima.
 (function () {
   const A = window.CrixAnim; if (!A) return;
-  const AN = { list: [], cur: null, t: 0, playing: false, sel: null, zoom: 120, layer: 0, track: -1, model: '', player: null, raf: 0, last: 0, base: new Map(), dirty: null };
+  const AN = { list: [], cur: null, t: 0, playing: false, sel: null, zoom: 120, layer: 0, track: -1, model: '', player: null, raf: 0, last: 0, base: new Map(), dirty: null, faceDriven: new Set() };
   const $ = id => document.getElementById(id);
   const esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const ROT = ['rx', 'ry', 'rz', 'angle'], D = 180 / Math.PI;
@@ -33,27 +33,36 @@
   const curModel = () => models().find(m => m.id === AN.model || m.name === AN.model) || null;
   function partEntry(name) { const m = curModel(); const id = m && m.parts && m.parts[name]; return stParts.find(e => e.data.id === (id || name)) || stParts.find(e => e.data.name === name); }
   function jointId(name) { const m = curModel(); return (m && m.joints && m.joints[name]) || name; }
-  const targetNames = () => { const out = { part: [], joint: [] }, m = curModel(); if (m) { out.part = Object.keys(m.parts || {}); out.joint = Object.keys(m.joints || {}); } for (const e of stParts) if (!out.part.includes(e.data.name)) out.part.push(e.data.name); return out; };
+  const targetNames = () => { const out = { part: [], joint: [], face: [], bone: ((window.CrixAvatar && CrixAvatar.BONES) || []).slice() }, m = curModel(); for (const e of stParts) if (e.data.avatarMesh === 'Head' && !out.face.includes(e.data.name)) out.face.push(e.data.name); if (m) { out.part = Object.keys(m.parts || {}); out.joint = Object.keys(m.joints || {}); } for (const e of stParts) if (!out.part.includes(e.data.name)) out.part.push(e.data.name); return out; };
   function baseOf(e) { if (!AN.base.has(e.data.id)) AN.base.set(e.data.id, { ...e.data }); return AN.base.get(e.data.id); }
 
   // ── Reproducción / vista previa ──
   function rebuild() { if (!AN.cur) { AN.player = null; return; } AN.player = A.createPlayer(AN.cur, { library: lib() }); AN.player.seek(AN.t); }
   function applyValues(values) {
-    const parts = {}, joints = {};
+    const parts = {}, joints = {}, faces = {};
     for (const k in values) {
       const e = values[k];
+      if (e.kind === 'bone') continue;   // los huesos del avatar solo se ven en el juego (la vista previa del editor no tiene avatar)
+      if (e.kind === 'face') { (faces[e.target] = faces[e.target] || {})[e.ch] = [e.v, e.w, e.rd, e.add]; continue; }
       if (e.kind === 'joint') { const id = jointId(e.target); (joints[id] = joints[id] || {})[e.ch] = e; continue; }
       const en = partEntry(e.target); if (!en) continue; (parts[en.data.id] = parts[en.data.id] || { _b: baseOf(en) })[e.ch] = e;
     }
     const pp = {}, jp = {};
-    for (const id in parts) { const o = parts[id], b = o._b, p = {}; for (const c in o) { if (c === '_b') continue; const e = o[c], bv = Number(b[c]) || 0; p[c] = (e.rel ? bv + e.v * e.w : bv + (e.v - bv) * e.w) + e.add; } pp[id] = p; }
-    for (const id in joints) { const o = joints[id], p = {}, tf = {}; for (const c in o) { const e = o[c], v = e.v * e.w + e.add; if (c === 'angle') { p.angle = v; } else tf[c] = v; } if (Object.keys(tf).length) p.transform = tf; jp[id] = p; }
+    for (const id in parts) { const o = parts[id], b = o._b, p = {}; for (const c in o) { if (c === '_b') continue; const e = o[c], bv = Number(b[c]) || 0; p[c] = A.apply(e, bv); } pp[id] = p; }
+    for (const id in joints) { const o = joints[id], p = {}, tf = {}; for (const c in o) { const e = o[c], v = A.apply(e, 0); if (c === 'angle') { p.angle = v; } else tf[c] = v; } if (Object.keys(tf).length) p.transform = tf; jp[id] = p; }
     if (window.CrixExt && CrixExt.animPose) CrixExt.animPose(pp, jp);
+    applyFaces(faces);
+  }
+  // Cara: se pone la animación (valores ya resueltos por prioridad) en la cara de la pieza Head; al dejar de animarla vuelve a la automática.
+  function applyFaces(faces) {
+    const now = new Set();
+    for (const name in faces) { const en = partEntry(name), av = en && en.mesh && en.mesh.userData.rigFace; if (!av || !window.CrixAvatar) continue; CrixAvatar.applyState(av, { faceAnim: faces[name] }); AN.faceDriven.add(av); now.add(av); }
+    for (const av of Array.from(AN.faceDriven)) if (!now.has(av)) { try { CrixAvatar.applyState(av, { faceAnim: null }); } catch (_) { /* cara ya destruida */ } AN.faceDriven.delete(av); }
   }
   function scrub(t) { AN.t = Math.max(0, t); if (!AN.player) rebuild(); if (!AN.player) return; AN.player.seek(AN.t); AN.player.playing = false; applyValues(AN.player.sample()); updatePlayhead(); }
   function play() { if (!AN.cur) return; rebuild(); AN.player.seek(AN.t >= AN.player.length ? 0 : AN.t); AN.player.playing = true; AN.playing = true; AN.last = performance.now(); cancelAnimationFrame(AN.raf); AN.raf = requestAnimationFrame(loop); renderBar(); }
   function pause() { AN.playing = false; cancelAnimationFrame(AN.raf); if (AN.player) AN.player.playing = false; renderBar(); }
-  function stop() { pause(); AN.t = 0; if (window.CrixExt && CrixExt.animPoseEnd) CrixExt.animPoseEnd(); AN.base.clear(); updatePlayhead(); }
+  function stop() { pause(); AN.t = 0; applyFaces({}); if (window.CrixExt && CrixExt.animPoseEnd) CrixExt.animPoseEnd(); AN.base.clear(); updatePlayhead(); }
   function loop(now) {
     if (!AN.playing) return; const dt = Math.min(0.1, (now - AN.last) / 1000); AN.last = now;
     const r = AN.player.update(dt); AN.t = AN.player.time; applyValues(r.values); updatePlayhead();
@@ -69,26 +78,28 @@
   function addKeyAt(l, tr, ch, t, v) {
     const track = AN.cur.layers[l].tracks[tr]; const arr = track.channels[ch] = track.channels[ch] || [];
     const i = arr.findIndex(k => Math.abs(k.t - t) < 1e-3); if (i >= 0) { arr[i].v = v; return i; }
-    arr.push({ t, v, ease: 'quadInOut' }); arr.sort((a, b) => a.t - b.t); return arr.findIndex(k => k.t === t);
+    arr.push({ t, v, ease: ['emotion', 'talk', 'tear', 'teeth'].includes(ch) ? 'step' : 'quadInOut' }); arr.sort((a, b) => a.t - b.t); return arr.findIndex(k => k.t === t);
   }
   function snap(t) { const f = AN.cur ? AN.cur.fps : 30; return Math.max(0, Math.round(t * f) / f); }
 
   function newAnim() { const a = A.blank('Animación ' + (AN.list.length + 1)); a.id = newId(); AN.list.push(a); AN.cur = a; AN.layer = 0; AN.track = -1; AN.sel = null; stop(); rebuild(); save(); render(); }
   function dupAnim() { if (!AN.cur) return; const c = A.sanitize(JSON.parse(JSON.stringify(AN.cur))); c.id = newId(); c.name += ' copia'; AN.list.push(c); AN.cur = c; rebuild(); save(); render(); }
   function delAnim() { if (!AN.cur || !confirm('¿Borrar «' + AN.cur.name + '»?')) return; stop(); AN.list = AN.list.filter(a => a !== AN.cur); AN.cur = AN.list[0] || null; AN.sel = null; rebuild(); save(); render(); }
-  function addLayer() { AN.cur.layers.push({ name: 'Capa ' + (AN.cur.layers.length + 1), tracks: [], clips: [], events: [] }); AN.layer = AN.cur.layers.length - 1; touch(); }
+  function addLayer() { AN.cur.layers.push({ name: 'Capa ' + (AN.cur.layers.length + 1), priority: AN.cur.layers.length ? AN.cur.layers[AN.cur.layers.length - 1].priority : A.DEFAULT_PRIORITY, tracks: [], clips: [], events: [] }); AN.layer = AN.cur.layers.length - 1; touch(); }
   function addTrack(kind) {
-    const names = targetNames()[kind]; if (!names.length) { toast(kind === 'joint' ? 'No hay uniones: elegí un Model arriba' : 'No hay objetos'); return; }
-    const pick = prompt((kind === 'joint' ? 'Unión' : 'Objeto') + ' a animar:\n' + names.slice(0, 60).join(', ') + (names.length > 60 ? '…' : ''), names[0]); if (!pick) return;
-    layerOf().tracks.push({ target: pick, kind, rel: kind === 'joint', channels: {} }); AN.track = layerOf().tracks.length - 1; touch();
+    const names = targetNames()[kind]; const free = kind === 'face' || kind === 'bone';   // cara/hueso también valen para avatares de jugadores y NPC (no hace falta que estén en el mapa)
+    if (!names.length && !free) { toast(kind === 'joint' ? 'No hay uniones: elegí un Model arriba' : 'No hay objetos'); return; }
+    const pick = prompt((kind === 'joint' ? 'Unión' : kind === 'face' ? 'Pieza Head o avatar de la cara' : kind === 'bone' ? 'Hueso del avatar' : 'Objeto') + ' a animar:\n' + names.slice(0, 60).join(', ') + (names.length > 60 ? '…' : ''), names[0] || (kind === 'face' ? 'Head' : '')); if (!pick) return;
+    let sub; if (kind === 'face') { const subs = Object.keys(A.FACE_SUBS); sub = prompt('Elemento de la cara (cada uno es una pista suelta que ponés en la capa que quieras):\n' + subs.join(', '), 'Mouth'); if (!sub || !subs.includes(sub.trim())) { toast('Elegí uno de: ' + subs.join(', ')); return; } sub = sub.trim(); }
+    layerOf().tracks.push(sub ? { target: pick, kind, sub, rel: false, channels: {} } : { target: pick, kind, rel: kind === 'joint', channels: {} }); AN.track = layerOf().tracks.length - 1; touch();
   }
   function addChannel(trIdx, ch) {
     const l = layerOf(), tr = l.tracks[trIdx]; if (!tr || tr.channels[ch]) return;
-    let v = 0; if (tr.kind === 'part') { const e = partEntry(tr.target); if (e && !tr.rel) v = Number(e.data[ch]) || (ch.startsWith('s') ? 1 : 0); } else if (ch.startsWith('s')) v = 1;
+    let v = 0; if (tr.kind === 'face') v = A.FACE_DEFAULTS[ch] || 0; else if (tr.kind === 'part') { const e = partEntry(tr.target); if (e && !tr.rel) v = Number(e.data[ch]) || (ch.startsWith('s') ? 1 : 0); } else if (ch.startsWith('s')) v = 1;
     addKeyAt(AN.layer, trIdx, ch, snap(AN.t), v); touch();
   }
   function recordPose() {
-    const l = layerOf(), tr = l && l.tracks[AN.track]; if (!tr || tr.kind !== 'part') { toast('Elegí una pista de objeto para grabar su pose'); return; }
+    const l = layerOf(), tr = l && l.tracks[AN.track]; if (!tr || tr.kind !== 'part') { toast('Elegí una pista de objeto para grabar su pose (la cara se anima con claves)'); return; }
     const e = partEntry(tr.target); if (!e) { toast('No encuentro «' + tr.target + '» en la escena'); return; }
     const b = baseOf(e), t = snap(AN.t);
     for (const ch of ['x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz']) { const cur = Number(e.data[ch]) || 0, bv = Number(b[ch]) || 0; if (tr.channels[ch] || Math.abs(cur - bv) > 1e-6) addKeyAt(AN.layer, AN.track, ch, t, tr.rel ? cur - bv : cur); }
@@ -137,19 +148,19 @@
       <select id="an-model" title="Model para la vista previa"><option value="">Model: (ninguno)</option>${mods}</select>
       <button data-a="${AN.playing ? 'pause' : 'play'}" class="${AN.playing ? 'on' : ''}">${AN.playing ? '⏸' : '▶'}</button><button data-a="stop">⏹</button><button data-a="rec" title="Graba la pose actual del objeto en el cursor">🔴 Key</button><span id="cxan-evlog" style="color:#f08a9c"></span>`;
     h += `<span style="flex:1"></span><button data-a="exp">Exportar</button><button data-a="imp">Importar</button><label>Zoom <input id="an-zoom" type="range" min="30" max="600" value="${AN.zoom}"></label><button data-a="close">✕ Cerrar</button></div>`;
-    if (!a) { root.innerHTML = h + '<div style="padding:30px;color:#8a95b0">Creá una animación con «＋ Nueva». Cada animación tiene capas; cada capa tiene pistas (objetos o uniones), eventos y símbolos.</div>'; return bind(); }
+    if (!a) { root.innerHTML = h + '<div style="padding:30px;color:#8a95b0">Creá una animación con «＋ Nueva». Cada animación tiene capas; cada capa tiene su prioridad, pistas (objetos o uniones), eventos y símbolos.</div>'; return bind(); }
     h += '<div class="body"><div class="tl" id="an-tl"><div style="width:' + (lw() + 214) + 'px;position:relative">';
     let ticks = ''; const step = AN.zoom >= 200 ? 0.25 : AN.zoom >= 80 ? 0.5 : 1; for (let t = 0; t * AN.zoom <= lw(); t += step) ticks += `<div class="tick" style="left:${X(t)}px">${t.toFixed(t % 1 ? 2 : 0)}s</div>`;
     h += `<div class="ruler"><div class="lab" style="height:22px">Tiempo</div><div class="lane" id="an-ruler" style="width:${lw()}px;height:22px;cursor:col-resize">${ticks}</div></div>`;
     h += `<div class="row"><div class="lab">⚡ Eventos de la animación</div><div class="lane" data-lane="aev" style="width:${lw()}px">${a.events.map((e, i) => `<div class="ev ${AN.sel && AN.sel.k === 'aev' && AN.sel.i === i ? 's' : ''}" data-ev="aev:${i}" style="left:${X(e.t)}px">${esc(e.name)}</div>`).join('')}</div></div>`;
     a.layers.forEach((l, li) => {
-      h += `<div class="row layer ${li === AN.layer ? 'sel' : ''}"><div class="lab" data-layer="${li}">📚 ${esc(l.name)} ${l.loop === true || (l.loop === undefined && a.loop) ? '🔁' : ''}</div><div class="lane" data-lane="lev:${li}" style="width:${lw()}px">`
+      h += `<div class="row layer ${li === AN.layer ? 'sel' : ''}"><div class="lab" data-layer="${li}">📚 ${esc(l.name)} <small title="Prioridad de la capa" style="opacity:.7">⬆${esc(A.priorityName(l.priority))}</small> ${l.loop === true || (l.loop === undefined && a.loop) ? '🔁' : ''}</div><div class="lane" data-lane="lev:${li}" style="width:${lw()}px">`
         + l.events.map((e, i) => `<div class="ev ${AN.sel && AN.sel.k === 'lev' && AN.sel.l === li && AN.sel.i === i ? 's' : ''}" data-ev="lev:${li}:${i}" style="left:${X(e.t)}px">${esc(e.name)}</div>`).join('')
         + l.clips.map((c, i) => `<div class="clip ${AN.sel && AN.sel.k === 'clip' && AN.sel.l === li && AN.sel.i === i ? 's' : ''}" data-clip="${li}:${i}" style="left:${X(c.start)}px;width:${Math.max(24, X((c.length || ((AN.list.find(s => s.id === c.symbol) ? A.animLength(AN.list.find(s => s.id === c.symbol), lib()) : 1) / Math.abs(c.speed || 1)))))}px">◆ ${esc((AN.list.find(s => s.id === c.symbol) || {}).name || c.symbol)}</div>`).join('') + '</div></div>';
       l.tracks.forEach((tr, ti) => {
-        h += `<div class="row ${li === AN.layer && ti === AN.track ? 'sel' : ''}"><div class="lab" data-track="${li}:${ti}">${tr.kind === 'joint' ? '🔗' : '🧊'} ${esc(tr.target)}${tr.rel ? ' <small>rel</small>' : ''}</div><div class="lane" style="width:${lw()}px"></div></div>`;
+        h += `<div class="row ${li === AN.layer && ti === AN.track ? 'sel' : ''}"><div class="lab" data-track="${li}:${ti}">${tr.kind === 'joint' ? '🔗' : tr.kind === 'face' ? '😀' : tr.kind === 'bone' ? '🦴' : '🧊'} ${esc(tr.target)}${tr.kind === 'face' ? ' · ' + esc(tr.sub) : ''}${tr.rel ? ' <small>rel</small>' : ''}</div><div class="lane" style="width:${lw()}px"></div></div>`;
         for (const ch of Object.keys(tr.channels)) {
-          h += `<div class="row"><div class="lab" style="padding-left:24px">${ch}</div><div class="lane" data-chlane="${li}:${ti}:${ch}" style="width:${lw()}px">` + tr.channels[ch].map((k, i) => `<div class="k ${AN.sel && AN.sel.k === 'key' && AN.sel.l === li && AN.sel.tr === ti && AN.sel.ch === ch && AN.sel.i === i ? 's' : ''}" data-key="${li}:${ti}:${ch}:${i}" style="left:${X(k.t)}px" title="${toUi(ch, k.v)} · ${k.ease}"></div>`).join('') + '</div></div>';
+          h += `<div class="row"><div class="lab" style="padding-left:24px">${ch}</div><div class="lane" data-chlane="${li}:${ti}:${ch}" style="width:${lw()}px">` + tr.channels[ch].map((k, i) => `<div class="k ${AN.sel && AN.sel.k === 'key' && AN.sel.l === li && AN.sel.tr === ti && AN.sel.ch === ch && AN.sel.i === i ? 's' : ''}" data-key="${li}:${ti}:${ch}:${i}" style="left:${X(k.t)}px" title="${ch === 'emotion' ? esc(A.FACE_EMOTIONS[Math.max(0, Math.min(A.FACE_EMOTIONS.length - 1, Math.round(k.v)))]) : toUi(ch, k.v)} · ${k.ease}"></div>`).join('') + '</div></div>';
         }
       });
     });
@@ -163,15 +174,16 @@
     if (l) {
       h += `<h4>Capa «${esc(l.name)}»</h4><label>Nombre <input data-lf="name" value="${esc(l.name)}"></label>
       <label><input type="checkbox" data-lf="loop" ${l.loop === true || (l.loop === undefined && a.loop) ? 'checked' : ''}>Loop de esta capa</label>
+      <label title="Como en Roblox, pero por pieza: la capa de más prioridad manda sobre las piezas que anima; las demás piezas siguen con las capas de menor prioridad. Igual prioridad: manda la capa de más abajo en la lista.">Prioridad <input style="width:96px" list="an-prios" data-lf="priority" value="${esc(A.priorityName(l.priority))}"></label><datalist id="an-prios">${Object.keys(A.PRIORITIES).map(n => `<option value="${n}">${A.PRIORITIES[n]}</option>`).join('')}</datalist>
       <label>Peso <input class="small" type="number" step="0.1" data-lf="weight" value="${l.weight}"></label><label>Velocidad <input class="small" type="number" step="0.1" data-lf="speed" value="${l.speed}"></label>
       <label>Modo <select data-lf="mode"><option value="override" ${l.mode === 'override' ? 'selected' : ''}>Reemplaza</option><option value="additive" ${l.mode === 'additive' ? 'selected' : ''}>Suma</option></select></label>
       <label><input type="checkbox" data-lf="enabled" ${l.enabled ? 'checked' : ''}>Activa</label>
-      <div style="display:flex;gap:4px;flex-wrap:wrap"><button data-a="addlayer">＋ Capa</button><button data-a="dellayer">🗑 Capa</button><button data-a="addtrack:part">＋ Objeto</button><button data-a="addtrack:joint">＋ Unión</button><button data-a="addclip">＋ Símbolo</button><button data-a="addaev">＋ Evento anim.</button><button data-a="addlev">＋ Evento capa</button></div>`;
+      <div style="display:flex;gap:4px;flex-wrap:wrap"><button data-a="addlayer">＋ Capa</button><button data-a="dellayer">🗑 Capa</button><button data-a="addtrack:part">＋ Objeto</button><button data-a="addtrack:joint">＋ Unión</button><button data-a="addtrack:face" title="Un elemento de la cara: boca, cada ojo, cada ceja o expresión">＋ Cara</button><button data-a="addtrack:bone" title="Un hueso del avatar de un jugador o NPC">＋ Hueso</button><button data-a="addclip">＋ Símbolo</button><button data-a="addaev">＋ Evento anim.</button><button data-a="addlev">＋ Evento capa</button></div>`;
       const tr = l.tracks[AN.track];
-      if (tr) h += `<h4>Pista «${esc(tr.target)}»</h4><label><input type="checkbox" data-tf="rel" ${tr.rel ? 'checked' : ''}>Relativa a la pose inicial</label><label>Agregar canal <select data-a="addch"><option value="">…</option>${A.CHANNELS.filter(c => !tr.channels[c] && (tr.kind === 'part' ? c !== 'angle' : !c.startsWith('s') && c !== 'transparent')).map(c => `<option>${c}</option>`).join('')}</select></label><button data-a="deltrack">🗑 Pista</button>`;
+      if (tr) h += `<h4>Pista «${esc(tr.target)}${tr.kind === 'face' ? ' · ' + esc(tr.sub) : ''}»</h4>${tr.kind === 'face' ? '' : `<label><input type="checkbox" data-tf="rel" ${tr.rel ? 'checked' : ''}>Relativa a la pose inicial</label>`}<label>Agregar canal <select data-a="addch"><option value="">…</option>${A.channelsOf(tr.kind, tr.sub).filter(c => !tr.channels[c] && (tr.kind === 'face' || tr.kind === 'bone' ? true : tr.kind === 'part' ? c !== 'angle' : !c.startsWith('s') && c !== 'transparent')).map(c => `<option>${c}</option>`).join('')}</select></label><button data-a="deltrack">🗑 Pista</button>`;
     }
     const o = selObj(), s = AN.sel;
-    if (o && s.k === 'key') h += `<h4>Fotograma clave</h4><label>Tiempo (s) <input class="small" type="number" step="0.01" data-of="t" value="${o.t}"></label><label>Valor ${ROT.includes(s.ch) ? '(°)' : ''} <input class="small" type="number" step="0.1" data-of="v" value="${toUi(s.ch, o.v)}"></label>
+    if (o && s.k === 'key') h += `<h4>Fotograma clave</h4><label>Tiempo (s) <input class="small" type="number" step="0.01" data-of="t" value="${o.t}"></label><label>Valor ${ROT.includes(s.ch) ? '(°)' : ''} ${s.ch === 'emotion' ? `<select data-of="v">${A.FACE_EMOTIONS.map((n, i) => `<option value="${i}" ${i === Math.round(o.v) ? 'selected' : ''}>${n}</option>`).join('')}</select>` : `<input class="small" type="number" step="0.1" data-of="v" value="${toUi(s.ch, o.v)}">`}</label>
       <label>Curva <select data-of="ease">${A.EASINGS.map(e => `<option ${e === o.ease ? 'selected' : ''}>${e}</option>`).join('')}</select></label>${o.ease === 'bezier' ? `<label>Bézier <input data-of="bez" value="${esc((o.bez || []).join(','))}"></label>` : ''}<button data-a="delsel">🗑 Borrar clave</button>`;
     if (o && (s.k === 'lev' || s.k === 'aev')) h += `<h4>Evento</h4><label>Nombre <input data-of="name" value="${esc(o.name)}"></label><label>Tiempo <input class="small" type="number" step="0.01" data-of="t" value="${o.t}"></label><button data-a="delsel">🗑 Borrar</button>`;
     if (o && s.k === 'clip') h += `<h4>Símbolo</h4><label>Animación <select data-of="symbol">${AN.list.filter(x => x !== a).map(x => `<option value="${esc(x.id)}" ${x.id === o.symbol ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label><label>Inicio <input class="small" type="number" step="0.01" data-of="start" value="${o.start}"></label>
@@ -207,7 +219,7 @@
       if (t.id === 'an-model') { stop(); AN.model = t.value; return; }
       if (t.id === 'an-zoom') { AN.zoom = +t.value; return render(); }
       if (t.dataset.a === 'addch') { if (t.value) addChannel(AN.track, t.value); return; }
-      if (t.dataset.lf && l) { const k = t.dataset.lf; l[k] = t.type === 'checkbox' ? t.checked : (k === 'name' || k === 'mode' ? t.value : +t.value); return touch(); }
+      if (t.dataset.lf && l) { const k = t.dataset.lf; l[k] = t.type === 'checkbox' ? t.checked : k === 'priority' ? A.priorityValue(t.value, l.priority) : (k === 'name' || k === 'mode' ? t.value : +t.value); return touch(); }
       if (t.dataset.tf && l && l.tracks[AN.track]) { l.tracks[AN.track][t.dataset.tf] = t.checked; return touch(); }
       if (t.dataset.of) {
         const o = selObj(), s = AN.sel; if (!o) return; const k = t.dataset.of;

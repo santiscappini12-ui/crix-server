@@ -86,8 +86,8 @@
   }
   function toggleModel(id) { if (S.open.has(id)) S.open.delete(id); else S.open.add(id); refreshExplorer(); }
   function explorerHtml() {
-    const inModel = x => S.instances.some(m => isModel(m) && m.id === x.parent);
-    const joints = S.joints.filter(j => !inModel(j)), others = S.instances.filter(i => !isModel(i) && !inModel(i));
+    const inModel = x => S.instances.some(m => (isModel(m) || m.class === 'Folder') && m.id === x.parent);   // el árbol del Workspace (CrixEdit) ya muestra Models y Folders con todo lo que contienen
+    const joints = S.joints.filter(j => !inModel(j)), others = S.instances.filter(i => !isModel(i) && i.class !== 'Folder' && !inModel(i));
     const total = joints.length + others.length;
     let h = '<div class="exp-folder"><div class="exp-folder-hd open" onclick="toggleFolder(this)"><span class="exp-arrow">▶</span><span>🧩</span><span style="flex:1;font-size:11px">Objetos sueltos</span>' + (total ? `<span style="font-size:9px;color:var(--text3)">${total}</span>` : '') + '<button class="exp-ctx" style="opacity:1;color:var(--acc);font-size:14px;font-weight:700;padding:0 5px;line-height:1" onclick="event.stopPropagation();CrixExt.openCatalog()">+</button></div><div class="exp-children">';
     for (const j of joints) h += rowHtml('joint', j.id, O.ICONS[j.class] || '🔗', j.name, `<span style="font-size:9px;color:var(--text3)">${j.class}</span>`);

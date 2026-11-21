@@ -89,7 +89,7 @@
 
   // Catálogo para el menú «Objetos». `needs`: 'part' = requiere una pieza seleccionada como padre/Part0.
   const CATALOG = [
-    { cat: 'Organización', items: [{ cls: 'Model', icon: '🗂', es: 'Model (agrupa piezas)' }, { cls: 'Folder', icon: '📁', es: 'Folder' }, { cls: 'Humanoid', icon: '🧍', es: 'Humanoid (datos)', needs: 'model' }, { cls: 'Attachment', icon: '📍', es: 'Attachment', needs: 'part' }] },
+    { cat: 'Organización', items: [{ cls: 'Model', icon: '🗂', es: 'Model (agrupa; no suelda)' }, { cls: 'Folder', icon: '📁', es: 'Folder (organiza piezas y models)' }, { cls: 'Humanoid', icon: '🧍', es: 'Humanoid (datos)', needs: 'model' }, { cls: 'Attachment', icon: '📍', es: 'Attachment', needs: 'part' }] },
     { cat: 'Uniones', items: [{ cls: 'Weld', icon: '🔗', es: 'Weld (soldadura con offsets)', needs: 'part' }, { cls: 'WeldConstraint', icon: '🧷', es: 'WeldConstraint', needs: 'part' }, { cls: 'Motor6D', icon: '⚙', es: 'Motor6D (articulación animable)', needs: 'part' }, { cls: 'Hinge', icon: '🚪', es: 'HingeConstraint (bisagra)', needs: 'part' }, { cls: 'BallSocket', icon: '⚽', es: 'BallSocketConstraint (rótula)', needs: 'part' }, { cls: 'Prismatic', icon: '↔', es: 'PrismaticConstraint (riel)', needs: 'part' }, { cls: 'Rod', icon: '📏', es: 'RodConstraint (varilla)', needs: 'part' }, { cls: 'Rope', icon: '🪢', es: 'RopeConstraint (cuerda)', needs: 'part' }, { cls: 'Spring', icon: '🌀', es: 'SpringConstraint (resorte)', needs: 'part' }] },
     { cat: 'Luces', items: [{ cls: 'PointLight', icon: '💡', es: 'PointLight', needs: 'part' }, { cls: 'SpotLight', icon: '🔦', es: 'SpotLight', needs: 'part' }, { cls: 'SurfaceLight', icon: '🖥', es: 'SurfaceLight', needs: 'part' }] },
     { cat: 'Efectos', items: [{ cls: 'ParticleEmitter', icon: '✨', es: 'ParticleEmitter', needs: 'part' }, { cls: 'Fire', icon: '🔥', es: 'Fire', needs: 'part' }, { cls: 'Smoke', icon: '💨', es: 'Smoke', needs: 'part' }, { cls: 'Sparkles', icon: '🎇', es: 'Sparkles', needs: 'part' }] },
@@ -216,8 +216,10 @@
     const out = [];
     for (const m of (instances || []).filter(i => i && i.class === 'Model')) {
       const info = { id: m.id, name: m.name, root: (m.props && m.props.primaryPart) || '', parts: {}, joints: {}, humanoid: null };
-      for (const p of parts || []) if (p && p.parent === m.id && p.name) info.parts[p.name] = p.id;
-      for (const j of joints || []) if (j && j.parent === m.id && j.name) info.joints[j.name] = j.id;
+      // un Model incluye lo de sus Models/Folders anidados (se agrupa cualquier cosa, no solo personajes)
+      const within = (pid) => { let cur = pid, g = 0; while (cur && g++ < 50) { if (cur === m.id) return true; const n = (instances || []).find(i => i && i.id === cur); cur = n && n.parent; } return false; };
+      for (const p of parts || []) if (p && p.name && within(p.parent) && !info.parts[p.name]) info.parts[p.name] = p.id;
+      for (const j of joints || []) if (j && j.name && within(j.parent) && !info.joints[j.name]) info.joints[j.name] = j.id;
       const h = (instances || []).find(i => i && i.class === 'Humanoid' && i.parent === m.id);
       if (h) info.humanoid = humanoidAttributes(h.props || {});
       out.push(info);

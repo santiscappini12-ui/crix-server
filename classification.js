@@ -259,10 +259,9 @@ function evaluate(input, lang) {
     age = Math.max(age, opt.age);
     if (opt.d) descriptors.add(opt.d);
   }
-  // Un medio para niños no puede tener contenido de 13+, ni secciones +18 aparte.
-  if (descriptors.has('kids') && (age > 12 || descriptors.has('adult_parts'))) {
-    return fail('KIDS_CONFLICT', 'Dijiste que es para menores de 13 años pero el contenido que declaraste es para mayores.', 'You said it is for children under 13, but the content you declared is for older audiences.');
-  }
+  // Crix solo prohíbe lo ilegal: si dijo «para niños» pero declaró contenido de 13+ o secciones +18, NO se rechaza; se clasifica por el
+  // contenido declarado y se quita la marca «Para niños» (así queda con la edad que corresponde y el acceso +18 sigue protegido).
+  if (descriptors.has('kids') && (age > 12 || descriptors.has('adult_parts'))) descriptors.delete('kids');
   const tier = TIERS.find(t => t >= age) ?? 18;
   const tierIdx = TIERS.indexOf(tier);
   const [countryNameEs, systemId] = COUNTRIES[country];

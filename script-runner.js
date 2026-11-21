@@ -303,36 +303,100 @@ const ISOLATE_EXTRAS = String.raw`
 
 
     // ── Animador (CrixAnim): capas con loop propio, símbolos, eventos y curvas por fotograma clave ──
-    // game.animate(id | definición, { model, targets, speed, weight, loop, layerLoop:{capa:true|false}, startTime, channel })
-    //   → manejador { stop, pause, resume, seek, setSpeed, setWeight, setLoop, setLayerLoop, setLayerWeight, setLayerSpeed, setLayerEnabled, onEvent, onEnded }
+    // game.animate(id | definición, { model, targets, speed, weight, loop, layerLoop:{capa:true|false}, startTime, channel,
+    //                                   priority, layerPriority:{capa:'Action2'}, avatar })
+    // TODO ES UNA PISTA SUELTA que el usuario pone en la capa que quiera (y la capa trae su prioridad): piezas (part), uniones (joint),
+    // huesos del avatar (bone) y cada elemento de la cara por separado (face: Mouth, EyeL, EyeR, BrowL, BrowR, Expression).
+    // bone y los face de un jugador/NPC con avatar necesitan avatar:jugador|'NombreNPC'; los face de un Model van a su pieza Head.
+    //   → manejador { stop, pause, resume, seek, setSpeed, setWeight, setLoop, setLayerLoop, setLayerWeight, setLayerSpeed, setLayerEnabled,
+    //                 setPriority, setLayerPriority, getLayerPriority, onEvent, onEnded }
+    // PRIORIDADES (game.PRIORITIES): Core 0 · Idle 1 · Movement 2 · Action 3 · Action2 4 · Action3 5 · Action4 6 (o cualquier número).
+    // Cada capa tiene la suya (se edita en el Animador) y como cada capa anima SUS piezas, la prioridad vale pieza por pieza: la capa de
+    // más prioridad manda sobre las piezas/canales que anima y las demás piezas siguen con las animaciones de menor prioridad.
+    // priority pisa la de TODAS las capas (como en Roblox); layerPriority pisa solo las capas que nombres.
     // Las animaciones del mapa se llaman por id; game.registerAnimation(id, def) agrega más en ejecución.
     const __animLib = new Map();
     (function () { try { for (const a of JSON.parse(__crixAnimsJson)) { const d = CrixAnim.sanitize(a); __animLib.set(d.id, d); } } catch (_) {} })();
+    let __animSeq = 0;
     const __animPlayers = [], __animBus = new Map(), __ANIM_PART = ['x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'transparent'];
     game.registerAnimation = (idOrDef, def) => { const src = idOrDef && typeof idOrDef === 'object' ? idOrDef : Object.assign({}, def || {}, { id: String(idOrDef) }); const d = CrixAnim.sanitize(src); __animLib.set(d.id, d); return d.id; };
     game.getAnimation = id => __animLib.get(String(id)) || null;
-    game.listAnimations = () => Array.from(__animLib.values()).map(a => ({ id: a.id, name: a.name, length: CrixAnim.animLength(a, __animLib), layers: a.layers.map(l => l.name) }));
+    game.listAnimations = () => Array.from(__animLib.values()).map(a => ({ id: a.id, name: a.name, length: CrixAnim.animLength(a, __animLib), layers: a.layers.map(l => l.name), priorities: Object.fromEntries(a.layers.map(l => [l.name, CrixAnim.priorityName(l.priority)])) }));
+    game.PRIORITIES = Object.assign({}, CrixAnim.PRIORITIES);
     game.onAnimationEvent = (name, fn) => { if (typeof fn !== 'function') throw new TypeError('onAnimationEvent necesita una función'); const key = String(name); if (!__animBus.has(key)) __animBus.set(key, []); __animBus.get(key).push(fn); return () => { const l = __animBus.get(key) || []; const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); }; };
     function __animResolve(h, target, kind) {
       const key = kind + ':' + target; if (h.cache.has(key)) return h.cache.get(key);
+      if (kind === 'bone') { const bid = h.avatar !== null ? 'a:' + h.avatar + '|' + target : null; h.cache.set(key, bid); return bid; }   // hueso del avatar de un jugador/NPC: requiere opts.avatar
+      if (kind === 'face') {   // la cara va por el canal de avatares: «a:<jugador|NPC>» o «p:<pieza Head del Model>»
+        let fid = null;
+        if (h.avatar !== null) fid = 'a:' + h.avatar;
+        else {
+          let pid = null;
+          if (h.targets && h.targets[target] !== undefined) pid = String(h.targets[target]);
+          else if (h.model && (h.model.parts || {})[target]) pid = (h.model.parts || {})[target];
+          else { const p = __getPart(String(target)); pid = p ? p.id : null; }
+          if (pid) fid = 'p:' + pid;
+        }
+        h.cache.set(key, fid); return fid;
+      }
       let id = null;
       if (h.targets && h.targets[target] !== undefined) id = String(h.targets[target]);
       else if (h.model) id = kind === 'joint' ? (h.model.joints || {})[target] : (h.model.parts || {})[target];
       if (!id) { if (kind === 'part') { const p = __getPart(String(target)); id = p ? p.id : null; } else id = String(target); }
       h.cache.set(key, id || null); return id || null;
     }
-    function __animApply(h, values) {
-      const parts = new Map(), joints = new Map();
-      for (const k in values) { const e = values[k], id = __animResolve(h, e.target, e.kind); if (!id) continue; const m = e.kind === 'joint' ? joints : parts; let o = m.get(id); if (!o) m.set(id, o = {}); o[e.ch] = e; }
+    // Mezcla TODAS las animaciones vivas a la vez: por cada pieza/unión/canal gana la capa de mayor prioridad (como en Roblox, pero
+    // por pieza: una animación de «Action» sobre el brazo no toca las piernas, que siguen con la de «Movement»). A igual prioridad
+    // manda la animación que empezó después. Las poses base se capturan al empezar a animar una pieza y se sueltan al dejar de animarla.
+    const __animBase = new Map(), __faceSent = new Map(), __boneSent = new Map();
+    let __animClock = 0;
+    // Caras y huesos de avatares: se mandan los valores YA resueltos por prioridades como [v, w, rd, add] por canal (op faceAnim / boneAnim).
+    // Solo si cambian (máx. ~15/s por destino, y un refresco cada 0,5 s por si el cliente recreó la pieza). Cuando nadie los anima, se manda
+    // null y vuelven a su comportamiento automático.
+    function __animSend(op, groups, sent) {
+      const r3 = n => Math.round(n * 1000) / 1000, tgt = key => key.charAt(0) === 'a' ? key.slice(2) : key;
+      const cv = e => [r3(e.v), r3(e.w), r3(e.rd), r3(e.add)];
+      for (const [key, o] of groups) {
+        const values = {};
+        for (const c in o) { if (op === 'boneAnim') { values[c] = {}; for (const ch in o[c]) values[c][ch] = cv(o[c][ch]); } else values[c] = cv(o[c]); }
+        const sig = JSON.stringify(values), last = sent.get(key);
+        if (last && ((last.sig === sig && __animClock - last.at < 0.5) || (last.sig !== sig && __animClock - last.at < 0.066))) continue;
+        sent.set(key, { sig, at: __animClock });
+        try { __avatarCmd(tgt(key), JSON.stringify({ op, values })); } catch (_) {}
+      }
+      for (const key of Array.from(sent.keys())) if (!groups.has(key)) { sent.delete(key); try { __avatarCmd(tgt(key), JSON.stringify({ op, values: null })); } catch (_) {} }
+    }
+    function __animMix() {
+      const acc = {};
+      for (const h of __animPlayers) {
+        if (h.dead) continue;
+        const tmp = h.player.sampleInto({});
+        for (const k in tmp) {
+          const e = tmp[k], id = __animResolve(h, e.target, e.kind); if (!id) continue;
+          const key = e.kind + '|' + id + '|' + e.ch; let g = acc[key];
+          if (!g) g = acc[key] = { target: id, kind: e.kind, ch: e.ch, rel: false, v: 0, w: 0, rd: 0, add: 0, items: [] };
+          for (const it of e.items) g.items.push(it);
+          g.add += e.add;
+        }
+      }
+      CrixAnim.resolve(acc);
+      const parts = new Map(), joints = new Map(), faces = new Map(), bones = new Map();
+      for (const k in acc) {
+        const e = acc[k];
+        if (e.kind === 'bone') { const i = e.target.lastIndexOf('|'), av = e.target.slice(0, i), bone = e.target.slice(i + 1); let o = bones.get(av); if (!o) bones.set(av, o = {}); (o[bone] = o[bone] || {})[e.ch] = e; continue; }
+        const m = e.kind === 'joint' ? joints : e.kind === 'face' ? faces : parts; let o = m.get(e.target); if (!o) m.set(e.target, o = {}); o[e.ch] = e;
+      }
+      __animSend('faceAnim', faces, __faceSent); __animSend('boneAnim', bones, __boneSent);
+      for (const id of Array.from(__animBase.keys())) if (!parts.has(id)) __animBase.delete(id);   // ya nadie la anima: queda en su última pose
       for (const [id, o] of parts) {
-        let base = h.base.get(id); if (!base) { const p = __getPart(id) || {}; base = {}; for (const c of __ANIM_PART) base[c] = Number(p[c]) || 0; h.base.set(id, base); }
+        let base = __animBase.get(id); if (!base) { const p = __getPart(id) || {}; base = {}; for (const c of __ANIM_PART) base[c] = Number(p[c]) || 0; __animBase.set(id, base); }
         const patch = {};
-        for (const c in o) { const e = o[c]; if (__ANIM_PART.indexOf(c) < 0) continue; const b = base[c]; patch[c] = (e.rel ? b + e.v * e.w : b + (e.v - b) * e.w) + e.add; }
+        for (const c in o) { if (__ANIM_PART.indexOf(c) < 0) continue; patch[c] = CrixAnim.apply(o[c], base[c]); }
         if (Object.keys(patch).length) game.updatePart(id, patch);
       }
       for (const [id, o] of joints) {
         const patch = {}, tf = {};
-        for (const c in o) { const e = o[c], v = (e.rel ? e.v * e.w : e.v * e.w) + e.add; if (c === 'angle') { patch.mode = 'servo'; patch.targetAngle = v; patch.maxVelocity = 200; } else if (['x', 'y', 'z', 'rx', 'ry', 'rz'].indexOf(c) >= 0) tf[c] = v; }
+        for (const c in o) { const v = CrixAnim.apply(o[c], 0); if (c === 'angle') { patch.mode = 'servo'; patch.targetAngle = v; patch.maxVelocity = 200; } else if (['x', 'y', 'z', 'rx', 'ry', 'rz'].indexOf(c) >= 0) tf[c] = v; }
         if (Object.keys(tf).length) patch.transform = tf;
         if (Object.keys(patch).length) game.updateJoint(id, patch);
       }
@@ -344,12 +408,18 @@ const ISOLATE_EXTRAS = String.raw`
       try { game.emit('animation:' + ev.name, info); } catch (_) {}
     }
     function __advanceAnims(dt) {
-      for (let i = 0; i < __animPlayers.length; i++) {
-        const h = __animPlayers[i]; if (h.dead || !h.player.playing) continue;
-        let r; try { r = h.player.update(dt); __animApply(h, r.values); } catch (err) { error('Animación ' + h.name + ': ' + (err && err.message || err)); h.dead = true; continue; }
-        for (const ev of r.events) __animFire(h, ev);
-        if (r.ended) { h.dead = true; for (const f of h.endedFns.slice()) { try { f(h); } catch (err) { error('Animación ' + h.name + ': ' + (err && err.message || err)); } } }
+      __animClock += dt;
+      if (!__animPlayers.length) { if (__animBase.size) __animBase.clear(); if (__faceSent.size) __animSend('faceAnim', new Map(), __faceSent); if (__boneSent.size) __animSend('boneAnim', new Map(), __boneSent); return; }
+      const fired = [], finished = [];
+      for (const h of __animPlayers.slice()) {
+        if (h.dead || !h.player.playing) continue;   // una animación en pausa sigue mandando con su pose, pero no avanza
+        let r; try { r = h.player.update(dt, true); } catch (err) { error('Animación ' + h.name + ': ' + (err && err.message || err)); h.dead = true; continue; }
+        for (const ev of r.events) fired.push([h, ev]);
+        if (r.ended) finished.push(h);
       }
+      try { __animMix(); } catch (err) { error('Animación: ' + (err && err.message || err)); }
+      for (const [h, ev] of fired) __animFire(h, ev);
+      for (const h of finished) { h.dead = true; for (const f of h.endedFns.slice()) { try { f(h); } catch (err) { error('Animación ' + h.name + ': ' + (err && err.message || err)); } } }
       for (let i = __animPlayers.length - 1; i >= 0; i--) if (__animPlayers[i].dead) __animPlayers.splice(i, 1);
     }
     game.animate = (anim, opts) => {
@@ -359,16 +429,17 @@ const ISOLATE_EXTRAS = String.raw`
       let model = null;
       if (opts.model !== undefined && opts.model !== null) { model = typeof opts.model === 'object' ? opts.model : game.getModel(opts.model); if (!model) throw new Error('No existe el Model ' + (typeof opts.model === 'object' ? opts.model.name : opts.model)); }
       if (opts.channel !== undefined) for (const o of __animPlayers) if (!o.dead && o.channel === String(opts.channel) && (o.model && model ? o.model.id === model.id : !o.model && !model)) o.dead = true;   // misma «ranura» (idle, caminar…) → reemplaza a la anterior
-      const player = CrixAnim.createPlayer(def, { library: __animLib, speed: opts.speed, weight: opts.weight, loop: opts.loop, layerLoop: opts.layerLoop });
+      const player = CrixAnim.createPlayer(def, { library: __animLib, speed: opts.speed, weight: opts.weight, loop: opts.loop, layerLoop: opts.layerLoop, priority: opts.priority, layerPriority: opts.layerPriority, order: ++__animSeq });
       if (opts.startTime !== undefined) player.seek(opts.startTime);
-      const h = { id: def.id, name: def.name, player, model, targets: opts.targets || null, channel: opts.channel === undefined ? null : String(opts.channel), cache: new Map(), base: new Map(), evt: new Map(), endedFns: [], dead: false };
+      const h = { id: def.id, name: def.name, player, model, targets: opts.targets || null, avatar: opts.avatar !== undefined && opts.avatar !== null ? __avT(opts.avatar) : null, channel: opts.channel === undefined ? null : String(opts.channel), cache: new Map(), evt: new Map(), endedFns: [], dead: false };
       const api = {
         id: def.id, name: def.name, length: player.length,
         get time() { return player.time; }, get isPlaying() { return player.playing && !h.dead; },
-        stop: () => { h.dead = true; player.playing = false; }, pause: () => { player.playing = false; }, resume: () => { if (!h.dead) player.playing = true; },
-        seek: t => { player.seek(t); try { __animApply(h, player.sample()); } catch (_) {} },
+        stop: () => { h.dead = true; player.playing = false; try { __animMix(); } catch (_) {} }, pause: () => { player.playing = false; }, resume: () => { if (!h.dead) player.playing = true; },
+        seek: t => { player.seek(t); try { __animMix(); } catch (_) {} },
         setSpeed: v => { player.speed = Number(v) || 0; }, setWeight: v => { player.weight = Number(v) || 0; }, setLoop: v => { player.loop = !!v; },
         setLayerLoop: (l, v) => player.setLayerLoop(l, v), setLayerWeight: (l, v) => player.setLayerWeight(l, v), setLayerSpeed: (l, v) => player.setLayerSpeed(l, v), setLayerEnabled: (l, v) => player.setLayerEnabled(l, v),
+        setPriority: v => { player.setPriority(v); return api; }, setLayerPriority: (l, v) => player.setLayerPriority(l, v), getLayerPriority: l => player.getLayerPriority(l),
         onEvent: (name, fn) => { if (typeof fn !== 'function') throw new TypeError('onEvent necesita una función'); const k = String(name); if (!h.evt.has(k)) h.evt.set(k, []); h.evt.get(k).push(fn); return api; },
         onEnded: fn => { if (typeof fn !== 'function') throw new TypeError('onEnded necesita una función'); h.endedFns.push(fn); return api; }
       };
