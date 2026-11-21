@@ -111,6 +111,56 @@ Al instalar Crix como aplicación (o desde el navegador) aparece un aviso para *
 
 - **Íconos de la PWA**: la carpeta `icons/` (192, 512, maskable, apple-touch y badge) tiene que estar desplegada. Si falta un solo archivo, antes el service worker no se instalaba y por eso no llegaba ninguna notificación; ahora el service worker tolera archivos faltantes, pero sin íconos la app no se puede instalar bien en el teléfono.
 
+## Funciones nativas del dispositivo para juegos (`device`)
+
+Los juegos pueden vibrar, mandar notificaciones y usar el resto de funciones nativas del teléfono, tablet o PC desde sus scripts. En un **LocalScript** (y en ▶ Probar) existe el objeto global `device` (también `game.device`); en un **juego HTML** es `Crix.device`. Todo devuelve una **promesa** (`false`/`null` si el dispositivo no lo soporta o la persona dijo que no), así que un juego nunca se rompe por una función que falte. `device.supports("vibrate")` y `device.capabilities` dicen qué hay; `device.info` trae `platform`, `standalone`, `touch`, `language`, `screen`…
+
+```js
+function onStart() {
+  game.on("coin", () => device.haptic("success"));
+  game.on("died", () => device.vibrate([200, 80, 200, 80, 400]));   // vibra, pausa, vibra…
+  device.on("shake", () => gui.toast("¡Sacudida!"));
+}
+await device.notify("Tu cosecha está lista", { body: "Volvé a jugar", tag: "cosecha", onlyHidden: true });
+```
+
+| Función | Qué hace |
+| --- | --- |
+| `vibrate(ms \| [vibra, pausa, …])`, `stopVibrate()` | Vibración (máx. 10 s, 30 tramos). En iPhone Safari no existe: Crix usa el motor háptico (iOS 18+, solo mientras se toca la pantalla). |
+| `haptic("light"\|"medium"\|"heavy"\|"select"\|"success"\|"warning"\|"error")` | Toque háptico: vibración del teléfono o del mando conectado. |
+| `rumble(ms, fuerte, suave)` | Vibra el mando (Gamepad API). |
+| `notify(titulo, { body, tag, silent, onlyHidden, requireInteraction, vibrate, actions:[{action,title}], data })` | Notificación del sistema. `onlyHidden` la muestra solo si Crix no está a la vista. Hasta 2 botones, sin límite de cantidad. |
+| `requestNotifications()`, `closeNotifications(tag)` | Pide el permiso / cierra avisos del juego. |
+| `setBadge(n)`, `clearBadge()` | Número en el ícono de la app instalada. |
+| `keepAwake(true\|false)` | Evita que la pantalla se apague (Wake Lock). |
+| `share({ title, text, url })` | Menú de compartir del sistema → `"shared"`, `"cancelled"`, `"unsupported"`. |
+| `copy(texto)`, `paste()` | Portapapeles. |
+| `fullscreen(on)`, `lockOrientation("landscape"\|"portrait"\|"any")` | Pantalla completa y orientación (en Android el bloqueo exige pantalla completa; Crix la pide sola). |
+| `getLocation({ high })` | `{ lat, lng, accuracy, altitude, speed, heading, timestamp }`. |
+| `battery()`, `network()` | `{ level, charging }` y `{ online, type, downlink, rtt, saveData }`. |
+| `speak(texto, { lang, rate, pitch, volume })`, `stopSpeaking()`, `listen({ lang })` | Voz en voz alta y reconocimiento de voz (devuelve el texto). |
+| `install()` | Instala Crix como app (en iOS indica *Compartir → Agregar a inicio*). |
+| `saveFile(nombre, contenido, mime)` | Descarga un archivo de texto (máx. 2 MB). |
+| `alert(msj)`, `confirm(msj)`, `prompt(msj)` | Cartel dentro del juego con aspecto de ventana de Windows (título, ícono, Aceptar/Cancelar; Enter y Esc funcionan). Devuelven `true`, `true`/`false` y el texto o `null`. Opciones: `title`, `ok`, `cancel`, `value`, `placeholder`. |
+| `onDialog(fn)` | Si el creador hizo su propio cartel, `device.onDialog((tipo, opciones) => …)` lo usa en lugar del de Crix (la función devuelve el resultado, o una promesa). |
+| `permission(nombre)` | `"granted"`, `"denied"`, `"prompt"` para `notifications`, `geolocation`, `microphone`, `camera`… |
+| `on(evento, fn)`, `off(evento)` | Eventos: `orientation` (`alpha/beta/gamma`), `motion`, `shake`, `location`, `online`, `offline`, `network`, `visibility`, `battery`, `gamepad`, `install`, `screen`, `fullscreen`, `notificationclick` (`{ tag, action, data }`). |
+
+**Permisos y seguridad.** Los scripts los escribe cualquiera y corren en el dispositivo de quien juega, por eso:
+
+- **Notificaciones, ubicación, micrófono (reconocimiento de voz), lectura del portapapeles y sensores de movimiento** piden primero un permiso propio de Crix **por juego** («“Mi juego” quiere enviarte notificaciones») y recién después el del navegador. La respuesta se recuerda por juego (`localStorage`, claves `crix:nc:<juego>:<permiso>`; `CrixNative.resetConsent()` las borra).
+- Compartir, copiar, pantalla completa, instalar y los permisos del navegador solo funcionan justo después de un toque. Si el script los pide sin toque reciente, Crix muestra un botón **«Tocá para continuar»** (así no falla en silencio).
+- Cada notificación lleva el **nombre del juego en el título** (no puede hacerse pasar por Crix) y usa `tag` propio del juego (repetir el `tag` reemplaza el aviso anterior en vez de apilarlo). Vibración, sensores, ubicación, pantalla encendida y voz **se apagan solos** al salir del juego.
+- Las operaciones que esperan a la persona (permisos, diálogos) no cuentan para el límite de 2,5 s por evento de los scripts.
+
+**Cosas a tener en cuenta**
+
+- `notify` usa el service worker (`registration.showNotification`), así que funciona en Android con la app instalada; en **iPhone/iPad** solo con la app instalada (iOS 16.4+). Son avisos **locales**: se muestran mientras Crix está abierto o en segundo plano. Para avisar con Crix cerrado hace falta Web Push desde el servidor (ver *Notificaciones (PWA)*).
+- `notificationclick` se entrega si Crix sigue abierto o en segundo plano; si el toque abre Crix desde cero, el juego se abre pero el evento no se repite.
+- Un **Script de servidor** no tiene `device` (corre en el servidor). Para vibrar a un jugador: `game.fireClient(jugador, "vibrar", [200])` en el servidor y `game.onServerEvent("vibrar", p => device.vibrate(p))` en un LocalScript.
+- No incluido a propósito: cámara/micrófono en bruto, Bluetooth, USB, serie, NFC y MIDI (requieren selector de dispositivo, solo existen en algunos navegadores y tienen riesgos de privacidad que merecen su propio permiso).
+- Archivos: `crix-native.js` (nuevo; ejecuta las operaciones en la página), `index.html` (objeto `device` del worker, puente de comandos, `Crix.device`, editor y ejemplos), `service-worker.js` (pasa los datos del toque a la página), `server.js` (publica `/crix-native.js`).
+
 ## Llamadas en segundo plano
 
 Una PWA no puede mantener el micrófono abierto "a la fuerza" cuando el sistema la pasa a segundo plano (no existe esa API web). Lo que sí hace Crix, en orden de efectividad:

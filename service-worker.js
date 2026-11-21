@@ -113,7 +113,7 @@ self.addEventListener('notificationclick', event => {
   // Una llamada genera varios avisos apilados: al tocar uno se quitan todos los de esa persona.
   if (data.type === 'call') event.waitUntil(self.registration.getNotifications().then(list => list.filter(x => (x.tag || '').startsWith('call-' + (data.from || ''))).forEach(x => x.close())));
   const action = event.action || '';
-  const msg = { crixNotif: true, type: data.type, from: data.from, kind: data.kind, id: data.id, action };
+  const msg = { crixNotif: true, type: data.type, from: data.from, kind: data.kind, id: data.id, action, tag: n.tag, script: data.script };
   // Si la app no está abierta, se abre con los datos en la URL y el cliente los procesa al iniciar sesión.
   let target = new URL(data.url || '/', self.location.origin);
   if (action) target.searchParams.set('a', action);

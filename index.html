@@ -1086,6 +1086,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 </div>
 <div id="toast"></div>
 <script src="/crix-console.js"></script>
+<script src="/crix-native.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/GLTFLoader.js"></script>
 <script src="/crix-avatar.js"></script>
@@ -2769,6 +2770,7 @@ async function saveAppSource() {
 }
 function exitIframe() {
   crixApp.active = false; try { if (typeof netLeaveGame === 'function') netLeaveGame(); } catch {}
+  try { window.CrixNative && CrixNative.release('iframe'); } catch (_) {}
   document.getElementById('s-iframe').classList.remove('active');
   document.getElementById('game-iframe').src = '';
   document.getElementById('s-home').classList.add('active');
@@ -3894,19 +3896,54 @@ for (const key of Object.keys(avConsts)) game[key] = avConsts[key].slice();
 const time = () => Date.now() / 1000;
 task.every = (seconds, callback) => setInterval(() => { try { callback(); } catch (err) { send('output', {text:'[error] ' + (err && err.message ? err.message : String(err)), cls:'err'}); } }, Math.max(100, Math.min(60000, number(seconds, 1) * 1000)));
 task.cancel = id => clearInterval(id);
-const env = {print,warn,error,workspace,math,game,task,localPlayer,gui,time,tonumber:value=>Number(value),tostring:value=>String(value)};
+// ── Funciones nativas del dispositivo (vibración, notificaciones, sensores…): el worker no puede tocarlas, se piden a la página.
+const nativeWait = new Map(); let nativeSeq = 0;
+const nativeCall = (op, args) => new Promise(resolve => { const rid = ++nativeSeq; nativeWait.set(rid, resolve); sendCommand('native', {op:op, args:(args === undefined ? null : args), rid:rid}); });
+const nativeCfg = () => (cfg && cfg.native) || {};
+let dialogHandler = null;
+const dialogCall = (kind, message, opts) => { const o = Object.assign({}, opts || {}, {kind:kind, message:String(message === undefined ? '' : message)}); if (dialogHandler) { try { return Promise.resolve(dialogHandler(kind, o)); } catch (err) { return Promise.resolve(null); } } return nativeCall('dialog', o); };
+const device = {
+  supports: f => !!(nativeCfg().caps || {})[String(f)],
+  get info() { return clone(nativeCfg().info || {}); },
+  get capabilities() { return clone(nativeCfg().caps || {}); },
+  vibrate: p => nativeCall('vibrate', {pattern:p}), stopVibrate: () => nativeCall('vibrate', {pattern:0}),
+  haptic: kind => nativeCall('haptic', {kind:String(kind === undefined ? 'medium' : kind)}),
+  rumble: (ms, strong, weak) => nativeCall('rumble', {ms:number(ms,200), strong:number(strong,1), weak:number(weak,1)}),
+  notify: (title, opts) => nativeCall('notify', Object.assign({}, opts || {}, {title:String(title === undefined ? '' : title)})),
+  requestNotifications: () => nativeCall('notifyPermission'), closeNotifications: tag => nativeCall('closeNotifications', {tag:tag === undefined ? '' : String(tag)}),
+  setBadge: n => nativeCall('badge', {count:number(n,0)}), clearBadge: () => nativeCall('badge', {count:0}),
+  keepAwake: on => nativeCall('wake', {on:on !== false}),
+  share: o => nativeCall('share', o || {}),
+  copy: text => nativeCall('copy', {text:String(text === undefined ? '' : text)}), paste: () => nativeCall('paste'),
+  fullscreen: on => nativeCall('fullscreen', {on:on !== false}),
+  lockOrientation: mode => nativeCall('orientation', {mode:String(mode === undefined ? 'any' : mode)}),
+  getLocation: o => nativeCall('location', o || {}),
+  battery: () => nativeCall('battery'), network: () => nativeCall('network'),
+  speak: (text, o) => nativeCall('speak', Object.assign({}, o || {}, {text:String(text === undefined ? '' : text)})), stopSpeaking: () => nativeCall('speakStop'),
+  listen: o => nativeCall('listen', o || {}),
+  install: () => nativeCall('install'),
+  saveFile: (name, content, mime) => nativeCall('saveFile', {name:String(name), content:String(content === undefined ? '' : content), mime:mime === undefined ? '' : String(mime)}),
+  permission: name => nativeCall('permission', {name:String(name)}),
+  alert: (message, opts) => dialogCall('alert', message, opts), confirm: (message, opts) => dialogCall('confirm', message, opts), prompt: (message, opts) => dialogCall('prompt', message, opts),
+  onDialog: fn => { dialogHandler = typeof fn === 'function' ? fn : null; },
+  on: (name, fn) => { if (typeof fn !== 'function') return Promise.resolve(false); game.on('device:' + String(name), fn); return nativeCall('subscribe', {name:String(name)}); },
+  off: name => { eventHandlers['device:' + String(name)] = []; return nativeCall('unsubscribe', {name:String(name)}); }
+};
+game.device = device; game.vibrate = device.vibrate; localPlayer.vibrate = device.vibrate; localPlayer.haptic = device.haptic;
+const env = {print,warn,error,workspace,math,game,task,localPlayer,gui,time,device,tonumber:value=>Number(value),tostring:value=>String(value)};
 const moduleCache = new Map();
-function requireModule(name) { const entry=(cfg.modules||[]).find(module=>module.name===String(name)||module.id===String(name));if(!entry)throw new Error('No existe el ModuleScript: '+name);const key=String(entry.id||entry.name);if(moduleCache.has(key))return moduleCache.get(key).exports;const module={exports:{}};moduleCache.set(key,module);const factory=new Function('env','print','warn','error','workspace','math','task','tonumber','tostring','game','require','localPlayer','gui','time','module','exports',entry.code+'\\n;return module.exports;');const result=factory(env,print,warn,error,workspace,math,task,env.tonumber,env.tostring,game,requireModule,localPlayer,gui,time,module,module.exports);if(result!==undefined)module.exports=result;return module.exports; }
+function requireModule(name) { const entry=(cfg.modules||[]).find(module=>module.name===String(name)||module.id===String(name));if(!entry)throw new Error('No existe el ModuleScript: '+name);const key=String(entry.id||entry.name);if(moduleCache.has(key))return moduleCache.get(key).exports;const module={exports:{}};moduleCache.set(key,module);const factory=new Function('env','print','warn','error','workspace','math','task','tonumber','tostring','game','require','localPlayer','gui','time','device','module','exports',entry.code+'\\n;return module.exports;');const result=factory(env,print,warn,error,workspace,math,task,env.tonumber,env.tostring,game,requireModule,localPlayer,gui,time,device,module,module.exports);if(result!==undefined)module.exports=result;return module.exports; }
 async function invoke(eventName,args) { const fn=handlers[eventName]; if(typeof fn!=='function'){send('eventDone',{event:eventName});return;} try { await Promise.resolve(fn(...args)); send('eventDone',{event:eventName}); } catch(err) { send('error',{text:eventName+': '+(err&&err.message?err.message:String(err)),cls:'err'}); } }
-self.onmessage = async message => { const data=message.data||{}; if(data.type==='init') { cfg=data.config||{}; parts=(cfg.parts||[]).map(summary); playerState=clone(cfg.player||{position:{x:0,y:0,z:0},x:0,y:0,z:0,onGround:false}); try { if(cfg.mode==='module'){const loaded=requireModule(cfg.name||cfg.id);print('ModuleScript cargado:',loaded);send('finished');return;}const factory=new Function('env','print','warn','error','workspace','math','task','tonumber','tostring','game','require','localPlayer','gui','time',cfg.code+'\\nreturn {onStart:typeof onStart===\"function\"?onStart:null,onUpdate:typeof onUpdate===\"function\"?onUpdate:null,onStop:typeof onStop===\"function\"?onStop:null};'); handlers=factory(env,print,warn,error,workspace,math,task,env.tonumber,env.tostring,game,requireModule,localPlayer,gui,time); if(cfg.mode==='runtime'){await invoke('onStart',[clone(playerState)]);send('ready',{hasUpdate:typeof handlers.onUpdate==='function'});} else {const event=cfg.event||'onStart';if(typeof handlers[event]!=='function')throw new Error('Definí function '+event+'() para ejecutar este evento');const args=event==='onUpdate'?[0.05,clone(playerState)]:[clone(playerState)];await invoke(event,args);send('finished');} } catch(err) { send('error',{text:err&&err.message?err.message:String(err),cls:'err'}); } return; }
+self.onmessage = async message => { const data=message.data||{}; if(data.type==='init') { cfg=data.config||{}; parts=(cfg.parts||[]).map(summary); playerState=clone(cfg.player||{position:{x:0,y:0,z:0},x:0,y:0,z:0,onGround:false}); try { if(cfg.mode==='module'){const loaded=requireModule(cfg.name||cfg.id);print('ModuleScript cargado:',loaded);send('finished');return;}const factory=new Function('env','print','warn','error','workspace','math','task','tonumber','tostring','game','require','localPlayer','gui','time','device',cfg.code+'\\nreturn {onStart:typeof onStart===\"function\"?onStart:null,onUpdate:typeof onUpdate===\"function\"?onUpdate:null,onStop:typeof onStop===\"function\"?onStop:null};'); handlers=factory(env,print,warn,error,workspace,math,task,env.tonumber,env.tostring,game,requireModule,localPlayer,gui,time,device); if(cfg.mode==='runtime'){await invoke('onStart',[clone(playerState)]);send('ready',{hasUpdate:typeof handlers.onUpdate==='function'});} else {const event=cfg.event||'onStart';if(typeof handlers[event]!=='function')throw new Error('Definí function '+event+'() para ejecutar este evento');const args=event==='onUpdate'?[0.05,clone(playerState)]:[clone(playerState)];await invoke(event,args);send('finished');} } catch(err) { send('error',{text:err&&err.message?err.message:String(err),cls:'err'}); } return; }
   if(data.type==='tick'){playerState=clone(data.player||playerState);await invoke('onUpdate',[number(data.dt,0.05),clone(playerState)]);return;}
   if(data.type==='event'){playerState=clone(data.player||playerState);const list=(eventHandlers[data.name]||[]).slice();for(const fn of list){try{await Promise.resolve(fn(...(data.args||[])));}catch(err){send('output',{text:'[error] '+data.name+': '+(err&&err.message?err.message:String(err)),cls:'err'});}}send('eventDone',{event:data.name});return;}
   if(data.type==='stop'){playerState=clone(data.player||playerState);await invoke('onStop',[clone(playerState)]);send('stopped');return;}
+  if(data.type==='nativeReply'){const w=nativeWait.get(data.rid);if(w){nativeWait.delete(data.rid);w(data.result===undefined?null:data.result);}return;}
   if(data.type==='workspace'){parts=(data.parts||[]).map(summary);return;}
 };`;
 function scriptPartsSnapshot(parts) { return (parts||[]).map((part,index)=>({id:String(part.id||'map-part-'+index),name:part.name||'Part',type:part.type||'Block',x:part.x||0,y:part.y||0,z:part.z||0,sx:part.sx||4,sy:part.sy||4,sz:part.sz||4,color:part.color||'#888888',anchored:part.anchored!==false,canCollide:part.canCollide!==false,transparent:part.transparent||0,material:part.material||'SmoothPlastic',isNPC:!!part.isNPC,rx:part.rx||0,ry:part.ry||0,rz:part.rz||0,parent:part.parent||'',attributes:part.attributes||{}})); }
 function scriptPlayerSnapshot() { const p=gPlayer?gPlayer.position:{x:0,y:0,z:0}; return {isAdult:!!(ME&&ME.adult),position:{x:p.x,y:p.y,z:p.z},x:p.x,y:p.y,z:p.z,rotationY:gPlayer?gPlayer.rotation.y:0,velocityY:gVelY,onGround:!!gOnGround,health:gState.health,maxHealth:gState.maxHealth,coins:gState.coins,deaths:gState.deaths}; }
-function makeScriptWorker(script, parts, mode, eventName, player, allScripts=[]) { const language=script.language||'crixscript'; const code=language==='crixscript'?compileCrixScript(script.code||''):(script.code||''); const modules=(allScripts||[]).filter(item=>item.type==='ModuleScript').map(item=>({id:item.id,name:item.name,code:(item.language||'crixscript')==='crixscript'?compileCrixScript(item.code||'',true):(item.code||'')})); const blobUrl=URL.createObjectURL(new Blob([SCRIPT_WORKER_SOURCE],{type:'text/javascript'})); const worker=new Worker(blobUrl); const config={id:script.id||script.name||'script',name:script.name||'Script',code,mode,event:eventName,modules,gui:(typeof guiElementsSnapshot==='function'?guiElementsSnapshot():{}),parts:scriptPartsSnapshot(parts),models:(window.CrixExt&&CrixExt.modelsInfo?CrixExt.modelsInfo():[]),rig:(window.CrixObjects&&CrixObjects.rigSpec?CrixObjects.rigSpec():[]),me:{id:String((ME&&(ME.id||ME.userId))||''),name:String((ME&&(ME.username||ME.name))||'')},player:player||scriptPlayerSnapshot()}; return {worker,blobUrl,code,language,config}; }
+function makeScriptWorker(script, parts, mode, eventName, player, allScripts=[]) { const language=script.language||'crixscript'; const code=language==='crixscript'?compileCrixScript(script.code||''):(script.code||''); const modules=(allScripts||[]).filter(item=>item.type==='ModuleScript').map(item=>({id:item.id,name:item.name,code:(item.language||'crixscript')==='crixscript'?compileCrixScript(item.code||'',true):(item.code||'')})); const blobUrl=URL.createObjectURL(new Blob([SCRIPT_WORKER_SOURCE],{type:'text/javascript'})); const worker=new Worker(blobUrl); const config={id:script.id||script.name||'script',native:(window.CrixNative?CrixNative.snapshot():{}),name:script.name||'Script',code,mode,event:eventName,modules,gui:(typeof guiElementsSnapshot==='function'?guiElementsSnapshot():{}),parts:scriptPartsSnapshot(parts),models:(window.CrixExt&&CrixExt.modelsInfo?CrixExt.modelsInfo():[]),rig:(window.CrixObjects&&CrixObjects.rigSpec?CrixObjects.rigSpec():[]),me:{id:String((ME&&(ME.id||ME.userId))||''),name:String((ME&&(ME.username||ME.name))||'')},player:player||scriptPlayerSnapshot()}; return {worker,blobUrl,code,language,config}; }
 function runScript(scriptOverride, partsOverride) {
   if (!scriptOverride) saveActiveScript();
   const script=scriptOverride||stScripts.find(x=>x.id===activeScriptId);
@@ -3934,7 +3971,7 @@ function _scriptWorkspaceSnapshot() { return [...runtimeWorkspaceBase,...Array.f
 function _syncScriptWorkspaces() { const parts=_scriptWorkspaceSnapshot(); for(const run of runtimeScripts.values())if(run.active)try{run.worker.postMessage({type:'workspace',parts});}catch(_){} }
 function _clearScriptWatchdog(run) { if(run.watchdog){clearTimeout(run.watchdog);run.watchdog=null;} }
 function _armScriptWatchdog(run,eventName) { _clearScriptWatchdog(run);run.watchdog=setTimeout(()=>{if(run.active)_failRuntimeScript(run,'El evento '+eventName+' superó '+(SCRIPT_TIMEOUT_MS/1000)+' s');},SCRIPT_TIMEOUT_MS); }
-function _terminateRuntimeScript(run) { if(!run||!run.active)return;run.active=false;_clearScriptWatchdog(run);if(run.stopTimer)clearTimeout(run.stopTimer);try{run.worker.terminate();}catch(_){}URL.revokeObjectURL(run.blobUrl);runtimeScripts.delete(run.id); }
+function _terminateRuntimeScript(run) { if(!run||!run.active)return;run.active=false;try{window.CrixNative&&CrixNative.release(run.id);}catch(_){}_clearScriptWatchdog(run);if(run.stopTimer)clearTimeout(run.stopTimer);try{run.worker.terminate();}catch(_){}URL.revokeObjectURL(run.blobUrl);runtimeScripts.delete(run.id); }
 function _failRuntimeScript(run,message) { appendOutput('[error] '+run.name+': '+message,'err');_terminateRuntimeScript(run); }
 function _sendRuntimeStop(run) { if(!run.active||run.stopSent)return;run.stopSent=true;run.busy=true;_armScriptWatchdog(run,'onStop');try{run.worker.postMessage({type:'stop',player:scriptPlayerSnapshot()});}catch(err){_terminateRuntimeScript(run);} }
 function stopGameScripts() { if(runtimeTickHandle){clearInterval(runtimeTickHandle);runtimeTickHandle=null;}if(runtimePhysicsHandle){clearInterval(runtimePhysicsHandle);runtimePhysicsHandle=null;}for(const run of [...runtimeScripts.values()]){run.stopping=true;if(!run.busy)_sendRuntimeStop(run);else run.stopPending=true;if(!run.stopTimer)run.stopTimer=setTimeout(()=>_terminateRuntimeScript(run),1500);} }
@@ -4048,6 +4085,7 @@ function playMap(mapId) {
   const maps = getMaps(); const m = maps[mapId]; if (!m) { showToast('Mapa no encontrado'); return; }
   if (!canPlayMap(m)) { showToast('🔒 No tenés acceso a este juego'); return; }
   currentGameSession++; stopGameScripts();
+  window.__crixPlaying = { id:String(mapId), name:String(m.name || 'Crix') };
   m.plays = (m.plays||0) + 1; setMaps(maps); ME.visits = (ME.visits||0) + 1; saveMe();
   apiRequest('/api/maps/' + encodeURIComponent(mapId) + '/play', { method:'POST', body:{} }).then(result => {
     const current = getMaps(); if (!current[mapId]) return; current[mapId].plays = result.plays; DB.set('maps', current);
@@ -4486,10 +4524,10 @@ function crixSdkMain() {   // se ejecuta DENTRO del iframe de la app
   var seq = 0, pending = {}, handlers = {}, info = null, players = [], state = {}, readyDone = false, resolveReady, lastHost = null;
   var ready = new Promise(function (r) { resolveReady = r; });
   function post(m) { m.crix = 1; try { parent.postMessage(m, '*'); } catch (e) {} }
-  function call(op, args) {
+  function call(op, args, ms) {
     return new Promise(function (res) {
       var id = ++seq; pending[id] = res; post({ id: id, op: op, args: args || {} });
-      setTimeout(function () { if (pending[id]) { delete pending[id]; res({ ok: false, err: 'Sin respuesta del servidor' }); } }, 12000);
+      setTimeout(function () { if (pending[id]) { delete pending[id]; res({ ok: false, err: 'Sin respuesta del servidor' }); } }, ms || 12000);
     });
   }
   function emit(ev, a, b) { (handlers[ev] || []).slice().forEach(function (fn) { try { fn(a, b); } catch (e) { console.error('[Crix]', e); } }); }
@@ -4541,8 +4579,31 @@ function crixSdkMain() {   // se ejecuta DENTRO del iframe de la app
     } else if (m.ev === 'state') {
       if (m.value === null) delete state[m.key]; else state[m.key] = m.value;
       emit('state', m.key, m.value); emit('state:' + m.key, m.value);
+    } else if (m.ev === 'native') {
+      emit('device:' + m.name, m.data);
     }
   });
+  // Crix.device: vibración, notificaciones, sensores… (los mismos nombres que `device` en los LocalScript, siempre con promesas)
+  function nat(op, args) { return call('native', { op: op, args: args || {} }, op === 'dialog' ? 3600000 : 80000).then(function (r) { return r && r.ok ? r.result : null; }); }
+  function mix(o, extra) { var a = {}, k; o = o || {}; for (k in o) a[k] = o[k]; for (k in extra) a[k] = extra[k]; return a; }
+  api.device = {
+    capabilities: function () { return nat('caps'); }, info: function () { return nat('info'); },
+    vibrate: function (p) { return nat('vibrate', { pattern: p }); }, stopVibrate: function () { return nat('vibrate', { pattern: 0 }); },
+    haptic: function (k) { return nat('haptic', { kind: k || 'medium' }); }, rumble: function (ms, s, w) { return nat('rumble', { ms: ms, strong: s, weak: w }); },
+    notify: function (title, o) { return nat('notify', mix(o, { title: title })); }, requestNotifications: function () { return nat('notifyPermission'); },
+    closeNotifications: function (tag) { return nat('closeNotifications', { tag: tag || '' }); },
+    setBadge: function (n) { return nat('badge', { count: n }); }, clearBadge: function () { return nat('badge', { count: 0 }); },
+    keepAwake: function (on) { return nat('wake', { on: on !== false }); }, share: function (o) { return nat('share', o || {}); },
+    copy: function (t) { return nat('copy', { text: t }); }, paste: function () { return nat('paste'); },
+    fullscreen: function (on) { return nat('fullscreen', { on: on !== false }); }, lockOrientation: function (m) { return nat('orientation', { mode: m || 'any' }); },
+    getLocation: function (o) { return nat('location', o || {}); }, battery: function () { return nat('battery'); }, network: function () { return nat('network'); },
+    speak: function (t, o) { return nat('speak', mix(o, { text: t })); }, stopSpeaking: function () { return nat('speakStop'); }, listen: function (o) { return nat('listen', o || {}); },
+    install: function () { return nat('install'); }, saveFile: function (n, c, m) { return nat('saveFile', { name: n, content: c, mime: m }); },
+    permission: function (n) { return nat('permission', { name: n }); },
+    alert: function (m, o) { return nat('dialog', mix(o, { kind: 'alert', message: m })); }, confirm: function (m, o) { return nat('dialog', mix(o, { kind: 'confirm', message: m })); }, prompt: function (m, o) { return nat('dialog', mix(o, { kind: 'prompt', message: m })); },
+    on: function (n, fn) { (handlers['device:' + n] = handlers['device:' + n] || []).push(fn); return nat('subscribe', { name: n }); },
+    off: function (n) { handlers['device:' + n] = []; return nat('unsubscribe', { name: n }); }
+  };
   window.Crix = api;
   post({ op: 'hello' });
 }
@@ -4555,7 +4616,7 @@ function crixInjectSdk(html) {
   return tag + html;
 }
 var crixApp = { active:false, online:false, helloDone:false, localState:{} };
-function crixAppReset(isHtml, online) { crixApp = { active:!!isHtml, online:!!(isHtml && online), helloDone:false, localState:{}, tries:0 }; }
+function crixAppReset(isHtml, online) { try { window.CrixNative && CrixNative.release('iframe'); } catch (_) {} crixApp = { active:!!isHtml, online:!!(isHtml && online), helloDone:false, localState:{}, tries:0 }; }
 function crixAppPush(payload) {
   if (!crixApp.active) return;
   const f = document.getElementById('game-iframe');
@@ -4586,6 +4647,14 @@ window.addEventListener('message', e => {
   if (!crixApp.active || !f || e.source !== f.contentWindow) return;
   const m = e.data; if (!m || m.crix !== 1 || typeof m.op !== 'string') return;
   if (m.op === 'hello') { crixApp.tries = 0; crixAppHello(); return; }
+  if (m.op === 'native' && m.id !== undefined) {   // Crix.device.* de los juegos HTML
+    const a = (m.args && typeof m.args === 'object') ? m.args : {}, rid = m.id;
+    const rep = result => { try { e.source.postMessage({ crix:1, reply:1, id:rid, result }, '*'); } catch {} };
+    if (!window.CrixNative) return rep({ ok:false, err:'No disponible en este dispositivo' });
+    CrixNative.exec({ id:'iframe', name:'iframe', emit:(n, d) => crixAppPush({ ev:'native', name:n, data:d }) }, String(a.op || ''), a.args)
+      .then(r => rep({ ok:true, result:r === undefined ? null : r }), err => rep({ ok:false, err:String((err && err.message) || err) }));
+    return;
+  }
   const ev = CRIX_APP_OPS[m.op], id = m.id; if (!ev || id === undefined) return;
   const args = (m.args && typeof m.args === 'object') ? m.args : {};
   const reply = result => { try { e.source.postMessage({ crix:1, reply:1, id, result }, '*'); } catch {} };
@@ -5771,6 +5840,7 @@ window.addEventListener('pagehide', () => { try { socket && socket.emit('app_vis
 })();
 function handleNotifAction(m) {
   if (!m) return;
+  if (m.type === 'script') { try { window.CrixNative && CrixNative.notifClick(m); } catch (_) {} return; }
   if (!ME) { _pendingNotif = m; return; }
   const from = String(m.from || '');
   if (m.type === 'call_ongoing') { if (m.action === 'hangup' && typeof _callState !== 'undefined' && _callState) callHangup('Llamada finalizada'); return; }
@@ -6342,9 +6412,30 @@ function _playerCommand(c) {
     case 'message': gameBanner(String(c.text||'').slice(0,200), 3); break;
   }
 }
+// ═══ Funciones nativas del dispositivo para scripts (vibración, notificaciones, sensores…) → crix-native.js ═══
+function _nativeEmit(run, name, args) {
+  if (!run.active || run.stopping) return;
+  const ev = {type:'event', name, args:args||[], player:scriptPlayerSnapshot()};
+  if (run.busy) { if (/^device:(orientation|motion|location)$/.test(name)) return; run.queue = run.queue || []; if (run.queue.length < 50) run.queue.push(ev); return; }
+  run.busy = true; _armScriptWatchdog(run, name);
+  try { run.worker.postMessage(ev); } catch (err) { _failRuntimeScript(run, err.message); }
+}
+function _nativeCtx(run) { return { id: run.id, name: run.name, emit: (name, data) => _nativeEmit(run, 'device:' + name, [data]) }; }
+function _nativeFromScript(run, p) {
+  const rid = p.rid;
+  const reply = result => {
+    if (!run.active) return;
+    try { run.worker.postMessage({type:'nativeReply', rid, result: result === undefined ? null : result}); } catch (_) {}
+    if (run.busy && !run.stopping) _armScriptWatchdog(run, 'device');
+  };
+  if (!window.CrixNative) { reply(null); return; }
+  if (run.busy) _clearScriptWatchdog(run);   // esperar un permiso o un diálogo del usuario no es un script colgado
+  CrixNative.exec(_nativeCtx(run), String(p.op || ''), p.args).then(reply, err => { appendOutput('[' + run.name + '] [warn] device.' + String(p.op || '') + ': ' + ((err && err.message) || err), 'warn'); reply(null); });
+}
 function _handleExtendedCommand(run, message) {
   const c = message.command, payload = message.payload || {};
   if (window.CrixExt && CrixExt.gameCommand(message)) return true;
+  if (c === 'native') { _nativeFromScript(run, payload); return true; }
   if (c === 'player') { _playerCommand(payload); return true; }
   if (c === 'guiSet') { if (typeof guiSet === 'function') guiSet(String(payload.name||''), String(payload.prop||''), payload.value); return true; }
   if (c === 'remote') { if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('script_remote', {name:String(payload.name||'').slice(0,40), data:payload.data}); return true; }
@@ -6657,7 +6748,7 @@ function guiEdTemplate(kind) {
 
 // ═══ Editor de código: resaltado, autocompletado, ayudas y documentación ═══
 const CODE_KW = new Set(['function','return','if','else','for','while','do','break','continue','let','const','var','new','true','false','null','undefined','async','await','of','in','switch','case','default','try','catch','finally','throw','typeof','this','class','extends','then','end','local','nil','and','or','not','elseif','repeat','until']);
-const CODE_API = new Set(['game','gui','localPlayer','workspace','task','math','print','warn','error','time','require','onStart','onUpdate','onStop']);
+const CODE_API = new Set(['game','gui','device','localPlayer','workspace','task','math','print','warn','error','time','require','onStart','onUpdate','onStop']);
 function codeLang() { return document.getElementById('code-language')?.value || 'javascript'; }
 function highlightCode(src, lang) {
   const escHtml = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -6760,8 +6851,9 @@ function codeKeydown(e) {
 // ── Autocompletado ──
 const CODE_COMPLETIONS = {
   'game.': [['createPart','({ name, type, position:{x,y,z}, size:{x,y,z}, color, anchored })','Crea una pieza'],['updatePart','(id, { x, y, z, color, transparent… })','Modifica una pieza'],['destroyPart','(id)','Elimina una pieza'],['getPlayer','()','Datos del jugador'],['findPart','(nombre)','Busca una pieza por nombre'],['on','(evento, fn)','Eventos: died, won, coin'],['onTouched','(nombrePieza, fn)','Cuando el jugador toca la pieza'],['onTouchEnded','(nombrePieza, fn)','Cuando deja de tocarla (Script de servidor)'],['onImpact','(nombrePieza, fn(info), velocidadMin)','Golpe contra la pieza con su velocidad (Script de servidor)'],['getPart','(idONombre)','Estado actual de una pieza (Script de servidor)'],['onKey','(tecla, fn)','Al apretar una tecla'],['player','','Control del jugador'],['gui','','Interfaces']],
+  'device.': [['vibrate','(patrón)','ms o [vibra, pausa, vibra…]; máx. 10 s'],['stopVibrate','()',''],['haptic','("light"|"medium"|"heavy"|"success"|"warning"|"error"|"select")','Toque háptico (vibración o mando)'],['rumble','(ms, fuerte, suave)','Vibra el mando conectado'],['notify','(titulo, { body, tag, silent, onlyHidden, vibrate, actions, data })','Notificación del sistema (pide permiso)'],['requestNotifications','()','Pide permiso de notificaciones'],['closeNotifications','(tag)',''],['setBadge','(n)','Número en el ícono de la app'],['clearBadge','()',''],['keepAwake','(true|false)','Evita que se apague la pantalla'],['share','({ title, text, url })','Menú de compartir del sistema'],['copy','(texto)','Copia al portapapeles'],['paste','()','Lee el portapapeles (pide permiso)'],['fullscreen','(true|false)','Pantalla completa'],['lockOrientation','("landscape"|"portrait"|"any")',''],['getLocation','({ high })','Ubicación {lat,lng,accuracy…} (pide permiso)'],['battery','()','{level,charging}'],['network','()','{online,type,downlink,rtt}'],['speak','(texto, { lang, rate, pitch })','Lee en voz alta'],['stopSpeaking','()',''],['listen','({ lang })','Reconoce tu voz → texto (pide permiso)'],['install','()','Instalar Crix como app'],['saveFile','(nombre, contenido, mime)','Descarga un archivo'],['permission','(nombre)','prompt | granted | denied'],['alert','(mensaje, { title, ok })','Cartel dentro del juego'],['confirm','(mensaje, { title, ok, cancel })','Cartel Aceptar/Cancelar → true | false'],['prompt','(mensaje, { title, value, placeholder })','Cartel con texto → texto | null'],['onDialog','(fn(tipo, opciones))','Usá tu propio cartel en vez del de Crix'],['on','(evento, fn)','orientation, motion, shake, location, online, offline, network, visibility, battery, gamepad, install, screen, fullscreen, notificationclick'],['off','(evento)',''],['supports','(funcion)','¿Existe en este dispositivo?'],['info','','{platform, standalone, touch, language, screen…}'],['capabilities','','Todo lo que este dispositivo soporta']],
   'gui.': [['get','(nombre)','Elemento: .text .visible .value .onClick(fn)'],['show','(nombre)','Muestra pantalla o elemento'],['hide','(nombre)','Oculta pantalla o elemento'],['toast','(texto, segundos)','Aviso en pantalla'],['chat','(texto)','Mensaje en el chat (el juego no escribe nada solo, ni al morir)']],
-  'localPlayer.': [['setSpeed','(porcentaje)','100 = normal'],['setJump','(porcentaje)','100 = normal'],['teleport','(x, y, z)',''],['damage','(n)',''],['heal','(n)',''],['setHealth','(n)',''],['kill','()',''],['respawn','()',''],['addCoins','(n)',''],['setCoins','(n)',''],['setCheckpoint','(x, y, z)',''],['say','(texto)','Aviso en pantalla'],['health','','Vida actual'],['maxHealth','',''],['coins','',''],['deaths','',''],['position','','{x,y,z}']],
+  'localPlayer.': [['setSpeed','(porcentaje)','100 = normal'],['setJump','(porcentaje)','100 = normal'],['teleport','(x, y, z)',''],['damage','(n)',''],['heal','(n)',''],['setHealth','(n)',''],['kill','()',''],['respawn','()',''],['addCoins','(n)',''],['setCoins','(n)',''],['setCheckpoint','(x, y, z)',''],['say','(texto)','Aviso en pantalla'],['vibrate','(patrón)','Vibra el dispositivo'],['haptic','(tipo)','Toque háptico'],['health','','Vida actual'],['maxHealth','',''],['coins','',''],['deaths','',''],['position','','{x,y,z}']],
   'workspace.': [['findFirstChild','(nombre)',''],['getChildren','()','Todas las piezas'],['createPart','(props)',''],['updatePart','(id, patch)',''],['destroyPart','(id)','']],
   'task.': [['wait','(segundos)','Pausa (máx. 2 s)'],['delay','(segundos, fn)','Ejecuta luego'],['every','(segundos, fn)','Repite; devuelve id'],['cancel','(id)','Detiene un every']],
   'math.': [['random','(min, max)',''],['floor','(n)',''],['ceil','(n)',''],['round','(n)',''],['abs','(n)',''],['max','(a, b…)',''],['min','(a, b…)',''],['sqrt','(n)',''],['pow','(a, b)',''],['sin','(n)',''],['cos','(n)',''],['tan','(n)',''],['atan2','(y, x)',''],['log','(n)',''],['exp','(n)',''],['sign','(n)',''],['lerp','(a, b, t)',''],['clamp','(v, min, max)',''],['dist','(a, b)','Distancia entre {x,y,z}'],['pi','','']]
@@ -6800,6 +6892,9 @@ function codeAcAccept() {
 }
 // ── Documentación y ejemplos ──
 const CODE_EXAMPLES = [
+  ['Vibrar al recoger una moneda', 'LocalScript', "function onStart() {\n  game.on('coin', () => {\n    device.haptic('success');\n  });\n  game.on('died', () => {\n    device.vibrate([200, 80, 200, 80, 400]);\n  });\n}\n"],
+  ['Notificación al volver a Crix', 'LocalScript', "// Avisa cuando la persona sale de la app y el juego sigue abierto\nfunction onStart() {\n  device.on('visibility', async (d) => {\n    if (!d.visible) await device.notify('Te estamos esperando', { body: 'Tu partida sigue abierta', tag: 'volver', onlyHidden: true });\n  });\n}\n"],
+  ['Controlar con el giroscopio', 'LocalScript', "function onStart() {\n  device.on('orientation', d => {\n    // d.gamma: inclinación izquierda/derecha (-90..90)\n    if (d.gamma > 20) print('derecha');\n    else if (d.gamma < -20) print('izquierda');\n  });\n  device.on('shake', () => { gui.toast('¡Sacudida!'); device.haptic('heavy'); });\n}\n"],
   ['Contador de clicks (GUI)', 'LocalScript', "// Necesita una pantalla con un TextLabel \"Contador\" y un TextButton \"Sumar\"\n// (Plantillas → Contador con script en el editor de GUI)\nlet clicks = 0;\n\nfunction onStart() {\n  gui.get('Sumar').onClick(() => {\n    clicks++;\n    gui.get('Contador').text = 'Clicks: ' + clicks;\n  });\n}\n"],
   ['Puerta que se abre con la tecla E', 'LocalScript', "// Necesita una pieza llamada \"Puerta\"\nlet abierta = false;\n\nfunction onStart() {\n  game.onKey('e', () => {\n    abierta = !abierta;\n    const puerta = game.findPart('Puerta');\n    if (!puerta) return;\n    game.updatePart(puerta.id, { transparent: abierta ? 0.8 : 0, canCollide: !abierta });\n    gui.toast(abierta ? 'Puerta abierta' : 'Puerta cerrada');\n  });\n}\n"],
   ['Plataforma que sube y baja', 'LocalScript', "// Necesita una pieza llamada \"Plataforma\"\nlet t = 0;\n\nfunction onUpdate(dt) {\n  t += dt;\n  const p = game.findPart('Plataforma');\n  if (p) game.updatePart(p.id, { y: 3 + Math.sin(t) * 4 });\n}\n"],
@@ -6813,6 +6908,7 @@ const CODE_DOCS_HTML = '<h4>Tipos de script</h4><p><b>LocalScript</b>: corre en 
 '<h4>Ciclo de vida</h4><pre>function onStart(player) { }\nfunction onUpdate(dt, player) { }\nfunction onStop(player) { }</pre><p><code>player</code> es una copia de solo lectura: <code>position</code>, <code>onGround</code>, <code>health</code>, <code>coins</code>, <code>deaths</code>.</p>'+
 '<h4>Piezas</h4><pre>const id = game.createPart({\n  name: "Caja", type: "Block",\n  position: {x:0,y:5,z:0}, size: {x:2,y:2,z:2},\n  color: "#ff4d6d", anchored: false\n});\ngame.updatePart(id, { y: 10, transparent: 0.5 });\ngame.destroyPart(id);\ngame.findPart("Puerta");  // {id, position, size…}\nworkspace.getChildren();</pre><p>Las piezas están <b>ancladas</b> salvo que pongas <code>anchored: false</code> (entonces caen).</p>'+
 '<h4>Jugador</h4><pre>localPlayer.setSpeed(150);   // %\nlocalPlayer.setJump(120);\nlocalPlayer.teleport(0, 10, 0);\nlocalPlayer.damage(20); localPlayer.heal(10);\nlocalPlayer.addCoins(5); localPlayer.kill();\nlocalPlayer.setCheckpoint(x, y, z);\nlocalPlayer.health / .coins / .deaths</pre>'+
+'<h4>Dispositivo (vibración, notificaciones, sensores…)</h4><pre>device.vibrate(200);                 // ms\ndevice.vibrate([100, 50, 100]);      // vibra, pausa, vibra\ndevice.haptic("success");            // light medium heavy success warning error select\nawait device.notify("¡Listo!", { body:"Tu cosecha está lista", onlyHidden:true });\ndevice.setBadge(3);\ndevice.keepAwake(true);\ndevice.share({ title:"Mirá mi puntaje", text:"Hice 900" });\ndevice.copy("texto");\ndevice.fullscreen(); device.lockOrientation("landscape");\nconst pos = await device.getLocation();   // {lat,lng}\ndevice.on("orientation", d => { /* d.alpha d.beta d.gamma */ });\ndevice.on("shake", () => { });  device.on("motion", d => { });\ndevice.speak("Hola"); const dicho = await device.listen();\nawait device.alert("Guardado");  if (await device.confirm("¿Salir?")) { }  const nombre = await device.prompt("Tu nombre");\ndevice.onDialog((tipo, o) => miCartel(tipo, o));   // opcional: tu propio cartel\nif (device.supports("vibrate")) { }   device.info.platform</pre><p>Todo devuelve una promesa (<code>false</code>/<code>null</code> si el dispositivo no lo soporta o la persona dijo que no). Notificaciones, ubicación, micrófono, portapapeles y sensores piden permiso a quien juega. Compartir, pantalla completa y copiar muestran un botón «Tocá para continuar» si no hubo un toque reciente. Un <b>Script</b> de servidor no tiene <code>device</code>: mandá un evento con <code>game.fireClient(jugador, "vibrar", [200])</code> y en el LocalScript <code>game.onServerEvent("vibrar", p => device.vibrate(p))</code>. En juegos HTML se usa <code>Crix.device.*</code>.</p>'+
 '<h4>Eventos</h4><pre>game.onTouched("Pieza", () => { });\ngame.onKey("e", () => { });  // "space", "shift"…\ngame.on("died", () => { });  // won, coin</pre>'+
 '<h4>Contactos e impactos (Script de servidor)</h4><pre>game.onTouched("Pieza", (jugador, info) => { });  // jugador es null si la toca otra pieza\ngame.onTouchEnded("Pieza", (jugador, info) => { });\ngame.onImpact("Pieza", info => { }, 5);  // solo golpes &ge; 5 studs/s\nconst p = game.getPart("Pieza");  // estado actual</pre><p><code>info</code>: <code>speed</code> (studs/s), <code>normal</code> (de la otra pieza hacia esta), <code>velocity</code>, <code>part</code> y <code>other</code> ({kind:"player"|"part", name, x, y, z…}).</p>'+
 '<h4>GUI</h4><pre>const txt = gui.get("Puntos");\ntxt.text = "Puntos: 10";\ntxt.visible = false;\ngui.get("Barra").value = 0.5;\ngui.get("Boton").onClick(() => { });\ngui.get("Caja").onSubmit(v => { });\ngui.show("Menu"); gui.hide("Menu");\ngui.toast("¡Hola!", 3);</pre><p>Propiedades: <code>text visible value x y w h color bg opacity fontSize image</code>.</p>'+
