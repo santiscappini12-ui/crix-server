@@ -2825,6 +2825,7 @@ function renderProfile(uid) {
     ? '<button class="btn btn-green" style="font-size:12px" onclick="unbanUser(\''+u.id+'\')">✅ Desbanear</button>'
     : '<button class="btn btn-red" style="font-size:12px" onclick="banUser(\''+u.id+'\')">🚫 Banear</button>') : '';
   const adminAdultBtn = isAdmin() ? adultBtnHtml(u, 'profile', 'font-size:12px') : '';
+  const adminRoleBtn = removeAdminBtnHtml(u, 'font-size:12px');
   const ageTagHtml = isMe && ME && ME.adult ? '<div class="pf-bio">'+esc(clsT('ageTag'))+'</div>' : '';   // solo la propia persona; nunca cómo lo consiguió
   document.getElementById('profile-inner').innerHTML =
     '<div class="pf-banner">'+
@@ -2847,7 +2848,7 @@ function renderProfile(uid) {
       : ((!isFriend ? '<button class="btn btn-p" style="font-size:12px" onclick="addFriend(\''+u.id+'\')">+ Agregar amigo</button>' : '')+
          (isFriend ? '<button class="btn btn-g" style="font-size:12px" onclick="openConvWith(\''+u.id+'\')">💬 Mensaje cifrado</button>' : ''))+
         (u.currentGameId && u.currentInstanceId ? '<button class="btn btn-p" style="font-size:12px" onclick="joinFriendGame(\''+u.id+'\')">▶ Unirme a su partida</button>' : '')+
-        adminBanBtn)+adminAdultBtn+
+        adminBanBtn)+adminAdultBtn+adminRoleBtn+
     '</div></div></div>'+
     (isMe ? '<input id="profile-avatar-file" type="file" accept="image/*" style="display:none" onchange="uploadProfileAvatar(event)">' : '')+
     (isMe ? '<div style="display:flex;gap:8px;margin-bottom:14px"><input class="inp" style="flex:1" id="add-friend-inp" placeholder="Buscar y agregar amigo..."><button class="btn btn-p" onclick="addFriendByName()">+ Amigo</button></div>' : '')+
@@ -2998,6 +2999,7 @@ function openAdminPanel() {
           : '<button class="btn btn-red" style="font-size:11px;padding:4px 10px" onclick="banUser(\''+u.id+'\')">Banear</button>')+
         (isAdmin() ? adultBtnHtml(u, 'admin', 'font-size:11px;padding:4px 10px') : '')+
         (isAdmin() && !u.isAdmin ? '<button class="btn btn-g" style="font-size:11px;padding:4px 10px" onclick="makeAdmin(\''+u.id+'\')">\u26A1 Admin</button>' : '')+
+        removeAdminBtnHtml(u, 'font-size:11px;padding:4px 10px')+
         '</div></div>';
     }).join('')+
     '</div>';
@@ -3037,6 +3039,25 @@ async function unbanUser(uid) {
   delete u.banned; users[uid] = u; DB.set('users', users);
   showToast('✅ Ban removido: ' + u.username);
   openAdminPanel();
+}
+function isOwnerUser(u) { return !!u && String(u.username || '').toLowerCase() === 'crix'; }
+// "Quitar admin": lo ve la cuenta principal (crix) sobre cualquier otro admin, y cada admin sobre sí mismo.
+function removeAdminBtnHtml(u, style) {
+  if (!isAdmin() || !u || !u.isAdmin || isOwnerUser(u)) return '';
+  if (u.id !== ME.id && !isOwnerUser(ME)) return '';
+  return '<button class="btn btn-red" style="' + style + '" onclick="removeAdmin(\'' + u.id + '\')">⛔ ' + (u.id === ME.id ? 'Dejar de ser admin' : 'Quitar admin') + '</button>';
+}
+async function removeAdmin(uid) {
+  if (!isAdmin()) return;
+  const users = getUsers(); const u = users[uid]; if (!u) return;
+  const self = uid === ME.id;
+  if (!confirm(self ? '¿Dejar de ser admin? Perderás los permisos de administración.' : '¿Quitarle el admin a ' + u.username + '?')) return;
+  try { await apiRequest('/api/admin/users/' + encodeURIComponent(uid) + '/remove-admin', { method:'POST', body:{} }); }
+  catch (err) { showToast('No se pudo quitar el admin: ' + err.message, 4000); return; }
+  u.isAdmin = false; delete u.adminGrantedBy; users[uid] = u; DB.set('users', users);
+  if (self) ME.isAdmin = false;
+  showToast('⛔ ' + (self ? 'Ya no sos admin' : u.username + ' ya no es admin'));
+  if (self) { try { bootApp(); } catch (_) {} goTab('home'); } else { openAdminPanel(); }
 }
 function makeAdmin(uid) {
   if (!isAdmin()) return;

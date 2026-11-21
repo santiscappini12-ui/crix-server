@@ -1250,8 +1250,8 @@ app.post('/api/user/:id', (req, res) => {
     if (actor.id === u.id && Array.isArray(u.following))
       for (const fid of u.following) if (!followedBefore.has(fid) && DB.users[fid]) notifyActivity(fid, { kind:'user', id:u.id, from:u.id, fromName:u.username, title:'👤 ' + u.username + ' te sigue ahora', body:'Tenés un seguidor nuevo', tag:'follow-' + u.id });
     if (actor.isAdmin && req.body.isAdmin !== undefined) {
-      u.isAdmin = !!req.body.isAdmin;
-      if (u.isAdmin) u.adminGrantedBy = actor.id; else delete u.adminGrantedBy;
+      // Quitar el admin solo se hace por /api/admin/users/:id/remove-admin (con sus reglas); aquí únicamente se concede.
+      if (req.body.isAdmin && !u.isAdmin) { u.isAdmin = true; u.adminGrantedBy = actor.id; }
     }
     DB.users[req.params.id] = u;
     saveDB();
@@ -1261,6 +1261,27 @@ app.post('/api/user/:id', (req, res) => {
     io.emit('user_updated', { userId: req.params.id });
     res.json({ ok:true });
   } catch(e) { res.json({ ok:false, err:e.message }); }
+});
+
+// ═══ QUITAR ADMIN ═══
+// La cuenta principal "crix" es la dueña: nadie puede quitarle el admin, y solo ella puede quitárselo a otra persona.
+// Cualquier admin puede renunciar a su propio rol. El cambio se guarda en el servidor (no solo en el navegador).
+const isOwnerAccount = u => !!u && String(u.username || '').toLowerCase() === 'crix';
+app.post('/api/admin/users/:id/remove-admin', requireAuth, requireAdmin, (req, res) => {
+  const target = DB.users[req.params.id];
+  if (!target) return res.status(404).json({ ok:false, err:'Usuario no encontrado' });
+  if (!target.isAdmin) return res.json({ ok:true, already:true });
+  if (isOwnerAccount(target)) return res.status(403).json({ ok:false, err:'La cuenta principal de Crix no puede dejar de ser admin' });
+  const self = target.id === req.user.id;
+  if (!self && !isOwnerAccount(req.user)) return res.status(403).json({ ok:false, err:'Solo la cuenta principal de Crix puede quitarle el admin a otra persona' });
+  target.isAdmin = false;
+  delete target.adminGrantedBy;
+  DB.users[target.id] = target;
+  saveDB();
+  io.emit('user_updated', { userId:target.id });
+  if (!self) notifyActivity(target.id, { kind:'home', id:'admin', title:'⛔ Se quitó tu rol de admin', body:'Ya no tenés permisos de administración en Crix.', tag:'admin-role' });
+  console.log(`[ADMIN] ${req.user.username} ${self ? 'renunció al rol de admin' : 'quitó el admin a ' + target.username}`);
+  res.json({ ok:true });
 });
 
 // ═══ VERIFICACIÓN DE EDAD (+18) ═══
