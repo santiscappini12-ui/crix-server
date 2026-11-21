@@ -479,13 +479,15 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 .cls-s0 .sh{fill:#2f9e5f}.cls-s7 .sh{fill:#2b9aa8}.cls-s12 .sh{fill:#e5b22a}.cls-s16 .sh{fill:#e8782a}.cls-s18 .sh{fill:#d93a3a}.cls-s12 text{fill:#1b1b1b}
 .cls-badge.cls-none{background:var(--bg3);color:var(--text3);border:1px dashed var(--border)}
 
-/* ═══ INTERFAZ PRINCIPAL: sin esquinas redondeadas ═══
+/* ═══ INTERFAZ PRINCIPAL: sin esquinas redondeadas (solo las fotos de perfil son redondas) ═══
    Solo aplica a Crix (inicio, descubrir, videos, foros, Hub, chat, perfil, modales...).
    Lo que está dentro de un juego (#s-game, GUIs del juego, el iframe) y la vista previa del
    editor de GUI conservan el estilo que le dé cada creador. */
-*:not(#s-game, #s-game *, #game-gui, #game-gui *, #s-iframe, #s-iframe *, #gui-stage, #gui-stage *),
-*:not(#s-game, #s-game *, #game-gui, #game-gui *, #s-iframe, #s-iframe *, #gui-stage, #gui-stage *)::before,
-*:not(#s-game, #s-game *, #game-gui, #game-gui *, #s-iframe, #s-iframe *, #gui-stage, #gui-stage *)::after{border-radius:0 !important;}
+*:not(#s-game, #s-game *, #game-gui, #game-gui *, #s-iframe, #s-iframe *, #gui-stage, #gui-stage *, .av-round, #forums-my-av, #nav-av, .nav-av, .pf-av, .friend-av, .conv-av, .call-av-big, .av-round *, #forums-my-av *, #nav-av *, .nav-av *, .pf-av *, .friend-av *, .conv-av *, .call-av-big *),
+*:not(#s-game, #s-game *, #game-gui, #game-gui *, #s-iframe, #s-iframe *, #gui-stage, #gui-stage *, .av-round, #forums-my-av, #nav-av, .nav-av, .pf-av, .friend-av, .conv-av, .call-av-big, .av-round *, #forums-my-av *, #nav-av *, .nav-av *, .pf-av *, .friend-av *, .conv-av *, .call-av-big *)::before,
+*:not(#s-game, #s-game *, #game-gui, #game-gui *, #s-iframe, #s-iframe *, #gui-stage, #gui-stage *, .av-round, #forums-my-av, #nav-av, .nav-av, .pf-av, .friend-av, .conv-av, .call-av-big, .av-round *, #forums-my-av *, #nav-av *, .nav-av *, .pf-av *, .friend-av *, .conv-av *, .call-av-big *)::after{border-radius:0 !important;}
+/* Las fotos de perfil (avatares) son lo único que se queda redondo */
+.av-round, #forums-my-av, #nav-av, .nav-av, .pf-av, .friend-av, .conv-av, .call-av-big{border-radius:50% !important;overflow:hidden;}
 ::-webkit-scrollbar-thumb{border-radius:0 !important;}
 /* Logo: borde blanco incluido en el propio SVG; solo se asegura que no se deforme ni se recorte */
 .nav-logo svg,.auth-brand svg{overflow:visible;flex-shrink:0;}
@@ -2522,7 +2524,7 @@ function avatarInnerHtml(user) {
 // Círculo con la foto de perfil de una cuenta (o su inicial si no tiene foto). Se usa en cada creación: juegos, videos, comentarios.
 function authAv(id, name, size, color) {
   const u = getUsers()[id] || {}, src = profileAvatarSrc(u), px = size || 24;
-  return '<span style="width:' + px + 'px;height:' + px + 'px;border-radius:50%;background:' + (src ? 'transparent' : (u.color || color || '#2f80ff')) + ';display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:' + Math.max(9, Math.round(px * .45)) + 'px;flex-shrink:0;overflow:hidden;vertical-align:middle;color:#fff">' +
+  return '<span class="av-round" style="width:' + px + 'px;height:' + px + 'px;border-radius:50%;background:' + (src ? 'transparent' : (u.color || color || '#2f80ff')) + ';display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:' + Math.max(9, Math.round(px * .45)) + 'px;flex-shrink:0;overflow:hidden;vertical-align:middle;color:#fff">' +
     avatarInnerHtml({ avatar:u.avatar, username:u.username || name }) + '</span>';
 }
 function updateOwnAvatar() {
@@ -2986,7 +2988,7 @@ function openAdminPanel() {
     userList.map(u => {
       const isBanned = u.banned && (u.banned.permanent || new Date(u.banned.until) > new Date());
       return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;align-items:center;gap:10px">'+
-        '<div style="width:36px;height:36px;border-radius:50%;background:'+(u.color||'#2f80ff')+';display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">'+(u.username||'?')[0].toUpperCase()+'</div>'+
+        '<div class="av-round" style="width:36px;height:36px;border-radius:50%;background:'+(u.color||'#2f80ff')+';display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">'+(u.username||'?')[0].toUpperCase()+'</div>'+
         '<div style="flex:1"><div style="font-weight:700;font-size:13px">'+(isBanned?'<span style="color:var(--red)">🚫 </span>':'')+esc(u.username)+'</div>'+
         '<div style="font-size:10px;color:var(--text3)">#'+u.id+' · '+dateStr(u.created)+'</div></div>'+
         '<div style="display:flex;gap:6px">'+
@@ -4957,7 +4959,7 @@ async function openVideoPlayer(vid) {
     (v.desc ? '<div style="font-size:13px;color:var(--text2);line-height:1.6;background:var(--bg2);border-radius:10px;padding:12px;margin-bottom:14px">' + esc(v.desc) + '</div>' : '') +
     '<div style="font-weight:800;margin-bottom:10px">Comentarios</div>' +
     '<div style="display:flex;gap:8px;margin-bottom:12px">' +
-    '<div style="width:32px;height:32px;border-radius:50%;background:' + (ME.color||'#2f80ff') + ';display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">' + ME.username[0].toUpperCase() + '</div>' +
+    '<div class="av-round" style="width:32px;height:32px;border-radius:50%;background:' + (ME.color||'#2f80ff') + ';display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">' + ME.username[0].toUpperCase() + '</div>' +
     '<textarea id="vp-comment-inp" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px;font-family:var(--font);resize:none;outline:none;height:56px" placeholder="Escribí un comentario..."></textarea>' +
     '<button class="btn btn-p" style="font-size:12px;align-self:flex-end" onclick="submitVideoComment()">Enviar</button>' +
     '</div>' +
@@ -5237,7 +5239,7 @@ function renderForums() {
       mediaHtml = '<img src="' + p.media.data + '" style="max-width:100%;border-radius:8px;margin-top:6px;display:block;max-height:400px;object-fit:cover;cursor:pointer" onclick="window.open(this.src)">';
     }
     return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;gap:12px;transition:border-color .15s" onmouseenter="this.style.borderColor=\'var(--acc)\'" onmouseleave="this.style.borderColor=\'var(--border)\'">' +
-      '<div style="width:40px;height:40px;border-radius:50%;background:' + (profileAvatarSrc(authorProfile)?'transparent':(p.authorColor||'#2f80ff')) + ';display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex-shrink:0;overflow:hidden;cursor:pointer" onclick="goTab(\'profile\',\'' + p.authorId + '\')">' + avatarInnerHtml(authorProfile) + '</div>' +
+      '<div class="av-round" style="width:40px;height:40px;border-radius:50%;background:' + (profileAvatarSrc(authorProfile)?'transparent':(p.authorColor||'#2f80ff')) + ';display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex-shrink:0;overflow:hidden;cursor:pointer" onclick="goTab(\'profile\',\'' + p.authorId + '\')">' + avatarInnerHtml(authorProfile) + '</div>' +
       '<div style="flex:1;min-width:0">' +
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
       '<span style="font-weight:700;font-size:13px;cursor:pointer" onclick="goTab(\'profile\',\'' + p.authorId + '\')">' + esc(p.authorName) + '</span>' +
@@ -5254,7 +5256,7 @@ function renderForums() {
       (p.replies||[]).slice(-2).map(r => {
         const replyProfile = getUsers()[r.authorId] || { username:r.authorName, color:r.authorColor };
         return '<div style="display:flex;gap:7px;margin-bottom:6px">' +
-        '<div style="width:24px;height:24px;border-radius:50%;background:' + (profileAvatarSrc(replyProfile)?'transparent':(r.authorColor||'#2f80ff')) + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;overflow:hidden">' + avatarInnerHtml(replyProfile) + '</div>' +
+        '<div class="av-round" style="width:24px;height:24px;border-radius:50%;background:' + (profileAvatarSrc(replyProfile)?'transparent':(r.authorColor||'#2f80ff')) + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;overflow:hidden">' + avatarInnerHtml(replyProfile) + '</div>' +
         '<div><span style="font-size:11px;font-weight:700;color:var(--acc)">' + esc(r.authorName) + '</span><span style="font-size:12px;margin-left:6px">' + esc(r.text||'') + '</span></div></div>';
       }).join('') + '</div>' : '') +
       '<div style="display:flex;gap:7px;margin-top:8px" id="reply-' + p.id + '">' +
@@ -5496,7 +5498,7 @@ function renderFriendRequests() {
   container.innerHTML = reqs.map(r => {
     const u = users[r.from] || { username: r.fromName, color: r.fromColor || '#2f80ff' };
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">' +
-      '<div style="width:36px;height:36px;border-radius:50%;background:' + (u.color||'#2f80ff') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + (u.username||'?')[0].toUpperCase() + '</div>' +
+      '<div class="av-round" style="width:36px;height:36px;border-radius:50%;background:' + (u.color||'#2f80ff') + ';display:flex;align-items:center;justify-content:center;font-weight:800">' + (u.username||'?')[0].toUpperCase() + '</div>' +
       '<div style="flex:1"><div style="font-weight:700;font-size:13px">' + esc(u.username) + '</div>' +
       '<div style="font-size:10px;color:var(--text3)">' + timeAgo(r.at) + '</div></div>' +
       '<button class="btn btn-p" style="font-size:11px;padding:4px 10px" onclick="acceptFriendRequest(\'' + r.from + '\')">✅ Aceptar</button>' +
