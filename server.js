@@ -1028,7 +1028,7 @@ app.get('/juego/:id/manifest.webmanifest', (req, res) => {
   const icon = map && src ? `/juego/${id}/icon.png?v=${gameIconVersion(map)}` : '/icons/icon-512.png';
   res.set({ 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' }).send(JSON.stringify({
     id: `/juego/${id}`, name, short_name: name.slice(0, 12), description: String(map?.desc || `Jugá ${name} en Crix`).slice(0, 200), lang: 'es',
-    start_url: `/juego/${id}?pwa=1`, scope: '/', display: 'standalone', orientation: 'any', background_color: '#080a0f', theme_color: '#080a0f',
+    start_url: `/juego/${id}?pwa=1`, scope: '/', display: 'standalone', orientation: 'any', background_color: '#07112a', theme_color: '#07112a',
     categories: ['games'], icons: [{ src: icon, sizes: '192x192', type, purpose: 'any' }, { src: icon, sizes: '512x512', type, purpose: 'any' }],
   }));
 });
