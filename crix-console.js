@@ -32,7 +32,12 @@
     if (lvl === 'error' && prefs.autoOpen && !isOpen && inGameOrStudio()) open();
   }
 
-  function inGameOrStudio() { return !!document.querySelector('#s-game.active, #s-studio.active'); }
+  // La salida solo se ve mientras CREÁS en Crix Hub (editor, o probando tu juego desde el editor). En un juego subido/publicado no aparece.
+  function inGameOrStudio() {
+    if (document.querySelector('#s-studio.active')) return true;
+    if (document.querySelector('#s-game.active')) { try { return typeof stPlaytesting !== 'undefined' && !!stPlaytesting; } catch (_) { return false; } }
+    return false;
+  }
 
   // ── Interfaz ──────────────────────────────────────────────────────────────
   function css() {
@@ -87,8 +92,8 @@
     grip.addEventListener('pointerdown', e => { drag = true; sy = e.clientY; sh = panel.offsetHeight; grip.setPointerCapture(e.pointerId); });
     grip.addEventListener('pointermove', e => { if (drag) panel.style.height = Math.max(150, Math.min(innerHeight * 0.85, sh + (sy - e.clientY))) + 'px'; });
     grip.addEventListener('pointerup', () => { drag = false; });
-    setInterval(() => { fab.classList.toggle('show', inGameOrStudio()); }, 400);
-    window.addEventListener('keydown', e => { if (e.key === 'F9') { e.preventDefault(); toggle(); } });
+    setInterval(() => { const ok = inGameOrStudio(); fab.classList.toggle('show', ok); if (!ok && isOpen) close(); }, 400);
+    window.addEventListener('keydown', e => { if (e.key === 'F9' && inGameOrStudio()) { e.preventDefault(); toggle(); } });
     render(); updateBadge();
   }
   function updateBadge() {
