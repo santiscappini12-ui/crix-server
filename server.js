@@ -2124,7 +2124,7 @@ function cmtDescendants(list, id) {
 }
 // ── Comentarios de juegos y apps ──
 // Se guardan en el propio juego (map.comments). Para leerlos o comentar hay que poder abrir el juego (privacidad y +18).
-const MAX_MAP_COMMENTS = 1000, commentHits = new Map();   // userId → última hora de comentario (anti-spam)
+const commentHits = new Map();   // userId → última hora de comentario (anti-spam)
 function commentable(req, res) {
   const map = DB.maps[req.params.id];
   if (!map || !canReadMap(map, req.user || null)) { res.status(404).json({ ok:false, err:'Juego no encontrado' }); return null; }
@@ -2147,18 +2147,10 @@ app.post('/api/maps/:id/comments', requireAuth, (req, res) => {
   const parentId = String(req.body?.parentId || '') || null;
   const parent = parentId ? map.comments.find(x => x.id === parentId) : null;
   if (parentId && !parent) return res.status(404).json({ ok:false, err:'El comentario que querés responder ya no existe' });
-  let removedIds = [];
-  if (map.comments.length >= MAX_MAP_COMMENTS) {   // al llegar al tope se descarta el hilo raíz más viejo completo (así no quedan respuestas huérfanas)
-    const oldest = map.comments.find(x => !x.parentId) || map.comments[0];
-    const gone = cmtDescendants(map.comments, oldest.id);
-    removedIds = [...gone];
-    map.comments = map.comments.filter(x => !gone.has(x.id));
-    if (parentId && gone.has(parentId)) return res.status(404).json({ ok:false, err:'El comentario que querés responder ya no existe' });
-  }
   const comment = { id:`c${crypto.randomUUID()}`, parentId, authorId:req.user.id, authorName:req.user.username, text, created:new Date().toISOString() };
   map.comments.push(comment);
   saveDB();
-  io.emit('map_comment', { mapId:map.id, comment, removedIds });
+  io.emit('map_comment', { mapId:map.id, comment });
   if (parent && parent.authorId !== req.user.id) notifyActivity(parent.authorId, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'↩️ ' + req.user.username + ' respondió tu comentario en ' + map.name, body:text, tag:'cmt-' + map.id });
   if (map.authorId !== req.user.id && (!parent || parent.authorId !== map.authorId)) notifyActivity(map.authorId, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'💬 ' + req.user.username + ' comentó en ' + map.name, body:text, tag:'cmt-' + map.id });
   res.json({ ok:true, comment });
