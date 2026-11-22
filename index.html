@@ -389,6 +389,47 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 .mo-box h3{font-family:var(--display);font-size:18px;font-weight:800;}
 .mo-btns{display:flex;gap:8px;}
 .mo-btns .btn{flex:1;}
+/* ── Editor de avatar: se adapta a celular (vertical y horizontal), tablet y escritorio ── */
+#mo-avatar{padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));}
+#mo-avatar .av-box{width:min(780px,100%);max-height:calc(100vh - 20px);max-height:calc(100dvh - 20px);padding:16px;gap:10px;overflow:hidden;}
+#mo-avatar .av-box h3{flex:0 0 auto;margin:0;}
+#mo-avatar .av-foot{flex:0 0 auto;flex-wrap:wrap;}
+#mo-avatar .av-foot .btn{flex:1 1 70px;padding:9px 8px;}
+.av-layout{display:flex;gap:14px;flex:1 1 auto;min-height:0;}
+.av-stage{flex:0 0 clamp(200px,34%,280px);display:flex;flex-direction:column;gap:8px;align-items:center;min-height:0;min-width:0;}
+.av-stage canvas{display:block;width:100%;aspect-ratio:250/330;max-height:calc(100vh - 230px);max-height:calc(100dvh - 230px);background:linear-gradient(#26304a,#3a4560);border-radius:12px;cursor:grab;touch-action:none;}
+.av-anims{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;overflow-y:auto;max-height:140px;width:100%;max-width:100%;min-width:0;}
+.av-ctrl{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:9px;font-size:13px;overflow-y:auto;padding-right:2px;overscroll-behavior:contain;}
+.av-acc-list{display:flex;flex-direction:column;gap:5px;max-height:230px;overflow:auto;}
+/* Celular en vertical (o pantalla muy angosta): la vista previa queda fija arriba y los controles se desplazan debajo. */
+@media (max-width:700px) and (orientation:portrait),(max-width:430px){
+  #mo-avatar .av-box{padding:12px;}
+  .av-layout{flex-direction:column;overflow-y:auto;overscroll-behavior:contain;gap:10px;-webkit-overflow-scrolling:touch;}
+  .av-stage{flex:0 0 auto;position:sticky;top:0;z-index:3;background:var(--bg2);padding-bottom:6px;}
+  .av-stage canvas{aspect-ratio:auto;height:clamp(170px,32vh,320px);height:clamp(170px,32dvh,320px);max-height:none;}
+  .av-anims{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;max-height:none;padding-bottom:4px;-webkit-overflow-scrolling:touch;}
+  .av-anims .btn{flex:0 0 auto;}
+  .av-ctrl{flex:0 0 auto;overflow:visible;}
+  .av-acc-list{max-height:none;overflow:visible;}
+}
+/* Celular en horizontal (poca altura): vista previa a la izquierda, compacta. */
+@media (max-height:520px) and (orientation:landscape){
+  #mo-avatar .av-box{padding:10px;gap:6px;}
+  #mo-avatar .av-box h3{font-size:15px;}
+  .av-stage{flex-basis:clamp(150px,30%,230px);}
+  .av-stage canvas{max-height:calc(100vh - 150px);max-height:calc(100dvh - 150px);}
+  .av-anims{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;max-height:none;padding-bottom:2px;}
+  .av-anims .btn{flex:0 0 auto;}
+}
+/* Pantallas táctiles: botones y controles más grandes para el dedo. */
+@media (pointer:coarse){
+  #mo-avatar .btn{min-height:38px;}
+  #mo-avatar #avp-ctrl .btn,#mo-avatar .av-anims .btn{font-size:12px!important;padding:7px 11px!important;}
+  #mo-avatar input[type=range]{height:30px;}
+  #mo-avatar input[type=color]{width:46px!important;height:34px!important;}
+  #mo-avatar .inp{font-size:14px!important;padding:9px!important;}
+  #mo-avatar input[type=radio],#mo-avatar input[type=checkbox]{width:20px;height:20px;}
+}
 /* ═══ NPC GRID ═══ */
 .npc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
 .npc-card{background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:12px;text-align:center;cursor:pointer;transition:all .15s;}
@@ -964,16 +1005,16 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 </div>
 </div>
 <div class="mo-overlay" id="mo-avatar">
-<div class="mo-box" style="width:min(720px,100%)">
+<div class="mo-box av-box">
   <h3>🧍 Mi avatar</h3>
-  <div style="display:flex;gap:14px;flex-wrap:wrap">
-    <div style="flex:0 0 250px;display:flex;flex-direction:column;gap:8px;align-items:center">
-      <canvas id="avp-canvas" width="250" height="330" style="background:linear-gradient(#26304a,#3a4560);border-radius:12px;cursor:grab;touch-action:none"></canvas>
-      <div id="avp-anims" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center"></div>
+  <div class="av-layout">
+    <div class="av-stage">
+      <canvas id="avp-canvas" width="250" height="330"></canvas>
+      <div id="avp-anims" class="av-anims"></div>
     </div>
-    <div id="avp-ctrl" style="flex:1;min-width:230px;display:flex;flex-direction:column;gap:9px;font-size:13px"></div>
+    <div id="avp-ctrl" class="av-ctrl"></div>
   </div>
-  <div class="mo-btns"><button class="btn btn-g" onclick="avatarEditorReset()">Restablecer</button><button class="btn btn-g" onclick="closeAvatarEditor()">Cancelar</button><button class="btn btn-p" onclick="saveAvatarEditor()">Guardar</button></div>
+  <div class="mo-btns av-foot"><button class="btn btn-g" onclick="avatarEditorReset()">Restablecer</button><button class="btn btn-g" onclick="closeAvatarEditor()">Cancelar</button><button class="btn btn-p" onclick="saveAvatarEditor()">Guardar</button></div>
 </div>
 </div>
 <div class="mo-overlay" id="mo-npc">
@@ -2970,8 +3011,11 @@ function openAvatarEditor() {
     scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa4b8, 0.8), new THREE.AmbientLight(0xffffff, 0.3)); const sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(3, 6, 5); scene.add(sun);
     cam.position.set(0, 1.9, 11); cam.lookAt(0, 1.55, 0);
     avEd = { renderer, scene, cam, av: null, mode: 'idle', raf: 0, yaw: 0.35, last: 0 };
+    if (window.ResizeObserver) new ResizeObserver(() => avEdResize()).observe(cv);   // la vista previa sigue el tamaño real del recuadro (celular, tablet, PC, al girar)
+    window.addEventListener('orientationchange', () => setTimeout(avEdResize, 250));
     let drag = null; cv.onpointerdown = e => { drag = e.clientX; cv.setPointerCapture(e.pointerId); }; cv.onpointermove = e => { if (drag !== null) { avEd.yaw += (e.clientX - drag) * 0.012; drag = e.clientX; } }; cv.onpointerup = () => { drag = null; };
   }
+  avEdResize();
   avEd.look = Object.assign({}, CrixAvatar.DEFAULT_LOOK, ME.look || {}); avEd.look.face = CrixAvatar.DEFAULT_LOOK.face; avEd.look.scale = 1;   // expresión y tamaño: solo animaciones
   avEd.look.equip = (avEd.look.equip || []).slice(); avEd.color = ME.color || '#2f80ff'; avEd.view = 'main'; avEd.draft = null; avEd.accs = null; avEd.mode = 'idle';
   accCam('body'); avatarEditorRebuild(); avatarEditorUI(); accLoadList();
@@ -2979,6 +3023,10 @@ function openAvatarEditor() {
   const loop = () => { if (!document.getElementById('mo-avatar').classList.contains('open')) return; avEd.raf = requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - avEd.last) / 1000); avEd.last = now;
     const m = avEd.mode; CrixAvatar.update(avEd.av, dt, { speed: m === 'walk' ? 6 : m === 'run' ? 14 : 0, onGround: m !== 'jump', vy: m === 'jump' ? 0.2 : 0 }); avEd.av.root.parent.rotation.y = avEd.yaw; avEd.renderer.render(avEd.scene, avEd.cam); };
   loop();
+}
+function avEdResize() {
+  if (!avEd) return; const cv = document.getElementById('avp-canvas'), w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return;
+  avEd.renderer.setSize(w, h, false); avEd.cam.aspect = w / h; avEd.cam.updateProjectionMatrix();
 }
 function avatarEditorRebuild() {
   if (avEd.av) { avEd.scene.remove(avEd.av.root.parent); CrixAvatar.dispose(avEd.av); }
@@ -3028,7 +3076,7 @@ function accListHTML() {
   const group = (title, list, mine) => list.length ? `<div class="set-note" style="margin:4px 0 0">${title}</div>` + list.map(a => row(a, mine)).join('') : '';
   const extra = (A.extra || []).filter(a => !A.mine.some(m => m.id === a.id) && !A.pub.some(m => m.id === a.id));
   const body = group('Míos', A.mine, true) + group('Puestos de otras personas', extra, false) + group('Catálogo de todos', A.pub, false);
-  return h + (body ? '<div style="display:flex;flex-direction:column;gap:5px;max-height:230px;overflow:auto">' + body + '</div>' : '<div class="set-note">Todavía no hay accesorios. Tocá «＋ Crear» para hacer el primero.</div>');
+  return h + (body ? '<div class="av-acc-list">' + body + '</div>' : '<div class="set-note">Todavía no hay accesorios. Tocá «＋ Crear» para hacer el primero.</div>');
 }
 function accToggle(id) {
   const eq = (avEd.look.equip || []).slice(), i = eq.indexOf(id);
@@ -3049,7 +3097,7 @@ async function accDelete(id) {
 function accCam(mode) {
   if (!avEd) return;
   if (mode === 'turn') { avEd.yaw += Math.PI; return; }
-  if (mode === 'head') { avEd.cam.position.set(0, 2.7, 3.6); avEd.cam.lookAt(0, 2.5, 0); } else { avEd.cam.position.set(0, 1.9, 11); avEd.cam.lookAt(0, 1.55, 0); }
+  if (mode === 'head') { avEd.cam.position.set(0, 2.7, 3.6); avEd.cam.lookAt(0, 2.5, 0); } else { avEd.cam.position.set(0, 1.9, 8.6); avEd.cam.lookAt(0, 1.55, 0); }
 }
 function accCreate() {
   avEd.view = 'creator'; avEd.mode = 'idle'; CrixAvatar.stopAnimation(avEd.av);
