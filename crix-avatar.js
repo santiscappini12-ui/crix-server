@@ -80,8 +80,10 @@
   const FACES = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'sleepy', 'wink', 'smug', 'scared', 'talk', 'dead', 'laugh', 'cry', 'love', 'dizzy', 'hurt', 'yawn', 'tongue', 'evil'];
   const HAIRS = ['none', 'short', 'spiky', 'long', 'bun', 'cap', 'mohawk'];
   const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'capsule'];
-  const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1 };
+  const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1, equip: [] };
   const MAX_ACCESSORIES = 24;
+  const MAX_EQUIPPED = 6, MAX_ACC_PARTS = 16;   // accesorios del perfil que se pueden llevar puestos / piezas por accesorio
+  const ACC_ID_RE = /^ac_[a-z0-9]{6,24}$/;
   // Todos los avatares son el muñeco de arcilla de un solo color (la referencia). Poner en false para volver a permitir 'cartoon'.
   const FORCE_CLAY = true;
 
@@ -96,8 +98,13 @@
     if (HAIRS.includes(src.hair)) o.hair = src.hair;
     if (FACES.includes(src.face)) o.face = src.face;
     if (src.scale !== undefined) o.scale = clamp(num(src.scale, 1), 0.25, 4);
+    if (Array.isArray(src.equip)) o.equip = [...new Set(src.equip.filter(id => typeof id === 'string' && ACC_ID_RE.test(id)))].slice(0, MAX_EQUIPPED);
+    else if (Array.isArray(o.equip)) o.equip = o.equip.slice();
     return forceClay(o);
   }
+  // Aspecto guardado en el PERFIL: la expresión y el tamaño NO se eligen desde el menú (los cambian solo las animaciones y los scripts),
+  // así que nunca se guardan ni se envían desde la cuenta.
+  function profileLook(src) { const o = sanitizeLook(src, {}); delete o.face; delete o.scale; return o; }
   const vec3 = (v, lo, hi, d = 0) => { const a = Array.isArray(v) ? v : (v && typeof v === 'object' ? [v.x, v.y, v.z] : null); return a ? [clamp(num(a[0], d), lo, hi), clamp(num(a[1], d), lo, hi), clamp(num(a[2], d), lo, hi)] : null; };
   // Propiedades de un hueso (rotación en GRADOS). Devuelve null si no hay nada válido.
   function sanitizeBoneProps(p) {
@@ -124,6 +131,36 @@
     if (spec.opacity !== undefined) o.opacity = clamp(num(spec.opacity, 1), 0.05, 1);
     const em = normalizeHex(spec.emissive, null); if (em) o.emissive = em;
     return o;
+  }
+  // ── Accesorios del perfil: los crea la gente (formas + un modelo .glb opcional) y se llevan puestos con look.equip ──
+  // Definición: { name, parts:[{ bone, shape:'box'|'sphere'|'cylinder'|'cone'|'capsule'|'model', size, offset, rotation, color?, opacity?, emissive? }] }.
+  // La ubicación (hueso + posición + rotación + tamaño) la elige quien lo crea ANTES de subirlo, y es la misma para todos los que lo usen.
+  const r3 = a => a && a.map(x => Math.round(x * 1000) / 1000);
+  function sanitizeAccPart(p) {
+    if (!p || typeof p !== 'object') return null;
+    const bone = resolveBone(p.bone); if (!bone || bone === 'Root') return null;
+    const model = p.shape === 'model', o = { bone, shape: model ? 'model' : (SHAPES.includes(p.shape) ? p.shape : 'box') };
+    o.size = r3(vec3(p.size, 0.01, 12, model ? 1 : 0.3)) || (model ? [1, 1, 1] : [0.3, 0.3, 0.3]);
+    o.offset = r3(vec3(p.offset, -12, 12)) || [0, 0, 0];
+    o.rotation = r3(vec3(p.rotation, -3600, 3600)) || [0, 0, 0];
+    if (!model) {
+      o.color = normalizeHex(p.color, '#c0c8d6');
+      if (p.opacity !== undefined) o.opacity = Math.round(clamp(num(p.opacity, 1), 0.05, 1) * 100) / 100;
+      const em = normalizeHex(p.emissive, null); if (em) o.emissive = em;
+    }
+    return o;
+  }
+  function sanitizeAccessoryDef(src) {
+    if (!src || typeof src !== 'object') return null;
+    const parts = []; let models = 0;
+    for (const p of (Array.isArray(src.parts) ? src.parts : []).slice(0, MAX_ACC_PARTS)) {
+      const sp = sanitizeAccPart(p); if (!sp) continue;
+      if (sp.shape === 'model' && ++models > 1) continue;   // un solo modelo importado por accesorio
+      parts.push(sp);
+    }
+    if (!parts.length) return null;
+    const name = String(src.name || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40);
+    return { name: name || 'Accesorio', parts };
   }
   // ── Animación de la cara (CrixAnim kind:'face') ──
   // faceAnim = { canal: [v, w, rd, add] } con el valor ya resuelto por prioridades (ver CrixAnim.resolve): el objetivo final del canal es
@@ -184,7 +221,7 @@
     if (diff.acc) { full.acc = full.acc || {}; for (const k of Object.keys(diff.acc)) { if (diff.acc[k] === null) delete full.acc[k]; else if (Object.keys(full.acc).length < MAX_ACCESSORIES || full.acc[k]) full.acc[k] = diff.acc[k]; } }
     return full;
   }
-  const Shared = { BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, sanitizeFaceAnim, sanitizeBoneAnim, FACE_SUBS, mergeState };
+  const Shared = { BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, MAX_EQUIPPED, MAX_ACC_PARTS, ACC_ID_RE, profileLook, sanitizeAccessoryDef, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, sanitizeFaceAnim, sanitizeBoneAnim, FACE_SUBS, mergeState };
   if (typeof module !== 'undefined' && module.exports) module.exports = Shared;
 
   // ══ PARTE GRÁFICA (solo navegador, necesita THREE r128) ══════════════════════════════════════════════════════
@@ -710,6 +747,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     M.hair.color.set(L.style === 'stick' && L.hair === 'none' ? '#1b1f2a' : L.hairColor);
     av.root.scale.setScalar(L.scale * BASE_SCALE);
     av.state.face = L.face; av.state.faceT = 0;
+    syncEquip(av, L.equip);
     av.root.traverse(o => { if (o.isMesh && !o.userData.noShadow && o.userData.tag !== 'face') o.castShadow = true; });
   }
   function setUserColor(av, color) { av.userColor = color; if (!av.look.shirt) av.mats.shirt.color.set(color); }
@@ -986,6 +1024,91 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   }
   function removeAccessory(av, id) { const a = av.accessories[id]; if (!a) return false; a.mesh.parent && a.mesh.parent.remove(a.mesh); a.mesh.material.dispose(); delete av.accessories[id]; return true; }
 
+
+  // ── Accesorios del perfil (creados por la gente) ─────────────────────────────────────────────────────────────
+  // Se llevan puestos con look.equip = [ids]. La definición (formas + modelo .glb opcional) se baja de /api/accessories/:id una sola vez
+  // y se guarda en memoria; la ubicación ya viene fijada por quien lo creó. Viven en av.equipped (aparte de av.accessories, que son
+  // los de los scripts), por eso las animaciones, los scripts y "reset" no los quitan.
+  const ACC_API = '/api/accessories/';
+  const AccCache = new Map();   // id → Promise<{ def, model }|null>
+  // .glb → THREE.Group normalizado: centrado en el origen y escalado para que su lado mayor mida 1 (después se le aplica `size`).
+  function parseGlb(buf) {
+    return new Promise((ok, fail) => {
+      if (!THREE.GLTFLoader) return fail(new Error('El cargador 3D no está disponible'));
+      try {
+        new THREE.GLTFLoader().parse(buf, '', gltf => {
+          const sc = gltf.scene, junk = [];
+          sc.traverse(o => { if (o.isLight || o.isCamera) junk.push(o); });
+          junk.forEach(o => o.parent && o.parent.remove(o));
+          sc.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(sc), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+          const m = Math.max(size.x, size.y, size.z);
+          if (!(m > 0) || !Number.isFinite(m)) return fail(new Error('El modelo está vacío'));
+          let tris = 0; sc.traverse(o => { if (o.isMesh && o.geometry) { const g = o.geometry; tris += (g.index ? g.index.count : (g.attributes.position ? g.attributes.position.count : 0)) / 3; } });
+          const inner = new THREE.Group(); sc.position.sub(c); inner.add(sc); inner.scale.setScalar(1 / m);
+          const outer = new THREE.Group(); outer.add(inner); outer.userData.tris = Math.round(tris);
+          ok(outer);
+        }, e => fail(e instanceof Error ? e : new Error('No se pudo leer el modelo')));
+      } catch (e) { fail(e); }
+    });
+  }
+  function loadAcc(id) {
+    if (AccCache.has(id)) return AccCache.get(id);
+    const p = fetch(ACC_API + encodeURIComponent(id)).then(r => r.ok ? r.json() : null).then(async j => {
+      const def = j && j.accessory && sanitizeAccessoryDef(j.accessory); if (!def) return null;
+      let model = null;
+      if (def.parts.some(x => x.shape === 'model')) { try { const r = await fetch(ACC_API + encodeURIComponent(id) + '/model'); if (r.ok) model = await parseGlb(await r.arrayBuffer()); } catch (_) {} }
+      return { def, model };
+    }).catch(() => null);
+    AccCache.set(id, p); p.then(v => { if (!v) setTimeout(() => { if (AccCache.get(id) === p) AccCache.delete(id); }, 30000); });
+    return p;
+  }
+  function buildAccParts(def, model) {
+    const out = [], mats = [];
+    for (const sp of def.parts) {
+      let obj;
+      if (sp.shape === 'model') { if (!model) continue; obj = model.clone(true); }
+      else {
+        const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(sp.color), shininess: 40, transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 });
+        if (sp.emissive) mat.emissive = new THREE.Color(sp.emissive);
+        mats.push(mat); obj = new THREE.Mesh(G('acc_' + sp.shape, ACC_SHAPES[sp.shape]), mat); obj.castShadow = true;
+      }
+      obj.userData.eqacc = true;
+      obj.scale.set(sp.size[0], sp.size[1], sp.size[2]); obj.position.set(sp.offset[0], sp.offset[1], sp.offset[2]); obj.rotation.set(sp.rotation[0] * DEG, sp.rotation[1] * DEG, sp.rotation[2] * DEG);
+      out.push({ bone: sp.bone, obj });
+    }
+    return { out, mats };
+  }
+  function removeEquipped(av, key) {
+    const e = av.equipped && av.equipped[key]; if (!e) return;
+    e.out.forEach(x => x.obj.parent && x.obj.parent.remove(x.obj)); e.mats.forEach(m => m.dispose()); delete av.equipped[key];
+  }
+  function mountEquipped(av, key, built) {
+    removeEquipped(av, key); av.equipped = av.equipped || {};
+    built.out.forEach(x => av.visuals[x.bone] && av.visuals[x.bone].add(x.obj)); av.equipped[key] = built;
+  }
+  function syncEquip(av, ids) {
+    av.equipped = av.equipped || {};
+    const want = new Set(Array.isArray(ids) ? ids : []);
+    for (const k of Object.keys(av.equipped)) if (k[0] !== '_' && !want.has(k)) removeEquipped(av, k);
+    for (const id of want) {
+      if (av.equipped[id] || (av._eqLoading && av._eqLoading[id])) continue;
+      (av._eqLoading = av._eqLoading || {})[id] = true;
+      loadAcc(id).then(r => {
+        delete av._eqLoading[id];
+        if (!r || av.disposed || av.equipped[id] || !(av.look.equip || []).includes(id)) return;
+        mountEquipped(av, id, buildAccParts(r.def, r.model));
+      });
+    }
+  }
+  // Vista previa del editor: accesorio sin subir (def + modelo ya leído del archivo) sobre el personaje.
+  function setDraftAccessory(av, def, model) { if (!def) { removeEquipped(av, '_draft'); return; } mountEquipped(av, '_draft', buildAccParts(def, model)); }
+  // Alguien editó o borró un accesorio: se vuelve a bajar y se rearma en todos los avatares que lo llevan puesto.
+  function refreshAccessory(id) {
+    AccCache.delete(id);
+    for (const av of LIVE) if (av.equipped && av.equipped[id]) { removeEquipped(av, id); syncEquip(av, av.look.equip); }
+  }
+
   // ── Estado serializable (para replicar por red y para jugadores que entran tarde) ────────────
   // Estructura: { look?, anim?, emote?, face?, talk?, bones?: {Name: {rot,pos,scale,weight,mode,visible,color}}, acc?: {id: {bone,...spec}} }
   function applyState(av, st) {
@@ -1002,10 +1125,10 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (st.acc) for (const id of Object.keys(st.acc)) { const a = st.acc[id]; if (a === null) removeAccessory(av, id); else addAccessory(av, id, a.bone, a); }
   }
 
-  function dispose(av) { LIVE.delete(av); av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
+  function dispose(av) { LIVE.delete(av); av.disposed = true; if (av.equipped) for (const k of Object.keys(av.equipped)) removeEquipped(av, k); av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
 
   global.CrixAvatar = Object.assign({}, Shared, { ANIMATIONS: Object.keys(EMOTES),
-    build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, modelBoneGeometry, onModelReady, attachRigFace, detachRigFace, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
+    build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, modelBoneGeometry, onModelReady, attachRigFace, detachRigFace, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, parseGlb, setDraftAccessory, refreshAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });
   global.CrixAvatarShared = Shared;
   loadModel(MODEL_URL);
 })(typeof window !== 'undefined' ? window : globalThis);

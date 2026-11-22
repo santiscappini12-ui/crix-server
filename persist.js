@@ -30,6 +30,7 @@ const DATA_BASE = path.join(path.dirname(DATA_FILE), path.basename(DATA_FILE, pa
 const VIDEO_DIR = DATA_BASE + '_videos';
 const TEX_DIR = DATA_BASE + '_textures';
 const SOUND_DIR = DATA_BASE + '_sounds';
+const ACC_DIR = DATA_BASE + '_accessories';   // modelos .glb importados en accesorios de avatar
 
 const DB_KEY = 'db/crix_data.json.gz';
 const BACKUP_PREFIX = 'db/backup-';
@@ -199,6 +200,14 @@ async function fetchSound(mapId, sid) {   // igual que fetchTexture, para audios
     if (!dest.startsWith(SOUND_DIR + path.sep)) return null;
     return (await ensureLocal(found[0].key, dest)) ? dest : null;
   } catch (e) { console.warn(`[PERSIST] No se pudo buscar el sonido ${sid}: ${e.message}`); return null; }
+}
+async function fetchAccModel(id) {   // baja del bucket el modelo de un accesorio si no está en el disco
+  if (!driver) return null;
+  try {
+    const dest = path.resolve(ACC_DIR, id + '.glb');
+    if (!dest.startsWith(ACC_DIR + path.sep)) return null;
+    return (await ensureLocal('accessories/' + id + '.glb', dest)) ? dest : null;
+  } catch (e) { console.warn(`[PERSIST] No se pudo buscar el accesorio ${id}: ${e.message}`); return null; }
 }
 async function fetchTexture(mapId, tid) {   // baja una textura del bucket si no está en el disco (la extensión se descubre listando)
   if (!driver) return null;
@@ -383,11 +392,13 @@ async function restore() {
   (async () => {
     const remoteVid = await retry(() => driver.list('videos/'), 3, 1000);
     const remoteSnd = await retry(() => driver.list('sounds/'), 3, 1000);
-    const have = new Set([...remoteTex, ...remoteVid, ...remoteSnd].map(o => o.key));
+    const remoteAcc = await retry(() => driver.list('accessories/'), 3, 1000);
+    const have = new Set([...remoteTex, ...remoteVid, ...remoteSnd, ...remoteAcc].map(o => o.key));
     const local = [
       ...walkLocal(VIDEO_DIR).map(f => ({ key: 'videos/' + f.split(path.sep).join('/'), file: path.join(VIDEO_DIR, f) })),
       ...walkLocal(TEX_DIR).map(f => ({ key: 'textures/' + f.split(path.sep).join('/'), file: path.join(TEX_DIR, f) })),
       ...walkLocal(SOUND_DIR).map(f => ({ key: 'sounds/' + f.split(path.sep).join('/'), file: path.join(SOUND_DIR, f) })),
+      ...walkLocal(ACC_DIR).map(f => ({ key: 'accessories/' + f.split(path.sep).join('/'), file: path.join(ACC_DIR, f) })),
     ].filter(x => !have.has(x.key) && !x.file.endsWith('.part'));
     if (local.length) console.log(`[PERSIST] Subiendo ${local.length} archivo(s) locales que faltaban en el bucket`);
     await pool(local, 3, x => putFile(x.key, x.file));
@@ -397,8 +408,8 @@ async function restore() {
 }
 
 module.exports = {
-  DATA_FILE, VIDEO_DIR, TEX_DIR, SOUND_DIR,
+  DATA_FILE, VIDEO_DIR, TEX_DIR, SOUND_DIR, ACC_DIR,
   get enabled() { return !!driver; },
   get restored() { return restored; },
-  restore, saveDb, setSync, startSync, pullRemote, pullFresh, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, flush,
+  restore, saveDb, setSync, startSync, pullRemote, pullFresh, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, fetchAccModel, flush,
 };

@@ -98,7 +98,7 @@ const DATA_FILE = persist.DATA_FILE;
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
 // a un disco persistente montado por el proveedor de alojamiento.
 // ══════════════════════════════════════════════
-let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, apiKeys: {}, push: {}, _v: 0 };
+let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, apiKeys: {}, accessories: {}, push: {}, _v: 0 };
 let dbSync = null;   // fusión entre instancias (db-sync.js); se crea justo después de loadDB()
 
 function loadDB() {
@@ -106,9 +106,9 @@ function loadDB() {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf8');
       const parsed = JSON.parse(raw);
-      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, apiKeys:{}, push:{}, _v:0, ...parsed };
+      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, apiKeys:{}, accessories:{}, push:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
-      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {}; DB.apiKeys = DB.apiKeys || {};
+      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {}; DB.apiKeys = DB.apiKeys || {}; DB.accessories = DB.accessories || {};
       // Los mensajes anteriores al cifrado E2EE no se pueden proteger retroactivamente.
       // Eliminarlos evita volver a servir o conservar conversaciones en texto plano.
       let legacyMessagesRemoved = 0;
@@ -643,10 +643,11 @@ function banActive(u) {
 }
 // +18: el detalle (cómo lo consiguió cada cuenta) NUNCA sale de acá. La cuenta solo recibe un booleano sobre sí misma
 // (el cliente lo usa para abrir o no contenido +18, no lo muestra). Ninguna cuenta, ni admin, ve el detalle: solo el sistema y los scripts.
-function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,ageVerified:___a,ageCheck:___c,...s}=u; s.adult = isAgeVerified(u); return s; }
+function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,ageVerified:___a,ageCheck:___c,...s}=u; s.adult = isAgeVerified(u); if (s.look && typeof s.look === 'object') s.look = CrixAvatar.profileLook(s.look); return s; }
 function publicUser(u) {
   if (!u) return null;
   const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ageVerified:_________, ageCheck:__________, prefs:___________, ...profile } = u;
+  if (profile.look && typeof profile.look === 'object') profile.look = CrixAvatar.profileLook(profile.look);
   return profile;
 }
 
@@ -1188,6 +1189,90 @@ const PREF_RULES = {
   crix_nav_hidden:    v => (v === '0' || v === '1') ? v : null,
   crix_country:       v => /^[A-Z_]{2,10}$/.test(v) ? v : null,
 };
+// ── Accesorios de avatar ──
+// Los crea la gente (formas + un modelo .glb opcional), los ubica sobre el personaje y los sube "solo para mí" (private) o "para todos"
+// (public: aparecen en el catálogo y cualquiera puede usarlos). Se llevan puestos con look.equip (ver CrixAvatar.sanitizeLook), así que
+// los ven todos los jugadores aunque el accesorio sea privado: lo privado solo significa que no figura en el catálogo de los demás.
+// La definición vive en DB.accessories (se sincroniza como el resto); el modelo, en un archivo (+ copia en el bucket).
+const ACC_ID_PARAM = /^ac_[a-z0-9]{6,24}$/;
+const ACC_PER_USER = 40, ACC_MODELS_PER_USER = 5;
+const ACC_MODEL_MAX = Math.round((Number(process.env.CRIX_MAX_ACC_MODEL_MB) || 1.5) * 1048576);
+const accModelPath = id => path.join(persist.ACC_DIR, id + '.glb');
+const accView = a => ({ id:a.id, name:a.name, authorId:a.authorId, authorName:a.authorName, scope:a.scope, parts:a.parts, hasModel:!!a.hasModel, createdAt:a.createdAt, updatedAt:a.updatedAt });
+// Un .glb válido y autocontenido: sin enlaces externos (evita rastreo/filtrado de IP) ni extensiones que el visor no soporta (Draco, KTX…).
+function validateGlb(buf) {
+  if (!buf || buf.length < 24) return 'El archivo del modelo está vacío';
+  if (buf.length > ACC_MODEL_MAX) return 'El modelo supera ' + (ACC_MODEL_MAX / 1048576).toFixed(1).replace(/\.0$/, '') + ' MB';
+  if (buf.readUInt32LE(0) !== 0x46546C67 || buf.readUInt32LE(4) !== 2) return 'Solo se aceptan modelos .glb (glTF 2.0)';
+  if (buf.readUInt32LE(8) !== buf.length) return 'El archivo .glb está dañado';
+  const jl = buf.readUInt32LE(12);
+  if (buf.readUInt32LE(16) !== 0x4E4F534A || jl < 2 || 20 + jl > buf.length) return 'El archivo .glb está dañado';
+  let j; try { j = JSON.parse(buf.slice(20, 20 + jl).toString('utf8')); } catch { return 'El archivo .glb está dañado'; }
+  const external = u => typeof u === 'string' && !/^data:/i.test(u);
+  if ((j.buffers || []).some(b => b && external(b.uri)) || (j.images || []).some(i => i && external(i.uri))) return 'El modelo debe traer todo incluido (sin enlaces externos)';
+  if (Array.isArray(j.extensionsRequired) && j.extensionsRequired.length) return 'El modelo usa extensiones no soportadas (' + j.extensionsRequired.slice(0, 3).join(', ') + ')';
+  return null;
+}
+app.get('/api/accessories', (req, res) => {
+  const user = readSession(req), all = Object.values(DB.accessories || {}).filter(a => a && a.id);
+  const mine = user ? all.filter(a => a.authorId === user.id).sort((a, b) => b.createdAt - a.createdAt) : [];
+  const pub = all.filter(a => a.scope === 'public' && (!user || a.authorId !== user.id)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 200);
+  res.set('Cache-Control', 'no-store'); res.json({ ok:true, mine:mine.map(accView), pub:pub.map(accView) });
+});
+app.get('/api/accessories/:id', (req, res) => {
+  const a = ACC_ID_PARAM.test(req.params.id) && DB.accessories && DB.accessories[req.params.id];
+  if (!a) return res.status(404).json({ ok:false, err:'Accesorio no encontrado' });
+  res.set('Cache-Control', 'no-cache'); res.json({ ok:true, accessory:accView(a) });
+});
+app.get('/api/accessories/:id/model', async (req, res) => {
+  const a = ACC_ID_PARAM.test(req.params.id) && DB.accessories && DB.accessories[req.params.id];
+  if (!a || !a.hasModel) return res.status(404).end();
+  const file = (fs.existsSync(accModelPath(a.id)) ? accModelPath(a.id) : null) || await persist.fetchAccModel(a.id); if (!file) return res.status(404).end();
+  res.set({ 'Content-Type':'model/gltf-binary', 'X-Content-Type-Options':'nosniff', 'Cache-Control':'no-cache' });
+  res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
+});
+app.post('/api/accessories', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {}, def = CrixAvatar.sanitizeAccessoryDef(b);
+    if (!def) return res.status(400).json({ ok:false, err:'El accesorio necesita al menos una pieza' });
+    if (!DB.accessories) DB.accessories = {};
+    const own = Object.values(DB.accessories).filter(a => a.authorId === req.user.id);
+    let rec = null;
+    if (b.id) {
+      rec = ACC_ID_PARAM.test(String(b.id)) ? DB.accessories[String(b.id)] : null;
+      if (!rec) return res.status(404).json({ ok:false, err:'Accesorio no encontrado' });
+      if (rec.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés editar este accesorio' });
+    } else if (own.length >= ACC_PER_USER) return res.status(400).json({ ok:false, err:`Llegaste al máximo de ${ACC_PER_USER} accesorios. Borrá alguno para crear otro.` });
+    let buf = null;
+    if (typeof b.model === 'string' && b.model) {
+      buf = Buffer.from(b.model, 'base64');
+      const bad = validateGlb(buf); if (bad) return res.status(400).json({ ok:false, err:bad });
+    }
+    const wantsModel = def.parts.some(p => p.shape === 'model');
+    if (wantsModel && !buf && !(rec && rec.hasModel)) { def.parts = def.parts.filter(p => p.shape !== 'model'); if (!def.parts.length) return res.status(400).json({ ok:false, err:'Falta el archivo del modelo' }); }
+    if (buf && !(rec && rec.hasModel) && own.filter(a => a.hasModel).length >= ACC_MODELS_PER_USER) return res.status(400).json({ ok:false, err:`Podés tener hasta ${ACC_MODELS_PER_USER} accesorios con modelo importado.` });
+    const now = Date.now(), id = rec ? rec.id : 'ac_' + crypto.randomBytes(8).toString('hex'), keepsModel = def.parts.some(p => p.shape === 'model');
+    if (buf && keepsModel) {
+      fs.mkdirSync(persist.ACC_DIR, { recursive:true });
+      const tmp = accModelPath(id) + '.' + process.pid + '.part'; fs.writeFileSync(tmp, buf); fs.renameSync(tmp, accModelPath(id));
+      await settleUpload(persist.putFile(`accessories/${id}.glb`, accModelPath(id)));
+    } else if (!keepsModel && rec && rec.hasModel) { try { fs.rmSync(accModelPath(id), { force:true }); } catch {} persist.delKey(`accessories/${id}.glb`); }
+    const next = { id, name:def.name, authorId:rec ? rec.authorId : req.user.id, authorName:rec ? rec.authorName : req.user.username, scope:b.scope === 'public' ? 'public' : 'private',
+      parts:def.parts, hasModel:keepsModel && (!!buf || !!(rec && rec.hasModel)), createdAt:rec ? rec.createdAt : now, updatedAt:now };
+    DB.accessories[id] = next; saveDB();
+    if (rec) io.emit('accessory_updated', { id });
+    res.json({ ok:true, accessory:accView(next) });
+  } catch (e) { res.status(500).json({ ok:false, err:'No se pudo guardar el accesorio' }); }
+});
+app.delete('/api/accessories/:id', requireAuth, (req, res) => {
+  const a = ACC_ID_PARAM.test(req.params.id) && DB.accessories && DB.accessories[req.params.id];
+  if (!a) return res.status(404).json({ ok:false, err:'Accesorio no encontrado' });
+  if (a.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés borrar este accesorio' });
+  delete DB.accessories[a.id];
+  try { fs.rmSync(accModelPath(a.id), { force:true }); } catch {} persist.delKey(`accessories/${a.id}.glb`);
+  saveDB(); io.emit('accessory_updated', { id:a.id }); res.json({ ok:true });
+});
+
 app.put('/api/prefs', requireAuth, (req, res) => {
   const input = req.body && req.body.prefs;
   if (!input || typeof input !== 'object' || Array.isArray(input)) return res.status(400).json({ ok:false, err:'Preferencias inválidas' });
@@ -1263,8 +1348,8 @@ app.post('/api/user/:id', (req, res) => {
       return res.status(400).json({ ok:false, err:'La foto debe ser JPG, PNG o WebP y no superar el límite permitido' });
     if (req.body.look !== undefined) {
       if (req.body.look === null) delete u.look;
-      else if (typeof req.body.look !== 'object' || JSON.stringify(req.body.look).length > 600) return res.status(400).json({ ok:false, err:'Aspecto de avatar inválido' });
-      else u.look = CrixAvatar.sanitizeLook(req.body.look, {});
+      else if (typeof req.body.look !== 'object' || JSON.stringify(req.body.look).length > 1200) return res.status(400).json({ ok:false, err:'Aspecto de avatar inválido' });
+      else u.look = CrixAvatar.profileLook(req.body.look);   // sin expresión ni tamaño: eso lo hacen solo las animaciones
     }
     const allowed = ['bio','color','games','visits','following','liked','onlineAt','avatar'];
     // Solo un admin pone/quita bans. Poner: objeto. Quitar: banned:null (o false). Antes un cuerpo SIN 'banned' (lo que mandaba
@@ -2632,7 +2717,7 @@ function ownerOfInstance(instanceId) {
   const m = /^([0-9a-f]{8})-/.exec(String(instanceId || ''));
   return cluster.enabled && m ? m[1] : cluster.nodeId;
 }
-const userBrief = u => u ? { id:u.id, username:u.username, color:u.color, isAdmin:!!u.isAdmin, look:u.look, friends:Array.isArray(u.friends) ? u.friends.slice(0, 2000) : [] } : null;
+const userBrief = u => u ? { id:u.id, username:u.username, color:u.color, isAdmin:!!u.isAdmin, look:u.look && typeof u.look === 'object' ? CrixAvatar.profileLook(u.look) : u.look, friends:Array.isArray(u.friends) ? u.friends.slice(0, 2000) : [] } : null;
 // Socket "de mentira" que usa la sala para hablar con alguien conectado a otra instancia.
 function makeProxy(sid, homeNode, user) {
   let p = remoteSockets.get(sid);
@@ -2865,7 +2950,7 @@ G('join_game', (socket, data) => {
     const pd = {
       socketId: socket.id, userId: userId||socket.id,
       username: username.substring(0,30), color: color||'#5b8def',
-      look: CrixAvatar.sanitizeLook(user?.look && typeof user.look==='object' ? user.look : data?.look, {}),
+      look: CrixAvatar.profileLook(user?.look && typeof user.look==='object' ? user.look : data?.look),
       x:0,y:3,z:0, ry:0, anim:0, moving:false, onGround:false, mapId, instanceId, joinedAt:Date.now(), isAdult:!!user && isAgeVerified(user),
     };
     room.players[socket.id] = pd;

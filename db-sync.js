@@ -14,7 +14,7 @@
 // ══════════════════════════════════════════════════════════════════
 const crypto = require('crypto');
 
-const KEYED = ['users', 'maps', 'sessions', 'apiKeys'];   // objeto { id: registro }
+const KEYED = ['users', 'maps', 'sessions', 'apiKeys', 'accessories'];   // objeto { id: registro }
 const LISTS = ['videos', 'posts'];             // arreglo de registros con `id`
 const COLS = [...KEYED, ...LISTS];
 const TOMB_KEEP_MS = 30 * 24 * 3600 * 1000;
