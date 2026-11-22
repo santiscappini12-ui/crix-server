@@ -80,7 +80,11 @@
   const FACES = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'sleepy', 'wink', 'smug', 'scared', 'talk', 'dead', 'laugh', 'cry', 'love', 'dizzy', 'hurt', 'yawn', 'tongue', 'evil'];
   const HAIRS = ['none', 'short', 'spiky', 'long', 'bun', 'cap', 'mohawk'];
   const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'capsule'];
-  const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1, equip: [] };
+  // Piezas del cuerpo a las que se les puede elegir color por separado (look.parts = { Hueso: '#rrggbb' }; sin entrada = color de arcilla).
+  const PART_KEYS = ['Head', 'Chest', 'Spine', 'Hips', 'UpperArmL', 'UpperArmR', 'LowerArmL', 'LowerArmR', 'HandL', 'HandR', 'UpperLegL', 'UpperLegR', 'LowerLegL', 'LowerLegR', 'FootL', 'FootR'];
+  const PART_LABELS = { Head: 'Cabeza', Chest: 'Pecho', Spine: 'Abdomen', Hips: 'Pelvis', UpperArmL: 'Brazo izq.', UpperArmR: 'Brazo der.', LowerArmL: 'Antebrazo izq.', LowerArmR: 'Antebrazo der.', HandL: 'Mano izq.', HandR: 'Mano der.', UpperLegL: 'Muslo izq.', UpperLegR: 'Muslo der.', LowerLegL: 'Pantorrilla izq.', LowerLegR: 'Pantorrilla der.', FootL: 'Pie izq.', FootR: 'Pie der.' };
+  const CLAY_HEX = '#dcdad6';
+  const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1, equip: [], parts: {} };
   const MAX_ACCESSORIES = 24;
   const MAX_EQUIPPED = 6, MAX_ACC_PARTS = 16;   // accesorios del perfil que se pueden llevar puestos / piezas por accesorio
   const ACC_ID_RE = /^ac_[a-z0-9]{6,24}$/;
@@ -92,7 +96,7 @@
   function forceClay(o) { if (FORCE_CLAY) { o.style = 'stick'; o.hair = 'none'; } return o; }
   function sanitizeLook(src, base) {
     const o = Object.assign({}, base || DEFAULT_LOOK);
-    if (!src || typeof src !== 'object') return forceClay(o);
+    if (!src || typeof src !== 'object') { o.parts = Object.assign({}, o.parts || {}); return forceClay(o); }
     if (src.style === 'cartoon' || src.style === 'stick') o.style = src.style;
     for (const k of ['skin', 'shirt', 'pants', 'shoes', 'hairColor', 'eyes']) if (src[k] !== undefined) o[k] = src[k] === null ? null : normalizeHex(src[k], o[k]);
     if (HAIRS.includes(src.hair)) o.hair = src.hair;
@@ -100,6 +104,9 @@
     if (src.scale !== undefined) o.scale = clamp(num(src.scale, 1), 0.25, 4);
     if (Array.isArray(src.equip)) o.equip = [...new Set(src.equip.filter(id => typeof id === 'string' && ACC_ID_RE.test(id)))].slice(0, MAX_EQUIPPED);
     else if (Array.isArray(o.equip)) o.equip = o.equip.slice();
+    // Color por pieza: si viene `parts` REEMPLAZA a todo el conjunto (así quitar un color es simplemente no mandarlo); si no viene, se conserva el anterior.
+    if (src.parts !== undefined) { o.parts = {}; if (src.parts && typeof src.parts === 'object') for (const k of PART_KEYS) { const c = normalizeHex(src.parts[k], null); if (c) o.parts[k] = c.toLowerCase(); } }
+    else o.parts = Object.assign({}, o.parts || {});
     return forceClay(o);
   }
   // Aspecto guardado en el PERFIL: la expresión y el tamaño NO se eligen desde el menú (los cambian solo las animaciones y los scripts),
@@ -221,7 +228,7 @@
     if (diff.acc) { full.acc = full.acc || {}; for (const k of Object.keys(diff.acc)) { if (diff.acc[k] === null) delete full.acc[k]; else if (Object.keys(full.acc).length < MAX_ACCESSORIES || full.acc[k]) full.acc[k] = diff.acc[k]; } }
     return full;
   }
-  const Shared = { BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, MAX_EQUIPPED, MAX_ACC_PARTS, ACC_ID_RE, profileLook, sanitizeAccessoryDef, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, sanitizeFaceAnim, sanitizeBoneAnim, FACE_SUBS, mergeState };
+  const Shared = { PART_KEYS, PART_LABELS, CLAY_HEX, BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, MAX_EQUIPPED, MAX_ACC_PARTS, ACC_ID_RE, profileLook, sanitizeAccessoryDef, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, sanitizeFaceAnim, sanitizeBoneAnim, FACE_SUBS, mergeState };
   if (typeof module !== 'undefined' && module.exports) module.exports = Shared;
 
   // ══ PARTE GRÁFICA (solo navegador, necesita THREE r128) ══════════════════════════════════════════════════════
@@ -736,10 +743,27 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     av.mats.brow = av.mats.hair;
   }
 
+  // Color por pieza: cada pieza con color propio usa un material aparte (clon del de arcilla); sin color vuelve al material original.
+  // La cabeza usa M.skin/M.head (los párpados y la nariz comparten ese material, así que quedan del mismo color).
+  // Lo pintado por un script (setBone color → ownMat) manda sobre esto y no se toca.
+  function applyPartColors(av) {
+    const P = (av.look && av.look.parts) || {}; av.partMats = av.partMats || {};
+    for (const bone of PART_KEYS) {
+      const vis = av.visuals[bone]; if (!vis) continue; const col = P[bone];
+      for (const c of vis.children) {
+        if (!c.isMesh || c.userData.tag !== 'body' || c.userData.ownMat) continue;
+        if (c.material === av.mats.skin) continue;   // cabeza del modelo: ya sigue a M.skin
+        if (!col) { if (c.userData.baseMat) { c.material = c.userData.baseMat; delete c.userData.baseMat; } continue; }
+        if (!c.userData.baseMat) c.userData.baseMat = c.material;
+        let m = av.partMats[bone]; if (!m) { m = c.userData.baseMat.clone(); av.partMats[bone] = m; }
+        m.color.set(col); c.material = m;
+      }
+    }
+  }
   function applyLook(av, look) {
     av.look = sanitizeLook(look, av.look);
     const L = av.look, M = av.mats;
-    M.skin.color.set(L.style === 'stick' ? CLAY : L.skin); M.pants.color.set(L.pants); M.shoes.color.set(L.shoes); M.hair.color.set(L.hairColor); M.eye.color.set(L.eyes);
+    M.skin.color.set((L.parts && L.parts.Head) || (L.style === 'stick' ? CLAY : L.skin)); M.pants.color.set(L.pants); M.shoes.color.set(L.shoes); M.hair.color.set(L.hairColor); M.eye.color.set(L.eyes);
     const shirt = L.shirt || (av.userColor || '#5b8def'); M.shirt.color.set(shirt);
     if (av.style !== L.style) { av.style = L.style; buildBody(av, L.style); }
     else buildHair(av, L.hair);
@@ -747,6 +771,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     M.hair.color.set(L.style === 'stick' && L.hair === 'none' ? '#1b1f2a' : L.hairColor);
     av.root.scale.setScalar(L.scale * BASE_SCALE);
     av.state.face = L.face; av.state.faceT = 0;
+    applyPartColors(av);
     syncEquip(av, L.equip);
     av.root.traverse(o => { if (o.isMesh && !o.userData.noShadow && o.userData.tag !== 'face') o.castShadow = true; });
   }
@@ -1125,7 +1150,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (st.acc) for (const id of Object.keys(st.acc)) { const a = st.acc[id]; if (a === null) removeAccessory(av, id); else addAccessory(av, id, a.bone, a); }
   }
 
-  function dispose(av) { LIVE.delete(av); av.disposed = true; if (av.equipped) for (const k of Object.keys(av.equipped)) removeEquipped(av, k); av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
+  function dispose(av) { LIVE.delete(av); av.disposed = true; if (av.partMats) { for (const k of Object.keys(av.partMats)) av.partMats[k].dispose(); av.partMats = {}; } if (av.equipped) for (const k of Object.keys(av.equipped)) removeEquipped(av, k); av.root.traverse(o => { if (o.isMesh) { if (o.userData.ownMat || o.userData.tag === 'acc') o.material.dispose(); } }); }
 
   global.CrixAvatar = Object.assign({}, Shared, { ANIMATIONS: Object.keys(EMOTES),
     build: buildAvatar, preload: loadModel, modelState: () => MODEL.state, modelBoneGeometry, onModelReady, attachRigFace, detachRigFace, update, applyLook, setUserColor, setLook, playAnimation, stopAnimation, setBone, resetBone, setFace, addAccessory, removeAccessory, parseGlb, setDraftAccessory, refreshAccessory, applyState, dispose, capsuleGeo, roundedBoxGeo });

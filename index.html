@@ -3013,11 +3013,11 @@ function openAvatarEditor() {
     avEd = { renderer, scene, cam, av: null, mode: 'idle', raf: 0, yaw: 0.35, last: 0 };
     if (window.ResizeObserver) new ResizeObserver(() => avEdResize()).observe(cv);   // la vista previa sigue el tamaño real del recuadro (celular, tablet, PC, al girar)
     window.addEventListener('orientationchange', () => setTimeout(avEdResize, 250));
-    let drag = null; cv.onpointerdown = e => { drag = e.clientX; cv.setPointerCapture(e.pointerId); }; cv.onpointermove = e => { if (drag !== null) { avEd.yaw += (e.clientX - drag) * 0.012; drag = e.clientX; } }; cv.onpointerup = () => { drag = null; };
+    let drag = null, moved = 0; cv.onpointerdown = e => { drag = e.clientX; moved = 0; cv.setPointerCapture(e.pointerId); }; cv.onpointermove = e => { if (drag !== null) { moved += Math.abs(e.clientX - drag); avEd.yaw += (e.clientX - drag) * 0.012; drag = e.clientX; } }; cv.onpointerup = e => { if (drag !== null && moved < 6) avEdPick(e); drag = null; };   // un toque (sin arrastrar) elige la pieza del cuerpo que tocaste
   }
   avEdResize();
   avEd.look = Object.assign({}, CrixAvatar.DEFAULT_LOOK, ME.look || {}); avEd.look.face = CrixAvatar.DEFAULT_LOOK.face; avEd.look.scale = 1;   // expresión y tamaño: solo animaciones
-  avEd.look.equip = (avEd.look.equip || []).slice(); avEd.color = ME.color || '#2f80ff'; avEd.view = 'main'; avEd.draft = null; avEd.accs = null; avEd.mode = 'idle';
+  avEd.look.equip = (avEd.look.equip || []).slice(); avEd.look.parts = Object.assign({}, avEd.look.parts || {}); avEd.sel = null; avEd.mirror = false; avEd.color = ME.color || '#2f80ff'; avEd.view = 'main'; avEd.draft = null; avEd.accs = null; avEd.mode = 'idle';
   accCam('body'); avatarEditorRebuild(); avatarEditorUI(); accLoadList();
   cancelAnimationFrame(avEd.raf); avEd.last = performance.now();
   const loop = () => { if (!document.getElementById('mo-avatar').classList.contains('open')) return; avEd.raf = requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - avEd.last) / 1000); avEd.last = now;
@@ -3038,6 +3038,7 @@ function avatarEditorUI() {
   ctrl.innerHTML = avEd.view === 'creator' ? accCreatorHTML()
     : '<div><b>Colores</b></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' + AVED_FIELDS.map(([k, n]) => { const val = L[k] || (k === 'shirt' ? avEd.color : '#888888'); return `<label style="display:flex;align-items:center;gap:6px">${n}<input type="color" value="${val}" oninput="avatarEditorSet('${k}',this.value,true)" style="width:34px;height:24px;border:none;background:none"></label>`; }).join('') + '</div>'   // todos los avatares son el muñeco de arcilla (FORCE_CLAY en crix-avatar.js): sin estilo ni colores de cuerpo
     + '<div class="set-note" style="margin:0">La expresión y el tamaño no se eligen acá: los cambian las animaciones.</div>'
+    + avPartsHTML()
     + accListHTML();
   document.getElementById('avp-anims').innerHTML = ['idle', 'walk', 'run', 'jump'].map(m => `<button class="btn ${avEd.mode === m ? 'btn-p' : 'btn-g'}" style="font-size:11px;padding:3px 7px" onclick="avatarEditorMode('${m}')">${m}</button>`).join('') + CrixAvatar.ANIMATIONS.filter(a => !['dead', 'sleep'].includes(a)).map(a => `<button class="btn btn-g" style="font-size:11px;padding:3px 7px" onclick="avatarEditorEmote('${a}')">${a}</button>`).join('');
 }
@@ -3203,9 +3204,43 @@ async function accSave() {
   } catch (e) { d.busy = false; showToast(e.message || 'No se pudo subir el accesorio'); avatarEditorUI(); }
 }
 function avatarEditorSet(key, value, noUI) { avEd.look[key] = value; CrixAvatar.applyLook(avEd.av, avEd.look); if (key === 'face') CrixAvatar.setFace(avEd.av, value); if (!noUI) avatarEditorUI(); }
+// ── Color por pieza: cada parte del cuerpo (cabeza, pecho, abdomen, pelvis, brazos, antebrazos, manos, muslos, pantorrillas, pies) tiene su propio color ──
+function avPartsHTML() {
+  const P = avEd.look.parts || {}, clay = CrixAvatar.CLAY_HEX, any = Object.keys(P).length > 0;
+  const rows = CrixAvatar.PART_KEYS.map(k => `<div id="avpart-${k}" style="display:flex;align-items:center;gap:6px;padding:2px 4px;${avEd.sel === k ? 'outline:2px solid #2f80ff;' : ''}"><span style="flex:1;font-size:12px">${CrixAvatar.PART_LABELS[k]}</span><input type="color" value="${P[k] || clay}" oninput="avatarEditorPart('${k}',this.value,true)" onchange="avatarEditorPart('${k}',this.value)" style="width:34px;height:24px;border:none;background:none"><button class="btn btn-g" style="font-size:11px;padding:1px 6px" title="Quitar color" onclick="avatarEditorPart('${k}',null)" ${P[k] ? '' : 'disabled'}>✕</button></div>`).join('');
+  return '<div style="margin-top:8px"><b>Color de cada parte</b></div>'
+    + '<div class="set-note" style="margin:2px 0 6px">Tocá el muñeco para elegir una parte, o usá la lista.</div>'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+    + `<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" ${avEd.mirror ? 'checked' : ''} onchange="avEd.mirror=this.checked">Izq. = Der.</label>`
+    + `<label style="display:flex;align-items:center;gap:4px;font-size:12px">Todo<input type="color" value="${clay}" onchange="avatarEditorAllParts(this.value)" style="width:34px;height:24px;border:none;background:none"></label>`
+    + `<button class="btn btn-g" style="font-size:11px;padding:2px 8px" onclick="avatarEditorAllParts(null)" ${any ? '' : 'disabled'}>Quitar todos</button></div>`
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px">' + rows + '</div>';
+}
+function avatarEditorPart(bone, value, noUI) {
+  if (!CrixAvatar.PART_KEYS.includes(bone)) return;
+  const mir = bone.endsWith('L') ? bone.slice(0, -1) + 'R' : bone.endsWith('R') ? bone.slice(0, -1) + 'L' : null;
+  const keys = avEd.mirror && mir && CrixAvatar.PART_KEYS.includes(mir) ? [bone, mir] : [bone], p = Object.assign({}, avEd.look.parts || {});
+  for (const k of keys) { if (value) p[k] = value; else delete p[k]; }
+  avEd.look.parts = p; avEd.sel = bone; CrixAvatar.applyLook(avEd.av, avEd.look); if (!noUI) avatarEditorUI();
+}
+function avatarEditorAllParts(value) {
+  const p = {}; if (value) for (const k of CrixAvatar.PART_KEYS) p[k] = value;
+  avEd.look.parts = p; CrixAvatar.applyLook(avEd.av, avEd.look); avatarEditorUI();
+}
+function avEdPick(e) {
+  if (!avEd || !avEd.av || avEd.view === 'creator') return;
+  const cv = document.getElementById('avp-canvas'), r = cv.getBoundingClientRect(); if (!r.width || !r.height) return;
+  const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), avEd.cam);
+  avEd.av.root.parent.updateMatrixWorld(true);
+  const hit = rc.intersectObjects(avEd.av.root.children, true).find(h => h.object.userData.tag === 'body'); if (!hit) return;
+  let o = hit.object.parent; while (o && !/_vis$/.test(o.name)) o = o.parent;
+  const bone = o ? o.name.replace(/_vis$/, '') : null; if (!bone || !CrixAvatar.PART_KEYS.includes(bone)) return;
+  avEd.sel = bone; avatarEditorUI();
+  const el = document.getElementById('avpart-' + bone); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+}
 function avatarEditorMode(m) { avEd.mode = m; CrixAvatar.stopAnimation(avEd.av); avatarEditorUI(); }
 function avatarEditorEmote(a) { avEd.mode = 'idle'; CrixAvatar.stopAnimation(avEd.av); CrixAvatar.playAnimation(avEd.av, a); avatarEditorUI(); }
-function avatarEditorReset() { avEd.look = Object.assign({}, CrixAvatar.DEFAULT_LOOK, { equip: [] }); avatarEditorRebuild(); avatarEditorUI(); }
+function avatarEditorReset() { avEd.look = Object.assign({}, CrixAvatar.DEFAULT_LOOK, { equip: [], parts: {} }); avEd.sel = null; avatarEditorRebuild(); avatarEditorUI(); }
 function closeAvatarEditor() { closeModal('mo-avatar'); if (avEd) cancelAnimationFrame(avEd.raf); }
 function saveAvatarEditor() {
   const look = CrixAvatar.profileLook(avEd.look); ME.look = look; saveMe(); closeAvatarEditor();   // sin expresión ni tamaño
