@@ -5371,23 +5371,18 @@ function toggleVideoLike(vid) {
 }
 function renderVideoComments(v) {
   const el = document.getElementById('vp-comments'); if (!el) return;
-  const comments = (v.comments || []).slice().reverse();
-  el.dataset.n = String(comments.length);
-  el.innerHTML = comments.length ? comments.map(c =>
-    '<div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">' +
-    authAv(c.authorId, c.authorName, 32) +
-    '<div><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
-    '<div style="font-size:13px;margin-top:2px">' + esc(c.text) + '</div>' +
-    '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : (c.time||'')) + '</div></div>' +
-    (ME && c.id && (c.authorId === ME.id || v.authorId === ME.id || isAdmin()) ? '<button class="btn btn-g" style="font-size:11px;padding:2px 8px;align-self:flex-start;margin-left:auto" title="Borrar" onclick="deleteVideoComment(\'' + c.id + '\')">🗑</button>' : '') + '</div>'
-  ).join('') : '<div style="color:var(--text3);font-size:13px;padding:12px 0">Sin comentarios todavía.</div>';
+  const list = v.comments || [];
+  el.dataset.n = String(list.length);
+  cmtSetHtml(el, list.length ? cmtThreadHtml('v', list, { avSize:32, delFn:'deleteVideoComment',
+    canDel: c => !!(ME && c.id && (c.authorId === ME.id || v.authorId === ME.id || isAdmin())) })
+    : '<div style="color:var(--text3);font-size:13px;padding:12px 0">Sin comentarios todavía.</div>');
 }
 async function deleteVideoComment(cid) {
-  if (!_activeVideoId || !confirm('¿Borrar este comentario?')) return;
+  if (!_activeVideoId || !confirm('¿Borrar este comentario? También se borran sus respuestas.')) return;
   try {
     await apiRequest('/api/videos/' + encodeURIComponent(_activeVideoId) + '/comments/' + encodeURIComponent(cid), { method:'DELETE' });
     const vids = getVideos(), v = vids.find(x => x.id === _activeVideoId);
-    if (v) { v.comments = (v.comments || []).filter(c => c.id !== cid); saveVideos(vids); renderVideoComments(v); }
+    if (v) { const gone = cmtDescendantIds(v.comments || [], cid); v.comments = (v.comments || []).filter(c => !gone.has(c.id)); saveVideos(vids); renderVideoComments(v); }
   } catch (e) { showToast((e && e.message) || 'No se pudo borrar', 3500); }
 }
 async function submitVideoComment() {
@@ -5706,6 +5701,89 @@ function initForums() {
   if (av) { av.innerHTML = avatarInnerHtml(ME); av.style.background = profileAvatarSrc(ME) ? 'transparent' : ME.color; av.style.overflow = 'hidden'; }
   renderForums();
 }
+// ── Hilos de comentarios: respuestas a respuestas sin límite (juegos, apps y videos) ──
+// La lista es plana; cada comentario puede traer parentId. Se arma el árbol al dibujar.
+var _cmtCollapsed = new Set(), _cmtReplyOpen = {}, _cmtDraft = {};
+function cmtBuildTree(list) {
+  const byId = new Map(), roots = [];
+  list.forEach(c => byId.set(c.id, { c, kids: [] }));
+  list.forEach(c => { const n = byId.get(c.id), p = c.parentId && c.parentId !== c.id ? byId.get(c.parentId) : null; (p ? p.kids : roots).push(n); });   // si falta el padre, queda como raíz
+  return roots;
+}
+function cmtDescendantIds(list, id) {
+  const ids = new Set([id]); let grew = true;
+  while (grew) { grew = false; list.forEach(x => { if (x.parentId && ids.has(x.parentId) && !ids.has(x.id)) { ids.add(x.id); grew = true; } }); }
+  return ids;
+}
+function cmtThreadHtml(ctx, list, opt) {
+  const roots = cmtBuildTree(list).reverse();   // raíces: más nuevas primero; respuestas: en orden de conversación
+  const canReply = !!(ME && !ME.guest), sz = opt.avSize || 30;
+  const total = n => n.kids.reduce((k, x) => k + 1 + total(x), 0);
+  const q = id => '\'' + ctx + '\',\'' + id + '\'';
+  const node = (n, depth) => {
+    const c = n.c, key = ctx + c.id, nk = n.kids.length, col = _cmtCollapsed.has(key);
+    let h = '<div style="padding:8px 0;' + (depth === 0 ? 'border-bottom:1px solid var(--border)' : '') + '">' +
+      '<div style="display:flex;gap:10px">' + authAv(c.authorId, c.authorName, depth ? Math.max(22, sz - 6) : sz) +
+      '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
+      '<div style="font-size:13px;margin-top:2px;white-space:pre-wrap;word-break:break-word">' + esc(c.text) + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:3px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>' + (c.created ? timeAgo(c.created) : (c.time || '')) + '</span>' +
+      (canReply && c.id ? '<a href="#" style="color:var(--text2);font-weight:700;text-decoration:none" onclick="cmtToggleReply(' + q(c.id) + ');return false">Responder</a>' : '') +
+      (nk ? '<a href="#" style="color:var(--text2);text-decoration:none" onclick="cmtToggleCollapse(' + q(c.id) + ');return false">' + (col ? '▸ Ver ' : '▾ Ocultar ') + total(n) + (total(n) === 1 ? ' respuesta' : ' respuestas') + '</a>' : '') +
+      '</div></div>' +
+      (opt.canDel(c) ? '<button class="btn btn-g" style="font-size:11px;padding:2px 8px;align-self:flex-start" title="Borrar" onclick="' + opt.delFn + '(\'' + c.id + '\')">🗑</button>' : '') + '</div>';
+    if (_cmtReplyOpen[key]) {
+      h += '<div style="display:flex;gap:8px;margin:8px 0 2px ' + (sz + 10) + 'px"><textarea data-cmt-inp="' + key + '" maxlength="1000" ' +
+        'oninput="_cmtDraft[\'' + key + '\']=this.value" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key===\'Enter\'){cmtSubmitReply(' + q(c.id) + ')}" ' +
+        'style="flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px;font-family:var(--font);resize:none;outline:none;height:46px" ' +
+        'placeholder="Respondé a ' + esc(c.authorName) + '...">' + esc(_cmtDraft[key] || '') + '</textarea>' +
+        '<div style="display:flex;flex-direction:column;gap:4px;justify-content:flex-end"><button class="btn btn-p" style="font-size:12px" onclick="cmtSubmitReply(' + q(c.id) + ')">Enviar</button>' +
+        '<button class="btn btn-g" style="font-size:11px" onclick="cmtToggleReply(' + q(c.id) + ')">Cancelar</button></div></div>';
+    }
+    if (nk && !col) h += '<div style="' + (depth < 5 ? 'margin-left:14px;padding-left:10px;border-left:2px solid var(--border)' : '') + '">' + n.kids.map(k => node(k, depth + 1)).join('') + '</div>';   // pasada la profundidad 5 no se sangra más (así entra en pantallas chicas)
+    return h + '</div>';
+  };
+  return roots.map(n => node(n, 0)).join('');
+}
+// Redibuja sin perder lo que la persona está escribiendo en una respuesta (llegan comentarios en vivo por socket).
+function cmtSetHtml(el, html) {
+  const a = document.activeElement, k = a && a.dataset && a.dataset.cmtInp, pos = k ? a.selectionStart : 0;
+  el.innerHTML = html;
+  if (k) { const t = el.querySelector('[data-cmt-inp="' + k + '"]'); if (t) { t.focus(); try { t.setSelectionRange(pos, pos); } catch (e) {} } }
+}
+function cmtRefresh(ctx) {
+  if (ctx === 'g') renderGameComments();
+  else { const v = getVideos().find(x => x.id === _activeVideoId); if (v) renderVideoComments(v); }
+}
+function cmtToggleReply(ctx, id) {
+  if (!ME || ME.guest) { showToast('Iniciá sesión para comentar.'); return; }
+  const key = ctx + id;
+  if (_cmtReplyOpen[key]) { delete _cmtReplyOpen[key]; delete _cmtDraft[key]; } else { _cmtReplyOpen[key] = true; _cmtCollapsed.delete(key); }
+  cmtRefresh(ctx);
+  if (_cmtReplyOpen[key]) { const t = document.querySelector('[data-cmt-inp="' + key + '"]'); if (t) t.focus(); }
+}
+function cmtToggleCollapse(ctx, id) {
+  const key = ctx + id;
+  if (_cmtCollapsed.has(key)) _cmtCollapsed.delete(key); else _cmtCollapsed.add(key);
+  cmtRefresh(ctx);
+}
+async function cmtSubmitReply(ctx, pid) {
+  const key = ctx + pid, text = (_cmtDraft[key] || '').trim(); if (!text) return;
+  try {
+    if (ctx === 'g') {
+      const id = _gcmt.id; if (!id) return;
+      const r = await apiRequest('/api/maps/' + encodeURIComponent(id) + '/comments', { method:'POST', body:{ text, parentId:pid } });
+      if (_gcmt.id === id && !_gcmt.list.some(c => c.id === r.comment.id)) { _gcmt.list.push(r.comment); _gcmt.err = ''; }
+    } else {
+      const vids = getVideos(), v = vids.find(x => x.id === _activeVideoId); if (!v) return;
+      const r = await apiRequest('/api/videos/' + encodeURIComponent(_activeVideoId) + '/comment', { method:'POST', body:{ comment:text, parentId:pid } });
+      v.comments = v.comments || [];
+      if (!v.comments.some(c => c.id === r.comment.id)) v.comments.push(r.comment);
+      saveVideos(vids);
+    }
+    delete _cmtReplyOpen[key]; delete _cmtDraft[key];
+    cmtRefresh(ctx);
+  } catch (e) { showToast((e && e.message) || 'No se pudo responder', 3500); }
+}
 // ── Comentarios de juegos y apps ──
 let _gcmt = { id:null, list:[], err:'' };
 async function loadGameComments(mapId) {
@@ -5723,16 +5801,10 @@ function renderGameComments() {
   const el = document.getElementById('gp-comments'); if (!el) return;
   const t = document.getElementById('gp-cmt-title'); if (t) t.textContent = '💬 Comentarios' + (_gcmt.list.length ? ' (' + _gcmt.list.length + ')' : '');
   if (_gcmt.err) { el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">' + esc(_gcmt.err) + '</div>'; return; }
-  const m = getMaps()[_gcmt.id], list = _gcmt.list.slice().reverse();
-  el.innerHTML = list.length ? list.map(c => {
-    const canDel = ME && (c.authorId === ME.id || (m && m.authorId === ME.id) || isAdmin());
-    return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">' +
-      authAv(c.authorId, c.authorName, 30) +
-      '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px;color:var(--acc)">' + esc(c.authorName) + '</div>' +
-      '<div style="font-size:13px;margin-top:2px;white-space:pre-wrap;word-break:break-word">' + esc(c.text) + '</div>' +
-      '<div style="font-size:10px;color:var(--text3);margin-top:3px">' + (c.created ? timeAgo(c.created) : '') + '</div></div>' +
-      (canDel ? '<button class="btn btn-g" style="font-size:11px;padding:2px 8px;align-self:flex-start" title="Borrar" onclick="deleteGameComment(\'' + c.id + '\')">🗑</button>' : '') + '</div>';
-  }).join('') : '<div style="color:var(--text3);font-size:13px;padding:8px 0">Sin comentarios todavía. ¡Sé el primero!</div>';
+  const m = getMaps()[_gcmt.id];
+  cmtSetHtml(el, _gcmt.list.length ? cmtThreadHtml('g', _gcmt.list, { avSize:30, delFn:'deleteGameComment',
+    canDel: c => !!(ME && (c.authorId === ME.id || (m && m.authorId === ME.id) || isAdmin())) })
+    : '<div style="color:var(--text3);font-size:13px;padding:8px 0">Sin comentarios todavía. ¡Sé el primero!</div>');
 }
 async function submitGameComment() {
   const inp = document.getElementById('gp-cmt-inp'), id = _gcmt.id;
@@ -5744,10 +5816,10 @@ async function submitGameComment() {
   } catch (e) { showToast((e && e.message) || 'No se pudo comentar', 3500); }
 }
 async function deleteGameComment(cid) {
-  const id = _gcmt.id; if (!id || !confirm('¿Borrar este comentario?')) return;
+  const id = _gcmt.id; if (!id || !confirm('¿Borrar este comentario? También se borran sus respuestas.')) return;
   try {
     await apiRequest('/api/maps/' + encodeURIComponent(id) + '/comments/' + encodeURIComponent(cid), { method:'DELETE' });
-    if (_gcmt.id === id) { _gcmt.list = _gcmt.list.filter(c => c.id !== cid); renderGameComments(); }
+    if (_gcmt.id === id) { const gone = cmtDescendantIds(_gcmt.list, cid); _gcmt.list = _gcmt.list.filter(c => !gone.has(c.id)); renderGameComments(); }
   } catch (e) { showToast((e && e.message) || 'No se pudo borrar', 3500); }
 }
 async function openGamePage(mapId) {
@@ -6517,7 +6589,8 @@ function setupGlobalLiveEvents() {
   socket.on('map_comment', ev => {
     if (!ev || ev.mapId !== _gcmt.id) return;
     if (ev.comment && !_gcmt.list.some(c => c.id === ev.comment.id)) _gcmt.list.push(ev.comment);
-    if (ev.removed) _gcmt.list = _gcmt.list.filter(c => c.id !== ev.removed);
+    const gone = new Set([...(ev.removedIds || []), ...(ev.removed ? [ev.removed] : [])]);
+    if (gone.size) _gcmt.list = _gcmt.list.filter(c => !gone.has(c.id));
     renderGameComments();
   });
   // Novedades (comentarios, me gusta, seguidores, equipo, cuenta...): con la app abierta se ven como aviso; con la app cerrada llegan como push.
@@ -8802,7 +8875,7 @@ function appearanceFields(d) {
       <textarea id="gp-cmt-inp" maxlength="1000" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px;font-family:var(--font);resize:none;outline:none;height:52px" placeholder="Escribí un comentario..."></textarea>
       <button class="btn btn-p" style="font-size:12px;align-self:flex-end" onclick="submitGameComment()">Enviar</button>
     </div>
-    <div id="gp-comments" style="max-height:260px;overflow:auto"></div>
+    <div id="gp-comments" style="max-height:380px;overflow:auto"></div>
   </div>
 </div>
 </div>

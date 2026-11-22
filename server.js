@@ -2116,6 +2116,12 @@ app.post('/api/maps/:id/like', requireAuth, (req, res) => {
   res.json({ ok:true, liked, likes:map.likes });
 });
 
+// Hilos de comentarios: lista plana con parentId (null = comentario raíz). Sin límite de profundidad.
+function cmtDescendants(list, id) {
+  const ids = new Set([id]); let grew = true;
+  while (grew) { grew = false; for (const x of list) if (x.parentId && ids.has(x.parentId) && !ids.has(x.id)) { ids.add(x.id); grew = true; } }
+  return ids;
+}
 // ── Comentarios de juegos y apps ──
 // Se guardan en el propio juego (map.comments). Para leerlos o comentar hay que poder abrir el juego (privacidad y +18).
 const MAX_MAP_COMMENTS = 1000, commentHits = new Map();   // userId → última hora de comentario (anti-spam)
@@ -2138,12 +2144,23 @@ app.post('/api/maps/:id/comments', requireAuth, (req, res) => {
   if (now - (commentHits.get(req.user.id) || 0) < 1500) return res.status(429).json({ ok:false, err:'Esperá un momento antes de comentar de nuevo' });
   commentHits.set(req.user.id, now);
   map.comments = Array.isArray(map.comments) ? map.comments : [];
-  if (map.comments.length >= MAX_MAP_COMMENTS) map.comments.shift();
-  const comment = { id:`c${crypto.randomUUID()}`, authorId:req.user.id, authorName:req.user.username, text, created:new Date().toISOString() };
+  const parentId = String(req.body?.parentId || '') || null;
+  const parent = parentId ? map.comments.find(x => x.id === parentId) : null;
+  if (parentId && !parent) return res.status(404).json({ ok:false, err:'El comentario que querés responder ya no existe' });
+  let removedIds = [];
+  if (map.comments.length >= MAX_MAP_COMMENTS) {   // al llegar al tope se descarta el hilo raíz más viejo completo (así no quedan respuestas huérfanas)
+    const oldest = map.comments.find(x => !x.parentId) || map.comments[0];
+    const gone = cmtDescendants(map.comments, oldest.id);
+    removedIds = [...gone];
+    map.comments = map.comments.filter(x => !gone.has(x.id));
+    if (parentId && gone.has(parentId)) return res.status(404).json({ ok:false, err:'El comentario que querés responder ya no existe' });
+  }
+  const comment = { id:`c${crypto.randomUUID()}`, parentId, authorId:req.user.id, authorName:req.user.username, text, created:new Date().toISOString() };
   map.comments.push(comment);
   saveDB();
-  io.emit('map_comment', { mapId:map.id, comment });
-  notifyActivity(map.authorId, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'💬 ' + req.user.username + ' comentó en ' + map.name, body:text, tag:'cmt-' + map.id });
+  io.emit('map_comment', { mapId:map.id, comment, removedIds });
+  if (parent && parent.authorId !== req.user.id) notifyActivity(parent.authorId, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'↩️ ' + req.user.username + ' respondió tu comentario en ' + map.name, body:text, tag:'cmt-' + map.id });
+  if (map.authorId !== req.user.id && (!parent || parent.authorId !== map.authorId)) notifyActivity(map.authorId, { kind:'game', id:map.id, from:req.user.id, fromName:req.user.username, title:'💬 ' + req.user.username + ' comentó en ' + map.name, body:text, tag:'cmt-' + map.id });
   res.json({ ok:true, comment });
 });
 app.delete('/api/maps/:id/comments/:cid', requireAuth, (req, res) => {
@@ -2152,9 +2169,10 @@ app.delete('/api/maps/:id/comments/:cid', requireAuth, (req, res) => {
   const c = (map.comments || []).find(x => x.id === req.params.cid);
   if (!c) return res.json({ ok:true });
   if (c.authorId !== req.user.id && map.authorId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ ok:false, err:'No podés borrar este comentario' });
-  map.comments = map.comments.filter(x => x.id !== c.id);
+  const gone = cmtDescendants(map.comments, c.id);   // borrar un comentario borra todo su hilo de respuestas
+  map.comments = map.comments.filter(x => !gone.has(x.id));
   saveDB();
-  io.emit('map_comment', { mapId:map.id, removed:c.id });
+  io.emit('map_comment', { mapId:map.id, removed:c.id, removedIds:[...gone] });
   res.json({ ok:true });
 });
 
@@ -2556,11 +2574,15 @@ app.post('/api/videos/:id/comment', (req, res) => {
   v.comments = v.comments || [];
   const text = String(req.body.comment?.text || req.body.comment || '').trim().slice(0, 1000);
   if (!text) return res.status(400).json({ ok:false, err:'El comentario está vacío' });
-  const comment = { id:`c${crypto.randomUUID()}`, authorId:user.id, authorName:user.username, text, created:new Date().toISOString() };
+  const parentId = String(req.body.parentId || '') || null;
+  const parent = parentId ? v.comments.find(x => x.id === parentId) : null;
+  if (parentId && !parent) return res.status(404).json({ ok:false, err:'El comentario que querés responder ya no existe' });
+  const comment = { id:`c${crypto.randomUUID()}`, parentId, authorId:user.id, authorName:user.username, text, created:new Date().toISOString() };
   v.comments.push(comment);
   saveDB();
   emitVideoEvent(v, 'video_updated', { id:v.id, comment });
-  notifyActivity(v.authorId, { kind:'video', id:v.id, from:user.id, fromName:user.username, title:'💬 ' + user.username + ' comentó tu video', body:text, tag:'cmt-' + v.id });
+  if (parent && parent.authorId !== user.id) notifyActivity(parent.authorId, { kind:'video', id:v.id, from:user.id, fromName:user.username, title:'↩️ ' + user.username + ' respondió tu comentario', body:text, tag:'cmt-' + v.id });
+  if (v.authorId !== user.id && (!parent || parent.authorId !== v.authorId)) notifyActivity(v.authorId, { kind:'video', id:v.id, from:user.id, fromName:user.username, title:'💬 ' + user.username + ' comentó tu video', body:text, tag:'cmt-' + v.id });
   res.json({ ok: true, comment });
 });
 app.delete('/api/videos/:id/comments/:cid', (req, res) => {
@@ -2571,7 +2593,8 @@ app.delete('/api/videos/:id/comments/:cid', (req, res) => {
   const c = (v.comments || []).find(x => x.id === req.params.cid);
   if (!c) return res.json({ ok:true });
   if (c.authorId !== user.id && v.authorId !== user.id && !user.isAdmin) return res.status(403).json({ ok:false, err:'No podés borrar este comentario' });
-  v.comments = v.comments.filter(x => x.id !== c.id);
+  const gone = cmtDescendants(v.comments, c.id);   // borra también todas las respuestas
+  v.comments = v.comments.filter(x => !gone.has(x.id));
   saveDB();
   emitVideoEvent(v, 'video_updated', { id:v.id, refetch:true });
   res.json({ ok:true });
