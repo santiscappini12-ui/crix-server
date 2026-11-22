@@ -646,7 +646,7 @@ function banActive(u) {
 function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,ageVerified:___a,ageCheck:___c,...s}=u; s.adult = isAgeVerified(u); return s; }
 function publicUser(u) {
   if (!u) return null;
-  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ageVerified:_________, ageCheck:__________, ...profile } = u;
+  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ageVerified:_________, ageCheck:__________, prefs:___________, ...profile } = u;
   return profile;
 }
 
@@ -1175,6 +1175,33 @@ app.post('/api/google', async (req, res) => {
 });
 
 app.get('/api/session', requireAuth, (req, res) => res.json({ ok:true, user:safeUser(req.user) }));
+
+// ── Preferencias de la cuenta (idioma, difuminado de miniaturas, sonido, etc.) ──
+// Se guardan en la cuenta (`user.prefs`) para que acompañen a la persona en cualquier dispositivo. Solo las ve su dueña
+// (safeUser las incluye; publicUser no). Cada clave tiene su validación; lo que no se reconoce se ignora. `null` borra la clave.
+const PREF_RULES = {
+  crix_lang:          v => ['es','en','pt','fr','de','it'].includes(v) ? v : null,
+  crix_thumb_blur_on: v => (v === '0' || v === '1') ? v : null,
+  crix_thumb_blur_px: v => { const n = parseInt(v, 10); return n >= 2 && n <= 60 ? String(n) : null; },
+  crix_thumb_filter:  v => ['strict','medium','off'].includes(v) ? v : null,
+  crix_sound:         v => (v === 'on' || v === 'off') ? v : null,
+  crix_nav_hidden:    v => (v === '0' || v === '1') ? v : null,
+  crix_country:       v => /^[A-Z_]{2,10}$/.test(v) ? v : null,
+};
+app.put('/api/prefs', requireAuth, (req, res) => {
+  const input = req.body && req.body.prefs;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return res.status(400).json({ ok:false, err:'Preferencias inválidas' });
+  const prefs = { ...(req.user.prefs || {}) };
+  for (const key of Object.keys(input)) {
+    if (!Object.prototype.hasOwnProperty.call(PREF_RULES, key)) continue;
+    if (input[key] === null) { delete prefs[key]; continue; }
+    const value = PREF_RULES[key](String(input[key]));
+    if (value !== null) prefs[key] = value;
+  }
+  req.user.prefs = prefs;
+  saveDB();
+  res.json({ ok:true, prefs });
+});
 app.post('/api/logout', requireAuth, (req, res) => {
   const token = (req.get('authorization') || '').slice(7);
   delete DB.sessions[tokenHash(token)];

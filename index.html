@@ -1780,6 +1780,53 @@ function setUsers(u) {
     apiRequest('/api/user/' + encodeURIComponent(id), { method:'POST', body:safe }).catch(() => {});
   });
 }
+// ═══ Preferencias de la cuenta ═══
+// Idioma, difuminado de miniaturas, sonido, barra superior y país de clasificación se guardan en la cuenta (servidor), no solo en este
+// navegador: al iniciar sesión en otro dispositivo (o tras limpiar el navegador) se recuperan. localStorage sigue siendo la copia local.
+const ACCOUNT_PREF_KEYS = ['crix_lang', 'crix_thumb_blur_on', 'crix_thumb_blur_px', 'crix_thumb_filter', 'crix_sound', 'crix_nav_hidden', 'crix_country'];
+let _prefTimer = null, _prefPending = {}, _applyingPrefs = false;
+// Llamar después de cambiar una de esas claves en localStorage: la sube a la cuenta (agrupa cambios seguidos).
+function prefSync(key) {
+  if (_applyingPrefs || !ME || ME.guest || !DB.get('token') || !ACCOUNT_PREF_KEYS.includes(key)) return;
+  let v = null; try { v = localStorage.getItem(key); } catch (_) {}
+  _prefPending[key] = v;
+  const cur = { ...(ME.prefs || {}) }; if (v == null) delete cur[key]; else cur[key] = v; ME.prefs = cur;
+  clearTimeout(_prefTimer); _prefTimer = setTimeout(flushPrefs, 500);
+}
+async function flushPrefs() {
+  clearTimeout(_prefTimer);
+  const body = _prefPending; _prefPending = {};
+  if (!Object.keys(body).length || !ME || ME.guest || !DB.get('token')) return;
+  try { const r = await apiRequest('/api/prefs', { method:'PUT', body:{ prefs:body } }); if (ME && r.prefs) ME.prefs = r.prefs; }
+  catch (_) { Object.keys(body).forEach(k => { if (!(k in _prefPending)) _prefPending[k] = body[k]; }); _prefTimer = setTimeout(flushPrefs, 15000); }
+}
+// Si la pestaña se cierra justo después de cambiar un ajuste, se manda igual.
+window.addEventListener('pagehide', () => {
+  const token = DB.get('token'), body = _prefPending;
+  if (!token || !Object.keys(body).length) return;
+  _prefPending = {};
+  try { fetch('/api/prefs', { method:'PUT', keepalive:true, headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + token }, body:JSON.stringify({ prefs:body }) }); } catch (_) {}
+});
+// Al iniciar sesión / restaurar la sesión: lo guardado en la cuenta pisa lo local. Si la cuenta todavía no guardó nada, sube lo que ya
+// había en este dispositivo (una sola vez), así nadie pierde sus ajustes actuales.
+function applyAccountPrefs() {
+  if (!ME || ME.guest || !DB.get('token')) return;
+  const remote = ME.prefs && typeof ME.prefs === 'object' ? ME.prefs : null, changed = [], up = {};
+  _applyingPrefs = true;
+  try {
+    ACCOUNT_PREF_KEYS.forEach(k => {
+      let local = null; try { local = localStorage.getItem(k); } catch (_) {}
+      if (remote) { if (remote[k] != null && remote[k] !== local) { try { localStorage.setItem(k, remote[k]); changed.push(k); } catch (_) {} } }
+      else if (local != null) up[k] = local;
+    });
+    if (changed.includes('crix_lang') && typeof setLang === 'function') { try { setLang(localStorage.getItem('crix_lang')); } catch (_) {} }
+    if (changed.includes('crix_nav_hidden') && typeof toggleNavBar === 'function') { try { toggleNavBar(localStorage.getItem('crix_nav_hidden') === '1'); } catch (_) {} }
+    if (changed.some(k => k.indexOf('crix_thumb_') === 0)) {
+      try { if (typeof thumbSettingsFill === 'function') thumbSettingsFill(); if (typeof thumbSettingsRefresh === 'function') thumbSettingsRefresh(); } catch (_) {}
+    }
+  } finally { _applyingPrefs = false; }
+  if (!remote && Object.keys(up).length) { ME.prefs = up; _prefPending = { ..._prefPending, ...up }; clearTimeout(_prefTimer); _prefTimer = setTimeout(flushPrefs, 300); }
+}
 function getMaps()   { return DB.get('maps')   || {}; }
 // Juegos propios cuya última subida al servidor no se completó (no se pierden al refrescar y se reintentan).
 const UNSYNCED_MAPS = new Set(), MAP_UPLOADS = {};
@@ -1951,7 +1998,7 @@ async function clsSubmit() {
   }
   c.busy = false; if (_cls === c) clsRender();
 }
-function clsConfirm() { const c = _cls; if (!c || !c.result) return; try { localStorage.setItem('crix_country', c.result.country); } catch (_) {} clsFinish(c.result); }
+function clsConfirm() { const c = _cls; if (!c || !c.result) return; try { localStorage.setItem('crix_country', c.result.country); } catch (_) {} prefSync('crix_country'); clsFinish(c.result); }
 
 // Insignia de clasificación (tarjetas, página del juego, reproductor). El autor ve "Sin clasificar" en lo que todavía no tiene.
 // Insignias propias de Crix: cada país tiene su forma. Son dibujos nuestros (SVG), no logos de ningún organismo.
@@ -2365,7 +2412,7 @@ function loginAs(user, token, legacyId, password) {
   }
   users[profile.id] = profile;
   DB.set('users', users); DB.set('session', profile.id); DB.set('token', token);
-  ME = profile; bootApp();
+  ME = profile; bootApp(); applyAccountPrefs();
   if (socket) { socket.auth = { token }; socket.disconnect().connect(); }
   if (password) initializeChatEncryption(password);
   syncCloudData();
@@ -2414,7 +2461,7 @@ async function restoreSession() {
   }
   ME = result.user;
   const users = getUsers(); users[ME.id] = ME; DB.set('users', users); DB.set('session', ME.id);
-  bootApp(); await syncCloudData();
+  bootApp(); applyAccountPrefs(); await syncCloudData();
 }
 let _syncBusy = false, _syncRetry = 0, _pushedFor = null;
 // Juegos creados con el contador viejo (1001, 1002…): se les asigna un id único. El servidor mueve todo
@@ -4301,6 +4348,7 @@ function toggleNavBar(force) {
   const btn = document.getElementById('nav-toggle');
   if (btn) { btn.textContent = hide ? '▼' : '▲'; btn.title = hide ? 'Mostrar barra superior' : 'Ocultar barra superior'; }
   try { localStorage.setItem('crix_nav_hidden', hide ? '1' : '0'); } catch (_) {}
+  prefSync('crix_nav_hidden');
 }
 try { if (localStorage.getItem('crix_nav_hidden') === '1') toggleNavBar(true); } catch (_) {}
 
@@ -5750,7 +5798,7 @@ function sfxCtx() {
 ['pointerdown', 'keydown', 'touchend'].forEach(ev => window.addEventListener(ev, () => { if (!_sfx || _sfx.state !== 'running') sfxCtx(); }, { passive: true }));
 const soundOn = () => lsGet('crix_sound') !== 'off';
 const appInView = () => document.visibilityState === 'visible' && (typeof document.hasFocus !== 'function' || document.hasFocus());
-function toggleSound() { lsSet('crix_sound', soundOn() ? 'off' : 'on'); showToast(soundOn() ? '🔔 Sonidos activados' : '🔕 Sonidos silenciados'); playSfx('soft'); }
+function toggleSound() { lsSet('crix_sound', soundOn() ? 'off' : 'on'); prefSync('crix_sound'); showToast(soundOn() ? '🔔 Sonidos activados' : '🔕 Sonidos silenciados'); playSfx('soft'); }
 function sfxTone(c, f, start, dur, vol, type) {
   const t = c.currentTime + start, o = c.createOscillator(), g = c.createGain();
   o.type = type || 'sine'; o.frequency.setValueAtTime(f, t);
@@ -7016,10 +7064,11 @@ function thumbSettingsRefresh() { if (typeof renderVideos === 'function') try { 
 function setThumbBlurOn(on) {
   if (!thumbAdult()) { showToast('Solo los usuarios con +18 verificado pueden desactivar el difuminado'); return; }
   try { localStorage.setItem('crix_thumb_blur_on', on ? '1' : '0'); if (on && localStorage.getItem('crix_thumb_filter') === 'off') localStorage.setItem('crix_thumb_filter', 'strict'); } catch {}
+  prefSync('crix_thumb_blur_on'); prefSync('crix_thumb_filter');
   thumbSettingsFill(); thumbSettingsRefresh();
 }
-function setThumbBlurPx(v) { try { localStorage.setItem('crix_thumb_blur_px', String(Math.max(thumbAdult() ? 2 : 12, Math.min(60, parseInt(v, 10) || 22)))); } catch {} thumbSettingsFill(false); thumbSettingsRefresh(); }
-function setThumbFilter(m) { if (!thumbAdult()) return; try { localStorage.setItem('crix_thumb_filter', m === 'medium' ? 'medium' : 'strict'); } catch {} thumbSettingsRefresh(); }
+function setThumbBlurPx(v) { try { localStorage.setItem('crix_thumb_blur_px', String(Math.max(thumbAdult() ? 2 : 12, Math.min(60, parseInt(v, 10) || 22)))); } catch {} prefSync('crix_thumb_blur_px'); thumbSettingsFill(false); thumbSettingsRefresh(); }
+function setThumbFilter(m) { if (!thumbAdult()) return; try { localStorage.setItem('crix_thumb_filter', m === 'medium' ? 'medium' : 'strict'); } catch {} prefSync('crix_thumb_filter'); thumbSettingsRefresh(); }
 function thumbSettingsFill(full) {
   const on = thumbBlurOn(), px = thumbBlurPx(), g = id => document.getElementById(id);
   if (!g('set-thumb-on')) return;
@@ -9257,6 +9306,7 @@ function setLang(l) {
   if (!LANGS[l]) return;
   LANG = l; window.__crixLang = l;
   try { localStorage.setItem('crix_lang', l); } catch (_) {}
+  prefSync('crix_lang');
   document.documentElement.lang = l;
   observer.disconnect();
   walk(document.body);
