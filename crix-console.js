@@ -32,9 +32,8 @@
     if (lvl === 'error' && prefs.autoOpen && !isOpen && inGameOrStudio()) open();
   }
 
-  // La salida solo se ve mientras CREÁS en Crix Hub (editor, o probando tu juego desde el editor). En un juego subido/publicado no aparece.
+  // La salida solo se ve en las PRUEBAS de Crix Hub (▶ probar tu juego desde el editor). Ni en el editor ni en un juego subido/publicado.
   function inGameOrStudio() {
-    if (document.querySelector('#s-studio.active')) return true;
     if (document.querySelector('#s-game.active')) { try { return typeof stPlaytesting !== 'undefined' && !!stPlaytesting; } catch (_) { return false; } }
     return false;
   }
