@@ -3683,6 +3683,7 @@ function stuAddToFolder(type, folderId) {
 }
 function openLightingProps() {
   const L = stLighting;
+  const tglOff = (key, label) => '<div class="prop-row"><div class="tgl-row" onclick="stSettings.'+key+'=!stSettings.'+key+';this.querySelector(\'.tgl\').classList.toggle(\'on\',!!stSettings.'+key+')"><div class="tgl '+(s[key]===true?'on':'')+'"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">'+label+'</span></div></div>';   // apagado por defecto
   document.getElementById('props-body').innerHTML =
     '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--yellow);background:var(--bg3);border-bottom:1px solid var(--border)">LIGHTING</div>'+
     '<div class="prop-row"><div class="prop-lbl">Luz Ambiente</div><input type="color" value="'+L.ambient+'" style="width:100%;height:28px;border-radius:6px;border:1px solid var(--border);cursor:pointer" onchange="stLighting.ambient=this.value;applyLighting()"></div>'+
@@ -4406,7 +4407,7 @@ function playMap(mapId) {
 function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); gRenderer.shadowMap.enabled = true; gRenderer.shadowMap.type = THREE.PCFSoftShadowMap; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
 function _loadMap(m) {
   const toRemove=[]; gScene.traverse(object=>{if(object!==gScene)toRemove.push(object);});toRemove.forEach(object=>gScene.remove(object));
-  gColliders=[];gNPCs=[];runtimeObjects.clear();_localRoom=null;_localPrev=null;networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];gPlayer=null;
+  gColliders=[];gNPCs=[];runtimeObjects.clear();_localRoom=null;_localPrev=null;networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];_ragAbort();gPlayer=null;
   disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:2048});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
   const parts=m.parts||[];runtimeWorkspaceBase=scriptPartsSnapshot(parts).filter(part=>part.type==='Spawn'||part.isNPC);let spawn={x:0,y:3,z:0};
   parts.forEach((part,index)=>{
@@ -4503,7 +4504,7 @@ function avatarChatCommand(text) {
   if (CrixAvatar.resolveAnim(arg)) _avatarSelf([{ op:'anim', name:arg }]); else addGMsg('Emotes: ' + CrixAvatar.ANIMATIONS.join(', '), 'sys');
   return true;
 }
-function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; const _nowT = performance.now(); const _frameDt = Math.min(0.1, Math.max(0, (_nowT - (_gameLoop._last || _nowT)) / 1000)); _gameLoop._last = _nowT; gAnimT += _frameDt; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; gAcc += Math.min(100, _frameDt * 1000); let _steps = 0; while (gAcc >= PHYS_STEP_MS && _steps < 6) { gAcc -= PHYS_STEP_MS; _steps++; _stepPlayer(mx, mz, moving); } if (_steps === 6) gAcc = 0; let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * Math.min(1, 12 * _frameDt); _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } { const _av = gPlayer.userData.avatar; if (_av) CrixAvatar.update(_av, _frameDt, { speed: Math.hypot(gVelX, gVelZ) * 60, onGround: gOnGround, vy: gVelY }); } gNPCs.forEach(npc => { const av = npc.mesh.userData.avatar; if (!av) return; if (npc.seed === undefined) npc.seed = String(npc.data.id || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; const _nowT = performance.now(); const _frameDt = Math.min(0.1, Math.max(0, (_nowT - (_gameLoop._last || _nowT)) / 1000)); _gameLoop._last = _nowT; gAnimT += _frameDt; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } const mx = gRag ? 0 : (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = gRag ? 0 : (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; gAcc += Math.min(100, _frameDt * 1000); let _steps = 0; while (gAcc >= PHYS_STEP_MS && _steps < 6) { gAcc -= PHYS_STEP_MS; _steps++; _stepPlayer(mx, mz, moving); } if (_steps === 6) gAcc = 0; let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * Math.min(1, 12 * _frameDt); if (!gRag) _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (gRag) _ragUpdate(_frameDt); _bloodUpdate(_frameDt); { const _av = gPlayer.userData.avatar; if (_av) CrixAvatar.update(_av, _frameDt, { speed: Math.hypot(gVelX, gVelZ) * 60, onGround: gOnGround, vy: gVelY }); } gNPCs.forEach(npc => { const av = npc.mesh.userData.avatar; if (!av) return; if (npc.seed === undefined) npc.seed = String(npc.data.id || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
     // Reloj de pared: todos los jugadores ven al NPC en el mismo lugar. Un Script puede detenerlo con game.setNpcWander(nombre, false).
     const t = Date.now() / 2000 + npc.seed * 0.3, hold = !!av.hold, nx = npc.data.x + (hold ? 0 : Math.sin(t) * 5), nz = npc.data.z + (hold ? 0 : Math.cos(t * 0.7) * 5);
     const dx = nx - npc.mesh.position.x, dz = nz - npc.mesh.position.z, spd = npc.px === undefined ? 0 : Math.hypot(dx, dz) / Math.max(0.001, _frameDt);
@@ -4575,7 +4576,7 @@ function _stepPlayer(mx, mz, moving) {
     else break;
   }
 }
-function _tryJump() { gJumpBuf = 7; }
+function _tryJump() { if (gRag) return; gJumpBuf = 7; }
 function _setupMob() { const base = document.getElementById('joy-base'); const knob = document.getElementById('joy-knob'); const jBtn = document.getElementById('jump-btn'); const R = 42; let jId = null; base.addEventListener('touchstart', e=>{e.preventDefault();jId=e.changedTouches[0].identifier;},{passive:false}); base.addEventListener('touchmove', e=>{ e.preventDefault(); let t=null; for(let i=0;i<e.changedTouches.length;i++) if(e.changedTouches[i].identifier===jId) t=e.changedTouches[i]; if(!t)return; const r=base.getBoundingClientRect(); let dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2); const dist=Math.hypot(dx,dy); if(dist>R){dx=dx/dist*R;dy=dy/dist*R;} knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; joyPos={x:dx/R,y:dy/R}; },{passive:false}); const rst=()=>{knob.style.transform='translate(-50%,-50%)';joyPos={x:0,y:0};jId=null;}; base.addEventListener('touchend',e=>{e.preventDefault();rst();},{passive:false}); jBtn.addEventListener('touchstart',e=>{e.preventDefault();_tryJump();},{passive:false}); const cv=gRenderer.domElement; cv.style.touchAction='none'; let ctId=null,ccx=0,ccy=0,pinchD=0;
   const pinchDist=e=>{const a=e.targetTouches[0],b=e.targetTouches[1];return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);};
   const anchorT=t=>{ctId=t.identifier;ccx=t.clientX;ccy=t.clientY;};
@@ -4672,7 +4673,7 @@ async function crixShare(kind, key) {
     try { document.getElementById('mo-game-page').classList.remove('open'); if (route) crixOpenRoute(route); else goTab0('home'); } finally { setTimeout(() => { window.__crixLock = false; }, 0); }
   });
 })();
-function exitGame() { try{CrixAudio.stopAll();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
+function exitGame() { try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
 const NET_RATE = 3;
 let remotePlayers = {};
@@ -6579,7 +6580,7 @@ async function joinUserGame(userId) {
 // ═══ Jugabilidad: comportamientos, vida, monedas, checkpoints, configuración ═══
 var stSettings = {}, stGuis = [];
 var gState = {health:100,maxHealth:100,coins:0,deaths:0,checkpoint:null,speedUntil:0,cool:{}};
-var gSettings = {speed:100,jump:100,gravity:100,health:true,maxHealth:100,hud:true,welcome:''};
+var gSettings = {speed:100,jump:100,gravity:100,health:true,maxHealth:100,hud:true,welcome:'',ragdoll:true,blood:false};
 var gSpawnPos = {x:0,y:3,z:0}, gBaseSpeed = 0.23, gTouchWatch = new Set(), _bannerTimer = null;
 const BEHAVIOR_LIST = [['none','Ninguno'],['kill','☠ Mata / daña (lava)'],['bounce','⬆ Trampolín'],['checkpoint','🚩 Checkpoint'],['speed','⚡ Acelerador'],['coin','🪙 Moneda'],['heal','💚 Cura'],['teleport','🌀 Teletransporte'],['win','🏆 Meta (ganaste)']];
 const BEHAVIOR_HINT = {kill:'Daño por toque (0 = muerte instantánea)',bounce:'Fuerza (2 = doble de un salto)',speed:'Multiplicador de velocidad',coin:'Valor de la moneda',heal:'Vida que cura'};
@@ -6598,7 +6599,7 @@ function setPartBehavior(value) {
   renderProps(selPart); refreshExplorer();
   if (value !== 'none') showToast('✅ Comportamiento: ' + (BEHAVIOR_LIST.find(o => o[0]===value)||[,''])[1] + ' (se prueba con ▶ Probar)');
 }
-function gameSettingsOf(m) { return Object.assign({speed:100,jump:100,gravity:100,health:true,maxHealth:100,hud:true,welcome:''}, (m && m.settings) || {}); }
+function gameSettingsOf(m) { return Object.assign({speed:100,jump:100,gravity:100,health:true,maxHealth:100,hud:true,welcome:'',ragdoll:true,blood:false}, (m && m.settings) || {}); }
 function resetGameState(m) {
   gSettings = gameSettingsOf(m);
   const clampN = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
@@ -6606,7 +6607,7 @@ function resetGameState(m) {
   gSettings.maxHealth = clampN(gSettings.maxHealth, 1, 10000, 100);
   gState = {health:gSettings.maxHealth,maxHealth:gSettings.maxHealth,coins:0,deaths:0,checkpoint:null,speedUntil:0,cool:{}};
   G_SPD = 0.23 * gSettings.speed / 100; gBaseSpeed = G_SPD; G_JUMP = 0.35 * gSettings.jump / 100; G_GRAV = 0.018 * gSettings.gravity / 100;
-  gTouchWatch = new Set(); updateGameHud();
+  gTouchWatch = new Set(); updateGameHud(); if (gSettings.ragdoll !== false) _ragPreload();
   if (gSettings.welcome) gameBanner(String(gSettings.welcome).slice(0,120), 3.5);
 }
 function updateGameHud() {
@@ -6632,13 +6633,169 @@ function damagePlayer(amount, source) {
 }
 function healPlayer(amount) { gState.health = Math.min(gState.maxHealth, gState.health + amount); updateGameHud(); }
 function teleportPlayer(x, y, z) { if (!gPlayer) return; gPlayer.position.set(x, y, z); gVelY = 0; gVelX = 0; gVelZ = 0; }
-function respawnPlayer(source) {
+function _respawnNow(source) {
   if (!gPlayer) return;
   gState.deaths++; gState.health = gState.maxHealth;
   const c = gState.checkpoint || gSpawnPos;
   teleportPlayer(c.x, c.y + 0.3, c.z);
   // Sin mensaje automático en el chat: si el creador quiere avisar que moriste, lo programa con game.on('died', () => gui.chat('...')).
   _damageFlash(); updateGameHud(); dispatchScriptEvent('died', []);
+}
+function respawnPlayer(source) {
+  if (!gPlayer) return;
+  if (gRag) { if (source === 'void') _ragFinish(); return; }   // ya está muriendo (el vacío corta el ragdoll)
+  const av = gPlayer.userData && gPlayer.userData.avatar;
+  if (gSettings.ragdoll === false || source === 'void' || !av) { _respawnNow(source); return; }
+  _ragStart(source, av);
+}
+
+// ═══ Muerte: ragdoll + grito + sangre (opcional) ═══
+// Al morir el muñeco cae, rebota y queda flojo ~2.6 s mientras suena el grito; después reaparece como siempre (y recién ahí se emite 'died').
+// Sangre: solo si el creador la activa en ⚙ Configuración del juego (por defecto apagada). Las manchas se desvanecen solas.
+const DEATH_SCREAM_URL = '/death-scream.mp3', RAG_SECONDS = 2.6, RAG_PIVOT_Y = 1.5;
+let gRag = null, _ragAudio = null;
+const RAG_BONES = ['Head', 'Spine', 'Chest', 'UpperArmL', 'UpperArmR', 'LowerArmL', 'LowerArmR', 'HandL', 'HandR', 'UpperLegL', 'UpperLegR', 'LowerLegL', 'LowerLegR', 'FootL', 'FootR'];
+const RAG_LATERAL = /^(UpperArm|LowerArm|Hand|UpperLeg|LowerLeg|Foot)[LR]$/;
+const RAG_LIMITS = { LowerArmL: [[-2.6, 0.05], null, null], LowerArmR: [[-2.6, 0.05], null, null], LowerLegL: [[0, 2.4], null, null], LowerLegR: [[0, 2.4], null, null], UpperArmL: [null, null, [-0.1, 2.6]], UpperArmR: [null, null, [-2.6, 0.1]], FootL: [[-0.7, 0.7], null, null], FootR: [[-0.7, 0.7], null, null], HandL: [[-0.8, 0.8], null, null], HandR: [[-0.8, 0.8], null, null] };
+function _ragPreload() { try { if (!_ragAudio && typeof Audio !== 'undefined') { _ragAudio = new Audio(DEATH_SCREAM_URL); _ragAudio.preload = 'auto'; } } catch (_) { /* sin audio */ } }
+function _playDeathScream() { try { const a = new Audio(DEATH_SCREAM_URL); a.volume = 0.9; gRag && (gRag.audio = a); a.play().catch(() => {}); } catch (_) { /* sin audio */ } }
+function _ragRand(a, b) { return a + Math.random() * (b - a); }
+function _ragLimpTarget(n, R) {   // postura floja en el suelo (espacio de poses: rx adelante/atrás, rz abrir)
+  const side = /L$/.test(n) ? 1 : -1, k = R.seed[n] || (R.seed[n] = [Math.random(), Math.random(), Math.random()]);
+  switch (n) {
+    case 'UpperArmL': case 'UpperArmR': return [-0.1 + k[0] * 0.7, 0, side * (0.9 + k[1] * 0.7)];
+    case 'LowerArmL': case 'LowerArmR': return [-0.2 - k[0] * 0.9, 0, 0];
+    case 'HandL': case 'HandR': return [k[0] * 0.5 - 0.25, 0, 0];
+    case 'UpperLegL': case 'UpperLegR': return [k[0] * 0.5 - 0.25, 0, side * (0.15 + k[1] * 0.35)];
+    case 'LowerLegL': case 'LowerLegR': return [0.1 + k[0] * 0.6, 0, 0];
+    case 'FootL': case 'FootR': return [k[0] * 0.5 - 0.25, 0, 0];
+    case 'Head': return [0.15, (k[0] - 0.5) * 0.9, (k[1] - 0.5) * 0.3];
+    case 'Spine': return [(k[0] - 0.5) * 0.2, 0, (k[1] - 0.5) * 0.2];
+    case 'Chest': return [(k[0] - 0.5) * 0.2, (k[1] - 0.5) * 0.2, 0];
+  }
+  return [0, 0, 0];
+}
+function _ragFlailTarget(n, t, R) {   // en el aire: brazos arriba y todo agitándose
+  const side = /L$/.test(n) ? 1 : -1, ph = (R.seed[n] || (R.seed[n] = [Math.random(), Math.random(), Math.random()]))[0] * 6.28, w = Math.sin(t * 17 + ph);
+  switch (n) {
+    case 'UpperArmL': case 'UpperArmR': return [-2.2 + w * 0.5, 0, side * (0.8 + Math.sin(t * 13 + ph) * 0.3)];
+    case 'LowerArmL': case 'LowerArmR': return [-0.5 + w * 0.4, 0, 0];
+    case 'UpperLegL': case 'UpperLegR': return [w * 0.8, 0, side * 0.25];
+    case 'LowerLegL': case 'LowerLegR': return [0.6 + Math.abs(w) * 0.7, 0, 0];
+    case 'Head': return [-0.35, w * 0.25, 0];
+  }
+  return [0, 0, 0];
+}
+function _ragStart(source, av) {
+  const root = av.root, rp = root.position.clone();
+  const pivot = new THREE.Group(); pivot.rotation.order = 'YXZ'; pivot.position.set(0, RAG_PIVOT_Y, 0);
+  gPlayer.add(pivot); pivot.add(root); root.position.set(rp.x, rp.y - RAG_PIVOT_Y, rp.z);
+  const fwd = gVelX * Math.sin(gPlayer.rotation.y) + gVelZ * Math.cos(gPlayer.rotation.y), speed = Math.hypot(gVelX, gVelZ) * 60;
+  const dir = Math.abs(fwd) > 0.01 ? (fwd > 0 ? 1 : -1) : (Math.random() < 0.5 ? 1 : -1);
+  gRag = { av, root, rp, pivot, dir, a: 0, w: 1.4 + Math.min(2.2, speed * 0.25), rest: false, landed: false, t: 0, dur: RAG_SECONDS, roll: _ragRand(-0.25, 0.25), spin: _ragRand(-1, 1) * (0.6 + Math.min(4, speed * 0.4)),
+    seed: {}, limbs: {}, blood: gSettings.blood === true, bleedT: 0, source, audio: null };
+  for (const n of RAG_BONES) gRag.limbs[n] = { a: [0, 0, 0], w: [_ragRand(-2, 2), _ragRand(-2, 2), _ragRand(-2, 2)] };
+  gState.health = 0; updateGameHud(); _damageFlash();
+  if (gOnGround) { gVelY = Math.max(gVelY, 0.15); gOnGround = false; }
+  try { CrixAvatar.setFace(av, 'dead'); } catch (_) {}
+  _playDeathScream();
+  if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('avatar_self', { cmds: [{ op: 'anim', name: 'dead' }] });   // los demás te ven tirado
+  if (gRag.blood) _bloodBurst(_ragCenter(), 26, 1);
+}
+function _ragCenter() { const v = new THREE.Vector3(); gRag.pivot.getWorldPosition(v); return v; }
+function _ragImpact(speed) {
+  const R = gRag, k = Math.min(1, speed / 2.5);
+  for (const n of RAG_BONES) { const L = R.limbs[n]; for (let i = 0; i < 3; i++) L.w[i] += _ragRand(-1, 1) * 7 * k; }
+  if (R.blood) _bloodBurst(_ragCenter(), Math.round(8 + 16 * k), 0.8 + k * 0.5);
+  if (R.blood && !R.pool) R.pool = _bloodPool();
+}
+function _ragUpdate(dt) {
+  const R = gRag; if (!R || !gPlayer) return; R.t += dt;
+  const half = Math.PI / 2 - 0.04;
+  if (!R.rest) {
+    R.w += (9 + 14 * Math.sin(Math.max(0, R.a))) * dt; R.a += R.w * dt;
+    if (R.a >= half) { const sp = R.w; R.a = half; R.landed = true; _ragImpact(Math.abs(sp)); if (sp > 1.0) R.w = -sp * 0.3; else { R.w = 0; R.rest = true; } }
+    else if (R.a < 0) { R.a = 0; R.w = Math.abs(R.w) * 0.3; }
+  }
+  R.spin *= Math.exp(-2.2 * dt); const lie = Math.min(1, R.a / half);
+  R.pivot.rotation.x = R.dir * R.a; R.pivot.rotation.z = R.roll * lie; R.pivot.rotation.y += R.spin * dt;
+  R.pivot.position.y = RAG_PIVOT_Y * Math.cos(R.a) + 0.5 * Math.sin(R.a) + 0.02;   // el punto más bajo apoya en el suelo
+  // articulaciones: resortes amortiguados hacia la postura (en el aire agitan, en el suelo quedan flojas) + los golpes les dan impulso
+  const flail = !R.landed;
+  for (const n of RAG_BONES) {
+    const L = R.limbs[n], tg = flail ? _ragFlailTarget(n, R.t, R) : _ragLimpTarget(n, R), kk = flail ? 30 : 60, cc = flail ? 5 : 6.5, lim = RAG_LIMITS[n];
+    for (let i = 0; i < 3; i++) {
+      L.w[i] += (kk * (tg[i] - L.a[i]) - cc * L.w[i]) * dt; L.a[i] += L.w[i] * dt;
+      const lm = lim && lim[i]; if (lm) { if (L.a[i] < lm[0]) { L.a[i] = lm[0]; L.w[i] = Math.abs(L.w[i]) * 0.2; } else if (L.a[i] > lm[1]) { L.a[i] = lm[1]; L.w[i] = -Math.abs(L.w[i]) * 0.2; } }
+    }
+    const z = RAG_LATERAL.test(n) ? -L.a[2] : L.a[2], D = 180 / Math.PI;   // los huesos laterales invierten z entre «pose» y «override»
+    CrixAvatar.setBone(R.av, n, { rot: [L.a[0] * D, L.a[1] * D, z * D], weight: 1, mode: 'set' });
+  }
+  if (R.blood && R.landed && R.t < 1.6) { R.bleedT -= dt; if (R.bleedT <= 0) { R.bleedT = 0.09; _bloodBurst(_ragCenter(), 2, 0.35); } }
+  if (R.pool) { R.pool.grow = Math.min(1, (R.pool.grow || 0) + dt / 2.2); const r = 0.25 + 1.5 * R.pool.grow; R.pool.mesh.scale.set(r, r * R.pool.squash, 1); const c = gPlayer.position; R.pool.mesh.position.set(c.x + R.pool.ox, R.pool.y, c.z + R.pool.oz); }
+  if (R.t >= R.dur) _ragFinish();
+}
+function _ragFinish() {
+  const R = gRag; if (!R) return; gRag = null;
+  try { for (const n of RAG_BONES) CrixAvatar.resetBone(R.av, n); CrixAvatar.setFace(R.av, null); } catch (_) {}
+  if (gPlayer && R.root.parent === R.pivot) { gPlayer.add(R.root); R.root.position.copy(R.rp); gPlayer.remove(R.pivot); }
+  if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('avatar_self', { cmds: [{ op: 'stop' }] });
+  if (R.pool) R.pool.mesh.position.y -= 0;   // la mancha grande se queda y se desvanece con las demás
+  _respawnNow(R.source);
+}
+function _ragAbort() { if (gRag && gRag.audio) { try { gRag.audio.pause(); } catch (_) {} } gRag = null; _bloodClear(); }
+
+// ── Sangre (opcional): gotas con gravedad que al caer en una superficie dejan una mancha que se desvanece ──
+const gBlood = { drops: [], stains: [], geo: null, dropMat: null, stainGeo: null };
+const BLOOD_MAX_STAINS = 140, BLOOD_GRAVITY = 60;
+function _bloodInit() { if (gBlood.geo) return; gBlood.geo = new THREE.SphereGeometry(0.09, 6, 5); gBlood.dropMat = new THREE.MeshBasicMaterial({ color: 0xa30b14 }); gBlood.stainGeo = new THREE.CircleGeometry(1, 18); }
+function _bloodGroundY(x, z, y) {   // superficie horizontal más alta bajo la gota (cajas de colisión del mapa)
+  let best = -Infinity;
+  for (const col of gColliders) { const b = col.box; if (b && x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z && b.max.y <= y + 0.4 && b.max.y > best) best = b.max.y; }
+  return best;
+}
+function _bloodStain(x, y, z, r, life, opacity) {
+  _bloodInit(); if (!gScene) return null;
+  const mat = new THREE.MeshBasicMaterial({ color: 0x8a0a12, transparent: true, opacity: opacity || 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const m = new THREE.Mesh(gBlood.stainGeo, mat); m.rotation.x = -Math.PI / 2; m.rotation.z = Math.random() * 6.28; m.position.set(x, y + 0.02, z);
+  const sq = _ragRand(0.65, 1); m.scale.set(r, r * sq, 1); m.renderOrder = 2; gScene.add(m);
+  const st = { mesh: m, mat, age: 0, life, op: mat.opacity }; gBlood.stains.push(st);
+  while (gBlood.stains.length > BLOOD_MAX_STAINS) _bloodRemoveStain(gBlood.stains[0]);
+  return st;
+}
+function _bloodPool() {   // charco grande bajo el cuerpo: crece mientras está tirado
+  const c = gPlayer.position, st = _bloodStain(c.x, c.y, c.z, 0.25, 15, 0.8); if (!st) return null;
+  st.mesh.rotation.z = 0; return { mesh: st.mesh, y: c.y + 0.03, squash: _ragRand(0.7, 1), ox: _ragRand(-0.15, 0.15), oz: _ragRand(-0.15, 0.15), grow: 0 };
+}
+function _bloodRemoveStain(st) { const i = gBlood.stains.indexOf(st); if (i >= 0) gBlood.stains.splice(i, 1); if (st.mesh.parent) st.mesh.parent.remove(st.mesh); st.mat.dispose(); }
+function _bloodBurst(origin, n, power) {
+  _bloodInit(); if (!gScene) return;
+  for (let i = 0; i < n && gBlood.drops.length < 160; i++) {
+    const m = new THREE.Mesh(gBlood.geo, gBlood.dropMat); m.position.copy(origin); const sc = _ragRand(0.6, 1.4); m.scale.set(sc, sc, sc); gScene.add(m);
+    const sp = _ragRand(3, 11) * power, ang = Math.random() * 6.28;
+    gBlood.drops.push({ mesh: m, vx: Math.cos(ang) * sp, vy: _ragRand(5, 15) * power, vz: Math.sin(ang) * sp, size: sc });
+  }
+}
+function _bloodUpdate(dt) {
+  if (!gBlood.drops.length && !gBlood.stains.length) return;
+  for (let i = gBlood.drops.length - 1; i >= 0; i--) {
+    const d = gBlood.drops[i], p = d.mesh.position, prevY = p.y;
+    d.vy -= BLOOD_GRAVITY * dt; p.x += d.vx * dt; p.y += d.vy * dt; p.z += d.vz * dt;
+    let done = false;
+    if (d.vy < 0) { const gy = _bloodGroundY(p.x, p.z, prevY); if (gy > -Infinity && p.y <= gy + 0.02) { _bloodStain(p.x, gy, p.z, 0.14 + d.size * 0.2 * Math.random() + Math.random() * 0.15, _ragRand(9, 14)); done = true; } }
+    if (!done && gPlayer && p.y < gPlayer.position.y - 40) done = true;
+    if (done) { gScene.remove(d.mesh); gBlood.drops.splice(i, 1); }
+  }
+  for (let i = gBlood.stains.length - 1; i >= 0; i--) {
+    const s = gBlood.stains[i]; s.age += dt; const k = s.age / s.life;
+    if (k >= 1) { _bloodRemoveStain(s); continue; }
+    const f = k < 0.3 ? 1 : 1 - (k - 0.3) / 0.7;   // se mantiene un rato y después se desvanece
+    s.mat.opacity = s.op * f * f;
+  }
+}
+function _bloodClear() {
+  for (const d of gBlood.drops) { if (d.mesh.parent) d.mesh.parent.remove(d.mesh); } gBlood.drops.length = 0;
+  for (const s of gBlood.stains.slice()) _bloodRemoveStain(s);
 }
 function _cool(key, ms, now) { if ((gState.cool[key]||0) > now) return false; gState.cool[key] = now + ms; return true; }
 function _stepGameplay() {
@@ -6748,13 +6905,15 @@ window.addEventListener('keydown', e => {
   dispatchScriptEvent('key:' + k, []);
 });
 function openGameSettings() {
-  const s = {speed:100,jump:100,gravity:100,health:true,maxHealth:100,hud:true,welcome:'',maxPlayers:50, ...stSettings};
+  const s = {speed:100,jump:100,gravity:100,health:true,maxHealth:100,hud:true,welcome:'',maxPlayers:50,ragdoll:true,blood:false, ...stSettings};
   const num = (key, label, min, max, step) => '<div class="prop-row"><div class="prop-lbl">'+label+'</div><input class="prop-inp" type="number" min="'+min+'" max="'+max+'" step="'+step+'" value="'+s[key]+'" onchange="stSettings.'+key+'=Number(this.value)"></div>';
   const tgl = (key, label) => '<div class="prop-row"><div class="tgl-row" onclick="stSettings.'+key+'=!(stSettings.'+key+'!==false);this.querySelector(\'.tgl\').classList.toggle(\'on\',stSettings.'+key+')"><div class="tgl '+(s[key]!==false?'on':'')+'"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">'+label+'</span></div></div>';
+  const tglOff = (key, label) => '<div class="prop-row"><div class="tgl-row" onclick="stSettings.'+key+'=!stSettings.'+key+';this.querySelector(\'.tgl\').classList.toggle(\'on\',!!stSettings.'+key+')"><div class="tgl '+(s[key]===true?'on':'')+'"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">'+label+'</span></div></div>';   // apagado por defecto
   document.getElementById('props-body').innerHTML =
     '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--yellow);background:var(--bg3);border-bottom:1px solid var(--border)">CONFIGURACIÓN DEL JUEGO</div>'+
     num('speed','Velocidad al caminar (%)',20,400,10)+num('jump','Fuerza de salto (%)',20,400,10)+num('gravity','Gravedad (%)',10,400,10)+
     tgl('health','Sistema de vida')+num('maxHealth','Vida máxima',1,1000000000,10)+tgl('hud','Mostrar vida y monedas')+
+    tgl('ragdoll','Ragdoll y grito al morir')+tglOff('blood','Sangre al morir (manchas que se desvanecen)')+
     '<div class="prop-row"><div class="prop-lbl">Mensaje de bienvenida</div><input class="prop-inp" maxlength="120" value="'+esc(s.welcome||'')+'" onchange="stSettings.welcome=this.value"></div>'+
     num('maxPlayers','Jugadores máximos por servidor',1,100000,1)+
     '<div style="padding:10px 12px;font-size:10px;color:var(--text3);line-height:1.6">Se guarda con 💾 Guardar. Seleccioná una pieza para darle un <b>comportamiento</b> (lava, trampolín, checkpoint, monedas, meta…).</div>';
@@ -8891,6 +9050,8 @@ function aiSetSettings(o) {
   const c = {}, R = { speed: [20, 400], jump: [20, 400], gravity: [10, 400], maxHealth: [1, 10000], maxPlayers: [1, 200] };
   for (const k in R) if (o[k] !== undefined) c[k] = aiNum(o[k], undefined, R[k][0], R[k][1]);
   ['health', 'hud'].forEach(k => { if (o[k] !== undefined) c[k] = aiBool(o[k], true); });
+  if (o.ragdoll !== undefined) c.ragdoll = aiBool(o.ragdoll, true);
+  if (o.blood !== undefined) c.blood = aiBool(o.blood, false);
   if (o.welcome !== undefined) c.welcome = String(o.welcome).slice(0, 120);
   Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; });
   Object.assign(stSettings, c); return Object.keys(c);
@@ -9237,6 +9398,7 @@ function openSoundProps(id) {
   const num = (k, label, min, max, step) => '<div class="prop-row"><div class="prop-lbl">' + label + '</div><input class="prop-inp" type="number" min="' + min + '" max="' + max + '" step="' + step + '" value="' + (s[k] ?? '') + '" onchange="stSoundUpdate(\'' + A + '\',\'' + k + '\',this.value)"></div>';
   const tgl = (k, label) => '<div class="prop-row"><div class="tgl-row" onclick="stSoundUpdate(\'' + A + '\',\'' + k + '\',!' + (s[k] ? 'true' : 'false') + ');this.querySelector(\'.tgl\').classList.toggle(\'on\')"><div class="tgl ' + (s[k] ? 'on' : '') + '"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">' + label + '</span></div></div>';
   const opts = Object.keys(assets).map(k => '<option value="' + esc(k) + '"' + (k === s.soundId ? ' selected' : '') + '>' + esc(assets[k].name) + ' (' + fmtBytes(assets[k].size) + ')</option>').join('');
+  const tglOff = (key, label) => '<div class="prop-row"><div class="tgl-row" onclick="stSettings.'+key+'=!stSettings.'+key+';this.querySelector(\'.tgl\').classList.toggle(\'on\',!!stSettings.'+key+')"><div class="tgl '+(s[key]===true?'on':'')+'"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">'+label+'</span></div></div>';   // apagado por defecto
   document.getElementById('props-body').innerHTML =
     '<div style="padding:5px 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--yellow);background:var(--bg3);border-bottom:1px solid var(--border)">SOUND</div>' +
     '<div class="prop-row"><div class="prop-lbl">Nombre (se usa en scripts: game.sound.play("nombre"))</div><input class="prop-inp" maxlength="60" value="' + esc(s.name) + '" onchange="stSoundUpdate(\'' + A + '\',\'name\',this.value)"></div>' +
