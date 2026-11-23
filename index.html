@@ -4406,8 +4406,11 @@ function applyNetworkPartUpsert(part,snap) {
   if(!existing){if(part.sx===undefined)return;_createGameScriptPart(id,part);return;}
   const rotKeys=existing.data.anchored===false?[]:['rx','ry','rz'];const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
   if(visualChanged){existing.netTarget=null;_updateGameScriptPart(id,part);return;}
+  const prevD=existing.data,prevAt=existing.netAt||0,nowT=performance.now();
   existing.data=normalizeGamePart(id,{...existing.data,...part});
   if(existing.data.anchored)existing.velocity.set(0,0,0);
+  if(prevAt&&nowT-prevAt<250&&nowT-prevAt>5){const dtp=(nowT-prevAt)/1000;existing.netVel={x:(existing.data.x-prevD.x)/dtp,y:(existing.data.y-prevD.y)/dtp,z:(existing.data.z-prevD.z)/dtp};}else existing.netVel=null;
+  existing.netAt=nowT;
   const d=existing.data,m=existing.mesh,far=Math.hypot(d.x-m.position.x,d.y-m.position.y,d.z-m.position.z)>12;
   if(snap||far||!existing.mesh.visible){
     // Primera vez / teletransporte / snapshot: colocar directamente.
@@ -4416,15 +4419,25 @@ function applyNetworkPartUpsert(part,snap) {
     _syncRuntimeCollider(existing);
   }else{
     // Movimiento normal: el servidor manda ~20 paquetes/s; el cliente interpola a 60/s (ver _stepNetInterp).
-    existing.netTarget={x:d.x,y:d.y,z:d.z,rx:d.rx||0,ry:d.ry||0,rz:d.rz||0};
+    if(existing.predAt&&performance.now()-existing.predAt<300)_reconcilePredicted(existing,d);
+    else existing.netTarget={x:d.x,y:d.y,z:d.z,rx:d.rx||0,ry:d.ry||0,rz:d.rz||0};
   }
+}
+// Pieza que estoy empujando y simulo en local: el paquete del servidor llega con retraso, así que se tolera un margen
+// (zona muerta) y solo se corrige el exceso; si la diferencia es grande, se coloca donde dice el servidor.
+function _reconcilePredicted(o,d){
+  const m=o.mesh,ex=d.x-m.position.x,ey=d.y-m.position.y,ez=d.z-m.position.z,err=Math.hypot(ex,ey,ez);
+  if(err>2.5){m.position.set(d.x,d.y,d.z);m.rotation.set(d.rx||0,d.ry||0,d.rz||0);if(_localRoom&&window.CrixWorldPhysics)CrixWorldPhysics.resetBody(_localRoom,String(o.id));_syncRuntimeCollider(o);return;}
+  if(err<=0.8)return;
+  const g=0.1*(err-0.8)/err;m.position.x+=ex*g;m.position.y+=ey*g;m.position.z+=ez*g;_syncRuntimeCollider(o);
 }
 // Acerca suavemente cada pieza sincronizada a la última posición que mandó el servidor.
 function _stepNetInterp() {
   for(const object of runtimeObjects.values()){
     const t=object.netTarget,m=object.mesh;if(!t||!m)continue;
-    const k=0.4,p=m.position;
-    p.x+=(t.x-p.x)*k;p.y+=(t.y-p.y)*k;p.z+=(t.z-p.z)*k;
+    const k=0.4,p=m.position,v=object.netVel,el=v&&object.netAt?(performance.now()-object.netAt)/1000:0,age=el<0.08?el:Math.max(0,0.16-el);
+    const tx=t.x+(v?v.x*age:0),ty=t.y+(v?v.y*age:0),tz=t.z+(v?v.z*age:0);
+    p.x+=(tx-p.x)*k;p.y+=(ty-p.y)*k;p.z+=(tz-p.z)*k;
     // Rotación por cuaternión (slerp): las piezas que vuelcan y ruedan con la física realista no deben pasar por ángulos de Euler.
     if(!t.q){t.q=new THREE.Quaternion().setFromEuler(new THREE.Euler(t.rx,t.ry,t.rz,'XYZ'));}
     m.quaternion.slerp(t.q,k);
@@ -4512,19 +4525,34 @@ function _loadMap(m) {
 let _localRoom = null, _localPrev = null;
 // Física realista (Rapier) en la prueba local: todas las piezas sueltas, no solo las esferas. Se descarga al primer uso.
 const _clientRigidOn = () => !!(window.CrixRigid && CrixRigid.isReady() && window.gPhysicsMode !== 'classic');
-function _stepLocalSpheres() {
+// predict=true: el servidor manda la física, pero las piezas que el jugador local está tocando/empujando se simulan
+// también aquí (mismo módulo que el servidor) para que el empuje se vea al instante; luego se reconcilia con el servidor.
+function _stepLocalSpheres(predict) {
   const WP = window.CrixWorldPhysics; if (!WP) return;
   const rg = _clientRigidOn();
+  let nearSet = null;
+  if (predict) {
+    if (!gPlayer) return;
+    const nowP = performance.now(), px = gPlayer.position.x, py = gPlayer.position.y, pz = gPlayer.position.z;
+    nearSet = new Set();
+    for (const o of runtimeObjects.values()) {
+      const d = o.data;
+      if (d.anchored !== false || !o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC || d.canCollide === false || (window.gJointDriven && gJointDriven.has(String(o.id)))) continue;
+      const reach = Math.max(d.sx || 1, d.sz || 1) / 2 + 1.6;
+      if ((o.predAt && nowP - o.predAt < 400) || (Math.hypot(o.mesh.position.x - px, o.mesh.position.z - pz) < reach && Math.abs(o.mesh.position.y - py) < Math.max(d.sy || 1, 3) + 1.5)) nearSet.add(String(o.id));
+    }
+    if (!nearSet.size) { _localRoom = null; _localPrev = null; return; }
+  }
   let any = false, anyLoose = false;
   for (const o of runtimeObjects.values()) { if (!(o.data.anchored === false && o.mesh && o.mesh.parent && !o.collected)) continue; anyLoose = true; if (o.data.type === 'Sphere' || rg) { any = true; break; } }
   if (anyLoose && !rg && window.CrixRigid && window.gPhysicsMode !== 'classic') CrixRigid.load();   // descarga Rapier; mientras tanto rige la física clásica
-  if (!any) { _localRoom = null; return; }
+  if (!predict && !any) { _localRoom = null; return; }
   if (!_localRoom) _localRoom = { worldParts: {}, physicsVelocities: {}, phys: null };
   _localRoom.physicsMode = rg ? 'realistic' : 'classic';
   const room = _localRoom, parts = room.worldParts, seen = new Set(), loose = [];
   for (const o of runtimeObjects.values()) {
     const d = o.data; if (!o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC) continue;
-    const free = (d.type === 'Sphere' || rg) && d.anchored === false && !(window.gJointDriven && gJointDriven.has(String(o.id))), id = String(o.id), m = o.mesh;
+    const id = String(o.id), m = o.mesh, free = predict ? nearSet.has(id) : ((d.type === 'Sphere' || rg) && d.anchored === false && !(window.gJointDriven && gJointDriven.has(id)));
     const p = parts[id] || (parts[id] = { id, name: d.name });
     seen.add(id);
     p.type = d.type; p.sx = d.sx; p.sy = d.sy; p.sz = d.sz; p.material = d.material; p.canCollide = d.canCollide !== false; p.anchored = !free;
@@ -4548,11 +4576,12 @@ function _stepLocalSpheres() {
     o.mesh.position.set(p.x, p.y, p.z); o.mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
     Object.assign(o.data, { x: p.x, y: p.y, z: p.z, rx: p.rx || 0, ry: p.ry || 0, rz: p.rz || 0 });
     o._pp = { x: p.x, y: p.y, z: p.z };
+    if (predict) { o.predAt = performance.now(); o.netTarget = null; o.netVel = null; }
     _syncRuntimeCollider(o);
   }
   for (const o of loose) if (!o._pp) o._pp = { x: o.mesh.position.x, y: o.mesh.position.y, z: o.mesh.position.z };
 }
-function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gameStep();}catch(err){if(!window._cxStepErr){window._cxStepErr=1;appendOutput('[Uniones] '+err.message,'err');}}const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics,localRigid=localSpheres&&_clientRigidOn();for(const object of runtimeObjects.values()){if(localSpheres&&(object.data.type==='Sphere'||(localRigid&&object.data.anchored===false)))continue;if(object.data.anchored||(window.gJointDriven&&gJointDriven.has(String(object.id)))||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
+function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gameStep();}catch(err){if(!window._cxStepErr){window._cxStepErr=1;appendOutput('[Uniones] '+err.message,'err');}}const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();else _stepLocalSpheres(true);const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics,localRigid=localSpheres&&_clientRigidOn();for(const object of runtimeObjects.values()){if(localSpheres&&(object.data.type==='Sphere'||(localRigid&&object.data.anchored===false)))continue;if(object.data.anchored||(window.gJointDriven&&gJointDriven.has(String(object.id)))||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
 // Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
 // así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
 // (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
@@ -4770,7 +4799,7 @@ async function crixShare(kind, key) {
 })();
 function exitGame() { try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;const backBtn=document.getElementById('g-back-btn');if(backBtn)backBtn.textContent='← Salir';goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
-const NET_RATE = 3;
+const NET_RATE = 2;
 let remotePlayers = {};
 function netConnect() {
   const serverUrl=window.location.origin;
@@ -4820,7 +4849,7 @@ function netConnect() {
   socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
   socket.on('join_ack',({playerCount})=>{updateNetPill('🟢',`${playerCount} jugador${playerCount!==1?'es':''}`);addGMsg(`✅ Conectado (${playerCount} en sala)`,'sys');});
   socket.on('player_joined',playerData=>{spawnRemote(playerData);addGMsg(`→ ${playerData.username} entró`,'sys');updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
-  socket.on('player_moved',({socketId,x,y,z,ry,anim,moving,og})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.targetRY=ry;rp.anim=anim;rp.moving=moving;rp.og=og!==false;});
+  socket.on('player_moved',({socketId,x,y,z,ry,anim,moving,og,vx,vy,vz})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.vel=rp.vel||new THREE.Vector3();rp.vel.set(vx||0,vy||0,vz||0);rp.netAt=performance.now();rp.targetRY=ry;rp.anim=anim;rp.moving=moving;rp.og=og!==false;});
   socket.on('sound_cmd',cmd=>{try{CrixAudio.command(cmd);}catch(_){}});
   socket.on('avatar_cmd',({target,diff}={})=>{if(target&&diff)applyAvatarDiff(target,diff);});
   socket.on('player_died',({socketId}={})=>{if(socketId&&gSettings.blood===true)_remoteBlood(socketId);});
@@ -4879,10 +4908,15 @@ function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[player
 function _buildAvatar(color) { return _buildHumanoid(color).group; }
 function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); if (window.CrixGFX) CrixGFX.tex(tex); const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
 function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); if (rp.av) CrixAvatar.dispose(rp.av); }); remotePlayers = {}; }
+const _predT = new THREE.Vector3();
 function netUpdateRemotes() { const LERP = 0.18, now = performance.now(), dt = Math.min(0.1, Math.max(0.001, (now - (netUpdateRemotes._t || now)) / 1000)); netUpdateRemotes._t = now;
   for (const rp of Object.values(remotePlayers)) {
     const px = rp.group.position.x, py = rp.group.position.y, pz = rp.group.position.z;
-    rp.group.position.lerp(rp.targetPos, LERP); let diff = rp.targetRY - rp.group.rotation.y; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; rp.group.rotation.y += diff * LERP;
+    const age = rp.netAt ? Math.min(0.15, (now - rp.netAt) / 1000) : 0, vel = rp.vel;
+    if (vel && age > 0) { _predT.copy(rp.targetPos).addScaledVector(vel, age); if (rp.og !== false) _predT.y = rp.targetPos.y; } else _predT.copy(rp.targetPos);
+    const dist = rp.group.position.distanceTo(_predT);
+    if (dist > 8) rp.group.position.copy(_predT); else rp.group.position.lerp(_predT, 1 - Math.exp(-dt * 22));
+    let diff = rp.targetRY - rp.group.rotation.y; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; rp.group.rotation.y += diff * (1 - Math.exp(-dt * 18));
     // La velocidad se estima con lo que realmente se movió el avatar (studs/s; la vertical en studs por tick de 60 Hz, como gVelY).
     const k = 1 - Math.exp(-dt * 12), sp = Math.hypot(rp.group.position.x - px, rp.group.position.z - pz) / dt, vy = (rp.group.position.y - py) / dt / 60;
     rp.spd += (sp - rp.spd) * k; rp.vy += (vy - rp.vy) * k;

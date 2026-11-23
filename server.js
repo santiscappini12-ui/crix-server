@@ -599,7 +599,7 @@ function stepServerWorldPhysics() {
     }
   }
 }
-setInterval(stepServerWorldPhysics,50);
+setInterval(stepServerWorldPhysics,33);   // ~30 Hz (antes 20 Hz): menos intervalo entre paquetes = menos que predecir
 
 // Presencia visible para todos: qué juego e instancia está jugando cada persona.
 // Presencia de una persona: la de esta instancia o, si está conectada a otra, la que esa instancia anunció.
@@ -3028,7 +3028,8 @@ G('player_move', (socket, data) => {
     p.ry=bounded(data?.ry,p.ry,-1000,1000);p.anim=bounded(data?.anim,p.anim,-10,10);p.moving=!!data?.moving;p.onGround=!!data?.onGround;
     sendRoomPlayersToRunner(room);
     socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_moved',
-      { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving, og:p.onGround });
+      { socketId:socket.id, x:p.x,y:p.y,z:p.z, ry:p.ry, anim:p.anim, moving:p.moving, og:p.onGround,
+        vx:Math.round((playerVelocity.get(p)?.x||0)*100)/100, vy:Math.round((playerVelocity.get(p)?.y||0)*100)/100, vz:Math.round((playerVelocity.get(p)?.z||0)*100)/100 });
 });
 
 G('avatar_self', (socket, data) => {
