@@ -423,10 +423,29 @@ function pairKey(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
 // Avanza la física de la sala hasta `now` y calcula los contactos.
 // players: [{ userId, username, x, y, z, vx, vy, vz }]
 // Devuelve { changed: [{id,x,y,z}], events: [...] }.
+function hasDynamicParts(room) {
+  for (const id in room.worldParts) {
+    const part = room.worldParts[id];
+    if (part.type === 'Spawn' || part.isNPC || part.anchored || part.jointDriven) continue;
+    if (part.y > VOID_Y) return true;
+  }
+  return false;
+}
+
 function stepRoom(room, now, players) {
   const ps = stateOf(room);
   const result = { changed: [], events: [] };
   if (!room.worldParts) return result;
+
+  // Sin piezas sueltas y sin piezas observadas por scripts no hay nada que simular ni contactos que calcular:
+  // se evita recorrer todo el mapa en cada tick (cajas, movimiento, contactos). Al aparecer una pieza suelta todo se recalcula normal.
+  if (!(room.watched && room.watched.size) && !hasDynamicParts(room)) {
+    ps.lastAt = now;
+    if (ps.prev.size) ps.prev = new Map();
+    if (ps.contacts.size) ps.contacts = new Map();
+    ps.landing.clear();
+    return result;
+  }
 
   const dtMs = ps.lastAt ? Math.min(250, Math.max(0, now - ps.lastAt)) : 50;
   ps.lastAt = now;
@@ -437,11 +456,23 @@ function stepRoom(room, now, players) {
   const dt = Math.max(dtMs / 1000, 1e-3);
 
   const entries = [], byId = new Map(), asm = assemblyMap(room, ps);
+  if (!ps.boxes) ps.boxes = new Map();
+  const boxCache = ps.boxes;
   for (const part of Object.values(room.worldParts)) {
     if (part.type === 'Spawn' || part.isNPC) continue;
-    const entry = { part, box: partBox(part), grp: asm ? asm.get(String(part.id)) : undefined, dyn: !part.anchored && !part.jointDriven, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
+    const dyn = !part.anchored && !part.jointDriven;
+    // Las piezas fijas no cambian de caja entre ticks: se reutiliza mientras no cambien su forma ni su posición (nadie modifica estas cajas).
+    let box;
+    if (dyn) box = partBox(part);
+    else {
+      const sh = shapeOf(part), c = boxCache.get(part.id);
+      if (c && c.sh === sh && c.x === part.x && c.y === part.y && c.z === part.z) box = c.box;
+      else { box = partBox(part); boxCache.set(part.id, { sh, x: part.x, y: part.y, z: part.z, box }); }
+    }
+    const entry = { part, box, grp: asm ? asm.get(String(part.id)) : undefined, dyn, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
     entries.push(entry); byId.set(part.id, entry);
   }
+  if (boxCache.size > entries.length + 64) for (const id of boxCache.keys()) if (!byId.has(id)) boxCache.delete(id);
   let dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
   const landings = [];
 
@@ -518,13 +549,12 @@ function stepRoom(room, now, players) {
   }
 
   // ── Movimiento desde el tick anterior (física o scripts) ──
-  const moved = new Set(), velocity = new Map(), swept = new Map(), nextPrev = new Map();
+  const moved = new Set(), velocity = new Map(), swept = new Map(), prevMap = ps.prev;
   for (const entry of entries) {
-    const part = entry.part, before = ps.prev.get(part.id);
-    nextPrev.set(part.id, { x: part.x, y: part.y, z: part.z, box: entry.box });
+    const part = entry.part, before = prevMap.get(part.id);
     // Una pieza recién vista no cuenta como "movida": lo que ya se solapa al crearla (una zona apoyada en el piso)
     // no es un toque; los contactos empiezan cuando algo se mueve.
-    if (!before) continue;
+    if (!before) { prevMap.set(part.id, { x: part.x, y: part.y, z: part.z, box: entry.box }); continue; }
     if (before.x !== part.x || before.y !== part.y || before.z !== part.z) {
       moved.add(part.id);
       const dx = part.x - before.x, dy = part.y - before.y, dz = part.z - before.z;
@@ -533,8 +563,9 @@ function stepRoom(room, now, players) {
         swept.set(part.id, unionBox(before.box, entry.box)); // caja barrida: no se "salta" piezas finas entre ticks
       } else velocity.set(part.id, { x: 0, y: 0, z: 0 }); // teletransporte
     }
+    before.x = part.x; before.y = part.y; before.z = part.z; before.box = entry.box;   // se actualiza en el sitio (antes se creaba un objeto por pieza y tick)
   }
-  ps.prev = nextPrev;
+  if (prevMap.size !== entries.length) for (const id of prevMap.keys()) if (!byId.has(id)) prevMap.delete(id);
 
   // ── Contactos de las piezas observadas por algún script ──
   const watchedEntries = (room.watched && room.watched.size) ? entries.filter(entry => isWatched(room, entry.part)) : [];
@@ -543,24 +574,32 @@ function stepRoom(room, now, players) {
   const playerKey = player => 'p:' + (player.userId || player.socketId || player.username);
   const playerList = Array.isArray(players) ? players : [];
 
+  const movedEntries = moved.size ? entries.filter(entry => moved.has(entry.part.id)) : [];
   for (const we of watchedEntries) {
-    const wbox = boxFor(we);
+    const wbox = boxFor(we), weMoved = moved.has(we.part.id);
     for (const player of playerList) {
       const pbox = playerBox(player);
       if (!intersects(wbox, pbox, PART_PAD)) continue;
       nowContacts.set(pairKey(we.part.id, playerKey(player)), { part: we.part.id, player: playerKey(player), meta: { userId: String(player.userId || ''), username: String(player.username || 'Jugador') } });
     }
-    for (const other of entries) {
+    // Un contacto entre dos piezas solo puede empezar o seguir si alguna de las dos se movió en este tick:
+    // si la observada se movió se mira contra todas; si no, solo contra las que sí se movieron (antes se miraban todas siempre).
+    for (const other of (weMoved ? entries : movedEntries)) {
       if (other === we) continue;
-      const key = pairKey(we.part.id, other.part.id);
-      if (!moved.has(we.part.id) && !moved.has(other.part.id)) {
-        const previous = ps.contacts.get(key);
-        if (previous && !nowContacts.has(key)) nowContacts.set(key, previous);
-        continue;
-      }
       if (intersects(wbox, boxFor(other), PAIR_PAD)) {
+        const key = pairKey(we.part.id, other.part.id);
         if (!nowContacts.has(key)) nowContacts.set(key, { a: we.part.id, b: other.part.id });
       }
+    }
+  }
+  // Los contactos entre piezas que no se movieron se mantienen como estaban.
+  if (ps.contacts.size) {
+    const watchedIds = new Set(watchedEntries.map(entry => entry.part.id));
+    for (const [key, previous] of ps.contacts) {
+      if (previous.player !== undefined || nowContacts.has(key)) continue;
+      const a = previous.a, b = previous.b;
+      if (!byId.has(a) || !byId.has(b) || a === b || moved.has(a) || moved.has(b)) continue;
+      if (watchedIds.has(a) || watchedIds.has(b)) nowContacts.set(key, previous);
     }
   }
 

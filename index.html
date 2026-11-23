@@ -4437,9 +4437,13 @@ function applyNetworkPartUpsert(part,snap) {
 function _reconcilePredicted(o,d){
   const m=o.mesh,ex=d.x-m.position.x,ey=d.y-m.position.y,ez=d.z-m.position.z,err=Math.hypot(ex,ey,ez);
   if(err>0.8&&o.netVel)o._adoptVel={x:o.netVel.x,y:o.netVel.y,z:o.netVel.z};   // el servidor la movió distinto (script, empujón…): se adopta su velocidad para seguir igual
-  if(err>2.5){m.position.set(d.x,d.y,d.z);m.rotation.set(d.rx||0,d.ry||0,d.rz||0);if(_localRoom&&window.CrixWorldPhysics)CrixWorldPhysics.resetBody(_localRoom,String(o.id));_syncRuntimeCollider(o);return;}
   if(err<=0.8)return;
+  // Las piezas unidas a esta (Weld, Motor6D…) se corrigen con la MISMA transformación que la raíz. Antes solo se movía la raíz y las
+  // unidas se quedaban atrás hasta que llegaba su propio paquete: el ensamblaje se estiraba y las piezas parecían empujarse entre sí.
+  const kidIds=_predDesc(String(o.id)),oldP=kidIds.length?m.position.clone():null,oldQ=oldP?m.quaternion.clone():null;
+  if(err>2.5){m.position.set(d.x,d.y,d.z);m.rotation.set(d.rx||0,d.ry||0,d.rz||0);if(_localRoom&&window.CrixWorldPhysics)CrixWorldPhysics.resetBody(_localRoom,String(o.id));_syncRuntimeCollider(o);if(oldP)_followKids(o,kidIds,oldP,oldQ);return;}
   const g=0.1*(err-0.8)/err;m.position.x+=ex*g;m.position.y+=ey*g;m.position.z+=ez*g;o._pp={x:m.position.x,y:m.position.y,z:m.position.z};_syncRuntimeCollider(o);
+  if(oldP)_followKids(o,kidIds,oldP,oldQ);
 }
 // Acerca suavemente cada pieza sincronizada a la última posición que mandó el servidor.
 const _netQ=new THREE.Quaternion(),_netE=new THREE.Euler();
@@ -4541,7 +4545,59 @@ const _clientRigidOn = () => !!(window.CrixRigid && CrixRigid.isReady() && windo
 // predict=true: el servidor manda la física, pero las piezas que el jugador local está tocando/empujando se simulan
 // también aquí (mismo módulo que el servidor) para que el empuje se vea al instante; luego se reconcilia con el servidor.
 let _predKids = null;   // id de pieza → ids de las piezas que la siguen por uniones cinemáticas (Weld, Motor6D…)
-function _predDesc(id) { const out = [], seen = new Set([id]), q = [id]; while (q.length) { const ks = _predKids && _predKids.get(q.pop()); if (!ks) continue; for (const k of ks) if (!seen.has(k)) { seen.add(k); out.push(k); q.push(k); } } return out; }
+let _predStruct = null; // análisis de las uniones (grupos, raíces, bloqueos): se rehace solo si cambian las uniones, no en cada fotograma
+let _localIdleAt = 0;
+const _NO_KIDS = [];
+function _predDesc(id) {
+  const S = _predStruct; if (!S) return _NO_KIDS;
+  let r = S.desc.get(id); if (r) return r;
+  r = []; const seen = new Set([id]), q = [id];
+  while (q.length) { const ks = _predKids && _predKids.get(q.pop()); if (!ks) continue; for (const k of ks) if (!seen.has(k)) { seen.add(k); r.push(k); q.push(k); } }
+  if (!r.length) r = _NO_KIDS;
+  S.desc.set(id, r); return r;
+}
+function _predAnalyze() {
+  const all = window.gJointDefs ? gJointDefs() : [], JD = window.CrixJoints, defs = [];
+  for (const j of all) if (j && !j.local && j.enabled !== false && j.part0 && j.part1) defs.push(j);
+  const old = _predStruct;
+  if (old && old.sig.length === defs.length) {
+    let same = true;
+    for (let i = 0; i < defs.length; i++) { const j = defs[i], c = old.sig[i]; if (c.cls !== j.class || c.a !== j.part0 || c.b !== j.part1) { same = false; break; } }
+    if (same) return old;
+  }
+  const blockP = new Set(), defP = new Set(), drivenP = new Set(), adjP = new Map(), kids = new Map(), sig = [];
+  for (const j of defs) {
+    const a = String(j.part0), b = String(j.part1); sig.push({ cls: j.class, a: j.part0, b: j.part1 }); defP.add(a); defP.add(b);
+    if (!adjP.has(a)) adjP.set(a, []); if (!adjP.has(b)) adjP.set(b, []); adjP.get(a).push(b); adjP.get(b).push(a);
+    if (JD && JD.KINEMATIC.includes(j.class)) { drivenP.add(b); if (!kids.has(a)) kids.set(a, []); kids.get(a).push(b); }
+    else { blockP.add(a); blockP.add(b); }   // uniones dinámicas (resortes, bisagras con física): no se predicen
+  }
+  // Grupos unidos. Si un grupo tiene más de una raíz suelta (A→B y C→B), cada raíz arrastraría a B por su lado y las piezas se
+  // empujarían entre sí: ese ensamblaje no se predice, lo manda el servidor.
+  const groups = [], seen = new Set();
+  for (const start of adjP.keys()) {
+    if (seen.has(start)) continue;
+    const grp = [], st = [start]; seen.add(start);
+    while (st.length) { const cur = st.pop(); grp.push(cur); for (const nb of adjP.get(cur)) if (!seen.has(nb)) { seen.add(nb); st.push(nb); } }
+    let roots = 0; for (const g of grp) if (!drivenP.has(g)) roots++;
+    if (roots !== 1) for (const g of grp) blockP.add(g);
+    groups.push(grp);
+  }
+  _predKids = kids;
+  return (_predStruct = { sig, defs, blockP, defP, drivenP, kids, groups, desc: new Map() });
+}
+// Suelta la sala de física local y libera su memoria (Rapier vive en WebAssembly: si no se libera a mano, se acumula).
+function _dropLocalRoom() { try { if (_localRoom && _localRoom.rigid && window.CrixRigid) CrixRigid.dispose(_localRoom); } catch (_) { /* ya liberada */ } _localRoom = null; _localPrev = null; _localIdleAt = 0; }
+// Las piezas unidas a `o` siguen su movimiento con la misma transformación (oldP/oldQ = pose de `o` antes de moverla).
+function _followKids(o, kidIds, oldP, oldQ) {
+  const ts = performance.now(), dq = o.mesh.quaternion.clone().multiply(oldQ.clone().invert()), np = o.mesh.position;
+  for (const kid of kidIds) {
+    const ko = runtimeObjects.get(kid); if (!ko || !ko.mesh) continue; const km = ko.mesh;
+    km.position.sub(oldP).applyQuaternion(dq).add(np); km.quaternion.premultiply(dq);
+    Object.assign(ko.data, { x: km.position.x, y: km.position.y, z: km.position.z, rx: km.rotation.x, ry: km.rotation.y, rz: km.rotation.z });
+    ko.predAt = ts; ko.predOn = ts; ko.netTarget = null; ko.netVel = null; ko.netAng = null; _syncRuntimeCollider(ko);
+  }
+}
 function _stepLocalSpheres(predict) {
   const WP = window.CrixWorldPhysics; if (!WP) return;
   const rg = _clientRigidOn();
@@ -4549,20 +4605,12 @@ function _stepLocalSpheres(predict) {
   if (predict) {
     const nowP = performance.now();
     nearSet = new Set();
-    const JD = window.CrixJoints, defs = (window.gJointDefs ? gJointDefs() : []).filter(j => j && !j.local && j.enabled !== false && j.part0 && j.part1);
-    const blockP = new Set(), defP = new Set(), drivenP = new Set(), adjP = new Map(); _predKids = new Map();
-    for (const j of defs) {
-      const a = String(j.part0), b = String(j.part1); defP.add(a); defP.add(b);
-      if (!adjP.has(a)) adjP.set(a, []); if (!adjP.has(b)) adjP.set(b, []); adjP.get(a).push(b); adjP.get(b).push(a);
-      if (JD && JD.KINEMATIC.includes(j.class)) { drivenP.add(b); if (!_predKids.has(a)) _predKids.set(a, []); _predKids.get(a).push(b); }
-      else { blockP.add(a); blockP.add(b); }   // uniones dinámicas (resortes, bisagras con física): no se predicen
-    }
+    const S = _predAnalyze(), blockP = S.blockP, defP = S.defP, drivenP = S.drivenP;
     // Grupos unidos: si alguna pieza del grupo está anclada, el grupo entero está sostenido y no cae → no se predice.
-    const heldP = new Set(), seenP = new Set();
-    for (const start of adjP.keys()) {
-      if (seenP.has(start)) continue;
-      const grp = [], st = [start]; seenP.add(start); let held = false;
-      while (st.length) { const cur = st.pop(); grp.push(cur); const co = runtimeObjects.get(cur); if (co && co.data.anchored !== false) held = true; for (const nb of adjP.get(cur)) if (!seenP.has(nb)) { seenP.add(nb); st.push(nb); } }
+    const heldP = new Set();
+    for (const grp of S.groups) {
+      let held = false;
+      for (const g of grp) { const co = runtimeObjects.get(g); if (co && co.data.anchored !== false) { held = true; break; } }
       if (held) for (const g of grp) heldP.add(g);
     }
     for (const o of runtimeObjects.values()) {
@@ -4573,15 +4621,20 @@ function _stepLocalSpheres(predict) {
       nearSet.add(oid); o.predOn = nowP;   // toda pieza suelta se simula también en el cliente; luego se reconcilia con el servidor
       for (const k of _predDesc(oid)) { const ko = runtimeObjects.get(k); if (ko) ko.predOn = nowP; }
     }
-    if (!nearSet.size) { _localRoom = null; _localPrev = null; return; }
+    if (!nearSet.size) {   // nada que predecir: la sala se conserva un momento (sin simular) y luego se libera
+      _localPrev = null; if (_localRoom && _localRoom.phys) { _localRoom.phys.lastAt = 0; _localRoom.phys.acc = 0; }
+      if (!_localIdleAt) _localIdleAt = nowP; else if (_localRoom && nowP - _localIdleAt > 2500) _dropLocalRoom();
+      return;
+    }
+    _localIdleAt = 0;
   }
   let any = false, anyLoose = false;
   for (const o of runtimeObjects.values()) { if (!(o.data.anchored === false && o.mesh && o.mesh.parent && !o.collected)) continue; anyLoose = true; if (o.data.type === 'Sphere' || rg) { any = true; break; } }
   if (anyLoose && !rg && window.CrixRigid && window.gPhysicsMode !== 'classic') CrixRigid.load();   // descarga Rapier; mientras tanto rige la física clásica
-  if (!predict && !any) { _localRoom = null; return; }
+  if (!predict && !any) { if (_localRoom) _dropLocalRoom(); return; }
   if (!_localRoom) _localRoom = { worldParts: {}, physicsVelocities: {}, phys: null };
   _localRoom.physicsMode = rg ? 'realistic' : 'classic';
-  _localRoom.jointDefs = (window.gJointDefs ? gJointDefs() : []).filter(j => j && !j.local && j.enabled !== false && j.part0 && j.part1);   // las piezas unidas no chocan entre sí (igual que en el servidor)
+  _localRoom.jointDefs = predict ? _predStruct.defs : (window.gJointDefs ? gJointDefs() : []).filter(j => j && !j.local && j.enabled !== false && j.part0 && j.part1);   // las piezas unidas no chocan entre sí (igual que en el servidor)
   const room = _localRoom, parts = room.worldParts, seen = new Set(), loose = [];
   for (const o of runtimeObjects.values()) {
     const d = o.data; if (!o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC) continue;
@@ -4618,15 +4671,7 @@ function _stepLocalSpheres(predict) {
     // Ensamblaje: los hijos de las uniones se mueven con la misma transformación que su raíz (solo si no es una caída).
     if (kidIds && kidIds.length) {
       if (fell) { for (const kid of kidIds) { const ko = runtimeObjects.get(kid); if (ko) ko.predAt = 0; } }
-      else {
-        const ts = performance.now(), dq = o.mesh.quaternion.clone().multiply(oldQ.clone().invert()), np = o.mesh.position;
-        for (const kid of kidIds) {
-          const ko = runtimeObjects.get(kid); if (!ko || !ko.mesh) continue; const km = ko.mesh;
-          km.position.sub(oldP).applyQuaternion(dq).add(np); km.quaternion.premultiply(dq);
-          Object.assign(ko.data, { x: km.position.x, y: km.position.y, z: km.position.z, rx: km.rotation.x, ry: km.rotation.y, rz: km.rotation.z });
-          ko.predAt = ts; ko.netTarget = null; ko.netVel = null; ko.netAng = null; _syncRuntimeCollider(ko);
-        }
-      }
+      else _followKids(o, kidIds, oldP, oldQ);
     }
   }
   for (const o of loose) if (!o._pp) o._pp = { x: o.mesh.position.x, y: o.mesh.position.y, z: o.mesh.position.z };
