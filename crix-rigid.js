@@ -162,6 +162,10 @@
       let rec = rs.bodies.get(id);
       if (rec && (!sameSig(rec.sig, part) || (rec.kind === 'dynamic') !== dynamic)) { removeBody(rs, id); rec = null; }
       if (!rec) rec = createBody(rs, part, kind);
+      // Piezas de un mismo ensamblaje (unidas) no chocan entre sí: cada ensamblaje tiene su bit de grupo (1..15) y el mundo normal usa el bit 0.
+      const gb = (helpers && helpers.groupOf ? helpers.groupOf(id) : undefined);
+      const want = gb === undefined ? 0x0001FFFF : gb;
+      if (rec.cg !== want) { try { rec.collider.setCollisionGroups(want); rec.cg = want; } catch (_) { /* versión sin grupos */ } }
       if (dynamic) {
         handled.add(id);
         if (poseDiffers(part, rec.pose)) { placeBody(rec, part, 'teleport'); rec.written = true; }   // un script la movió a mano

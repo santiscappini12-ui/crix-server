@@ -2859,7 +2859,13 @@ function routeJoin(socket, data) {
   const owner = ownerOfInstance(instanceId);
   leaveAnyRoom(socket);
   if (owner === cluster.nodeId) { socket.data.gameOwner = null; return gameHandlers.join_game(socket, data); }
-  if (!cluster.alive(owner)) { socket.emit('join_error', { message:'Esa partida ya no está activa. Abrí una nueva con "Jugar".' }); return; }
+  if (!cluster.alive(owner)) {
+    // El servidor que creó esta partida ya no está (se reinició o cayó) y la sala murió con él. Antes se rechazaba con
+    // «Esa partida ya no está activa» y había que abrir una nueva a mano. Ahora esta instancia la recrea con el mismo id:
+    // quien se reconecta vuelve a entrar y los demás que lleguen con el mismo enlace caen en la misma sala.
+    console.log(`[CLUSTER] La instancia ${owner} ya no responde: se recrea su partida en este servidor (${cluster.nodeId}).`);
+    socket.data.gameOwner = null; return gameHandlers.join_game(socket, data);
+  }
   cluster.sendTo(owner, { type:'fwd', sid:socket.id, ev:'join_game', args:[{ mapId, instanceId, username:data?.username, look:data?.look }], user:userBrief(socket.data.user) });
 }
 function routeGame(socket, ev, args) {

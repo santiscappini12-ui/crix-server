@@ -15,7 +15,9 @@
 // ══════════════════════════════════════════════════════════════════
 const crypto = require('crypto');
 
-const NODE_ID = crypto.randomBytes(4).toString('hex');   // 8 hex: va de prefijo en los instanceId
+// 8 hex: va de prefijo en los instanceId. Si se define CRIX_NODE_ID (8 caracteres hex) el identificador sobrevive a los reinicios y las
+// partidas siguen siendo «de este servidor» después de reiniciarlo; sin ella cambia en cada arranque.
+const NODE_ID = /^[0-9a-f]{8}$/.test(String(process.env.CRIX_NODE_ID || '')) ? String(process.env.CRIX_NODE_ID) : crypto.randomBytes(4).toString('hex');
 const REDIS_URL = process.env.CRIX_REDIS_URL || process.env.REDIS_URL || '';
 const HB_MS = 5000, DEAD_MS = 30000, SNAP_MS = 60000;   // 30 s de tolerancia: un bloqueo breve del bucle de eventos ya no hace que las demás instancias den por caída a esta
 const CH_ALL = 'crix:bus', chOf = id => 'crix:n:' + id;

@@ -324,7 +324,7 @@ function stepDynamicBody(room, ps, e, entries, byId, landings) {
       const lo = axis === 'x' ? 'minX' : 'minZ', hi = axis === 'x' ? 'maxX' : 'maxZ';
       let move = d, hitId = null;
       for (const o of entries) {
-        if (o === e || o.part.canCollide === false) continue;
+        if (o === e || o.part.canCollide === false || (e.grp !== undefined && o.grp === e.grp)) continue;
         // Solo choca lo que está a la altura de la pieza (no lo que pisa ni lo que está por encima).
         if (!(o.box.maxY > e.box.minY + SNAP && o.box.minY < e.box.maxY - SNAP)) continue;
         const other = axis === 'x' ? 'z' : 'x';
@@ -362,7 +362,7 @@ function stepDynamicBody(room, ps, e, entries, byId, landings) {
   if (part.canCollide !== false) {
     let landTop = -Infinity, landOn = null, ceilBottom = Infinity, ceilOn = null;
     for (const o of entries) {
-      if (o === e || o.part.canCollide === false || !overlapXZ(e.box, o.box)) continue;
+      if (o === e || o.part.canCollide === false || (e.grp !== undefined && o.grp === e.grp) || !overlapXZ(e.box, o.box)) continue;
       if (vy <= 0) {
         if (oldBottom >= o.box.maxY - SNAP && oldBottom + vy < o.box.maxY && o.box.maxY > landTop) { landTop = o.box.maxY; landOn = o; }
       } else if (oldTop <= o.box.minY + SNAP && oldTop + vy > o.box.minY && o.box.minY < ceilBottom) { ceilBottom = o.box.minY; ceilOn = o; }
@@ -395,6 +395,29 @@ function stepDynamic(room, ps, e, entries, byId, landings) {
   if (e.part.type === 'Sphere') advanceSpin(ps, e.part); // el giro sigue en el aire, apoyada o rebotando
 }
 
+// ── Piezas unidas (Weld, Motor6D, Hinge…): forman un ensamblaje y NO chocan entre sí ───────────────
+// Antes la pieza raíz chocaba con sus propias piezas unidas (que están pegadas a ella), se empujaban y el conjunto salía disparado.
+// Aquí se calcula, para cada pieza unida, el número de su ensamblaje (se recalcula solo cuando cambian las uniones).
+const WELD_CLASSES = new Set(['Weld', 'WeldConstraint', 'Motor6D', 'Hinge', 'BallSocket', 'Prismatic']);
+function assemblyMap(room, ps) {
+  const joints = Array.isArray(room.joints) ? room.joints : (Array.isArray(room.jointDefs) ? room.jointDefs : null);
+  let key = '';
+  if (joints) for (const j of joints) if (j && j.enabled !== false && j.part0 && j.part1 && WELD_CLASSES.has(j.class)) key += String(j.part0) + '>' + String(j.part1) + ';';
+  if (key === ps.asmKey) return ps.asm || null;
+  ps.asmKey = key; ps.asm = null; ps.asmGroup = null;
+  if (!key) return null;
+  const parent = new Map(), find = a => { while (parent.get(a) !== a) { parent.set(a, parent.get(parent.get(a))); a = parent.get(a); } return a; };
+  for (const j of joints) {
+    if (!(j && j.enabled !== false && j.part0 && j.part1 && WELD_CLASSES.has(j.class))) continue;
+    const a = String(j.part0), b = String(j.part1);
+    if (!parent.has(a)) parent.set(a, a); if (!parent.has(b)) parent.set(b, b);
+    const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb);
+  }
+  const ids = new Map(), asm = new Map(); let n = 0;
+  for (const id of parent.keys()) { const r = find(id); if (!ids.has(r)) ids.set(r, ++n); asm.set(id, ids.get(r)); }
+  ps.asm = asm; return asm;
+}
+
 function pairKey(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
 
 // Avanza la física de la sala hasta `now` y calcula los contactos.
@@ -413,10 +436,10 @@ function stepRoom(room, now, players) {
   if (steps > MAX_CATCHUP_STEPS) { steps = MAX_CATCHUP_STEPS; ps.acc = 0; } else ps.acc -= steps * STEP;
   const dt = Math.max(dtMs / 1000, 1e-3);
 
-  const entries = [], byId = new Map();
+  const entries = [], byId = new Map(), asm = assemblyMap(room, ps);
   for (const part of Object.values(room.worldParts)) {
     if (part.type === 'Spawn' || part.isNPC) continue;
-    const entry = { part, box: partBox(part), dyn: !part.anchored && !part.jointDriven, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
+    const entry = { part, box: partBox(part), grp: asm ? asm.get(String(part.id)) : undefined, dyn: !part.anchored && !part.jointDriven, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
     entries.push(entry); byId.set(part.id, entry);
   }
   let dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
@@ -426,7 +449,7 @@ function stepRoom(room, now, players) {
   let rigidEntries = [];
   if (useRigid(room)) {
     const extentsOf = part => { const b = partBox(part); return { ex: (b.maxX - b.minX) / 2, ey: (b.maxY - b.minY) / 2, ez: (b.maxZ - b.minZ) / 2 }; };
-    const handled = rigid().step(room, entries, Math.min(rawSteps, 15), players, landings, { extentsOf });
+    const handled = rigid().step(room, entries, Math.min(rawSteps, 15), players, landings, { extentsOf, groupOf: id => { if (!asm) return undefined; const g = asm.get(String(id)); if (g === undefined) return undefined; const b = 1 + ((g - 1) % 15); return (((1 << b) << 16) | (0xFFFF & ~(1 << b))) >>> 0; } });
     rigidEntries = dynamics.filter(entry => handled.has(entry.part.id));
     dynamics = dynamics.filter(entry => !handled.has(entry.part.id));
     for (const entry of rigidEntries) entry.box = partBox(entry.part);

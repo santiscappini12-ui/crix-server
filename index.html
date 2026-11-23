@@ -4412,7 +4412,8 @@ function applyNetworkPartUpsert(part,snap) {
   if(existing.data.anchored)existing.velocity.set(0,0,0);
   existing.netVel=null;existing.netAng=null;
   if(prevAt&&nowT-prevAt<250&&nowT-prevAt>5){
-    const dtp=(nowT-prevAt)/1000,nd=existing.data,wrapA=a=>{a%=Math.PI*2;if(a>Math.PI)a-=Math.PI*2;else if(a<-Math.PI)a+=Math.PI*2;return a;};
+    const dtp=(nowT-prevAt)/1000,nd=existing.data;existing.netInt=existing.netInt?existing.netInt*0.7+dtp*0.3:dtp;   // intervalo medio entre paquetes de esta pieza
+    const wrapA=a=>{a%=Math.PI*2;if(a>Math.PI)a-=Math.PI*2;else if(a<-Math.PI)a+=Math.PI*2;return a;};
     const v={x:(nd.x-prevD.x)/dtp,y:(nd.y-prevD.y)/dtp,z:(nd.z-prevD.z)/dtp};
     const w={x:wrapA((nd.rx||0)-(prevD.rx||0))/dtp,y:wrapA((nd.ry||0)-(prevD.ry||0))/dtp,z:wrapA((nd.rz||0)-(prevD.rz||0))/dtp};
     if(Math.hypot(v.x,v.y,v.z)<150)existing.netVel=v;          // más rápido = teletransporte, no se extrapola
@@ -4435,6 +4436,7 @@ function applyNetworkPartUpsert(part,snap) {
 // (zona muerta) y solo se corrige el exceso; si la diferencia es grande, se coloca donde dice el servidor.
 function _reconcilePredicted(o,d){
   const m=o.mesh,ex=d.x-m.position.x,ey=d.y-m.position.y,ez=d.z-m.position.z,err=Math.hypot(ex,ey,ez);
+  if(err>0.8&&o.netVel)o._adoptVel={x:o.netVel.x,y:o.netVel.y,z:o.netVel.z};   // el servidor la movió distinto (script, empujón…): se adopta su velocidad para seguir igual
   if(err>2.5){m.position.set(d.x,d.y,d.z);m.rotation.set(d.rx||0,d.ry||0,d.rz||0);if(_localRoom&&window.CrixWorldPhysics)CrixWorldPhysics.resetBody(_localRoom,String(o.id));_syncRuntimeCollider(o);return;}
   if(err<=0.8)return;
   const g=0.1*(err-0.8)/err;m.position.x+=ex*g;m.position.y+=ey*g;m.position.z+=ez*g;o._pp={x:m.position.x,y:m.position.y,z:m.position.z};_syncRuntimeCollider(o);
@@ -4444,7 +4446,7 @@ const _netQ=new THREE.Quaternion(),_netE=new THREE.Euler();
 function _stepNetInterp() {
   for(const object of runtimeObjects.values()){
     const t=object.netTarget,m=object.mesh;if(!t||!m)continue;
-    const k=0.4,p=m.position,v=object.netVel,el=(v||object.netAng)&&object.netAt?(performance.now()-object.netAt)/1000:0,age=el<0.08?el:Math.max(0,0.16-el);
+    const k=0.4,p=m.position,v=object.netVel,el=(v||object.netAng)&&object.netAt?(performance.now()-object.netAt)/1000:0,H=object.netInt?Math.min(0.3,Math.max(0.08,object.netInt*1.6)):0.08,age=el<H?el:Math.max(0,2*H-el);   // predice el movimiento de scripts del servidor ~1,6 intervalos de paquete
     const tx=t.x+(v?v.x*age:0),ty=t.y+(v?v.y*age:0),tz=t.z+(v?v.z*age:0);
     p.x+=(tx-p.x)*k;p.y+=(ty-p.y)*k;p.z+=(tz-p.z)*k;
     // Rotación por cuaternión (slerp): las piezas que vuelcan y ruedan con la física realista no deben pasar por ángulos de Euler.
@@ -4579,6 +4581,7 @@ function _stepLocalSpheres(predict) {
   if (!predict && !any) { _localRoom = null; return; }
   if (!_localRoom) _localRoom = { worldParts: {}, physicsVelocities: {}, phys: null };
   _localRoom.physicsMode = rg ? 'realistic' : 'classic';
+  _localRoom.jointDefs = (window.gJointDefs ? gJointDefs() : []).filter(j => j && !j.local && j.enabled !== false && j.part0 && j.part1);   // las piezas unidas no chocan entre sí (igual que en el servidor)
   const room = _localRoom, parts = room.worldParts, seen = new Set(), loose = [];
   for (const o of runtimeObjects.values()) {
     const d = o.data; if (!o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC) continue;
@@ -4601,6 +4604,7 @@ function _stepLocalSpheres(predict) {
     players = [{ userId: 'local', username: 'local', x: gPlayer.position.x, y: gPlayer.position.y, z: gPlayer.position.z, vx, vy: 0, vz }];
   }
   const result = WP.stepRoom(room, now, players);
+  for (const o of loose) if (o._adoptVel) { try { WP.setVelocity(room, String(o.id), o._adoptVel); } catch (_) {} o._adoptVel = null; }
   for (const c of result.changed) {
     const o = runtimeObjects.get(c.id), p = parts[c.id]; if (!o || !p) continue;
     const kidIds = predict ? _predDesc(String(c.id)) : null, oldP = kidIds && kidIds.length ? o.mesh.position.clone() : null, oldQ = oldP ? o.mesh.quaternion.clone() : null;
