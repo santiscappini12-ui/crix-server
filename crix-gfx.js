@@ -12,7 +12,7 @@
   let pref = ''; try { pref = String(localStorage.getItem('crix_gfx') || ''); } catch (e) {}
   if (pref === 'off') return;   // sin CrixGFX el juego usa sus materiales y luces de siempre
   const QUALITY = (pref === 'low' || pref === 'high' || pref === 'ultra') ? pref : (mobile ? 'low' : 'high');
-  // Flujo de color correcto: salida sRGB + tone mapping ACES, con todos los colores de entrada convertidos a lineal.
+  // Flujo de color correcto: salida sRGB (sin tone mapping, para respetar los colores), con todos los colores de entrada convertidos a lineal.
   // Los materiales "viejos" (Basic/Phong/Lambert/Points/Sprite, p. ej. los del avatar) se parchean más abajo para convertir
   // solos lo que se les asigna: sus archivos no se tocan y sus colores se ven igual que se eligieron.
   // Para volver al aspecto anterior: localStorage.setItem('crix_gfx','off') y recargar.
@@ -64,7 +64,7 @@
   // ── Renderer ─────────────────────────────────────────────────────────────────────────────────
   function setupRenderer(r, o) {
     o = o || {};
-    if (SRGB) { r.outputEncoding = T.sRGBEncoding; r.toneMapping = T.ACESFilmicToneMapping; r.toneMappingExposure = o.exposure || 0.9; }
+    if (SRGB) { r.outputEncoding = T.sRGBEncoding; r.toneMapping = T.NoToneMapping; r.toneMappingExposure = 1; }   // sin ACES: no desplaza los tonos (el marrón sigue siendo marrón)
     if (r.shadowMap) { r.shadowMap.enabled = true; r.shadowMap.type = T.PCFSoftShadowMap; }
     Q.maxAniso = Math.min(Q.anisotropy, r.capabilities && r.capabilities.getMaxAnisotropy ? r.capabilities.getMaxAnisotropy() : 4);
     Q.anisotropy = Q.maxAniso || Q.anisotropy;
@@ -89,7 +89,7 @@
     '  col += uSunCol * (haze * 0.16 + pow(sd, 48.0) * 0.38 + pow(sd, 3500.0) * uSunBoost);',
     '#ifdef CLOUDS',
     '  if (h > 0.02) {',
-    '    vec2 uv = d.xz / (h + 0.2) * 0.5 + vec2(uTime * 0.006, uTime * 0.002);',
+    '    vec2 uv = d.xz / (h + 0.2) * 0.5 + vec2(uTime * 0.03, uTime * 0.011);',
     '    float n = fbm(uv * 1.6);',
     '    float dens = smoothstep(0.5 - uCloudAmt * 0.14, 0.82, n);',
     '    if (dens > 0.001) {',
@@ -166,7 +166,7 @@
       const pm = renderer.userData && renderer.userData._pmrem || (renderer.userData = renderer.userData || {}, renderer.userData._pmrem = new T.PMREMGenerator(renderer));
       const es = new T.Scene(), dome = sky(false);
       dome.scale.set(50, 50, 50);
-      applySky(dome, P, 6, (0.55 + 0.45 * P.day) * P.B * 0.8);
+      applySky(dome, P, 6, (0.55 + 0.45 * P.day) * P.B * 0.42);
       es.add(dome);
       const rt = pm.fromScene(es, 0.02, 1, 100);
       const old = st.envRT; scene.environment = rt.texture; st.envRT = rt; st.envKey = key;
