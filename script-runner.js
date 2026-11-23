@@ -28,7 +28,8 @@ const MAX_RAYS_PER_TICK = Infinity;
 const PLAYER_OPS = new Set(['teleport','launch','speed','jump','damage','heal','health','kill','message','coins','setCoins','checkpoint']);
 const MAX_TICK_BUDGET_MS = 35;
 const MAX_SCRIPT_CALL_MS = 25;
-const TICK_MS = 50;
+const LOWRES = require('./low-resource');   // contenedor pequeño: menos memoria por sala y tick más lento
+const TICK_MS = LOWRES.low ? 100 : 50;
 const PLAYER_HALF_W = 0.5;
 const PLAYER_HEIGHT = 3.05;
 
@@ -690,7 +691,7 @@ function createRoom(message) {
   const modules = (Array.isArray(message.scripts) ? message.scripts : [])
     .filter(script => script && script.type === 'ModuleScript' && typeof script.code === 'string')
     .map(script => ({ id:String(script.id || script.name), name:String(script.name || 'ModuleScript'), code:(script.language === 'crixscript' ? compileCrixScript(script.code) : script.code).slice(0,MAX_SOURCE_CHARS) }));
-  const isolate = new ivm.Isolate({ memoryLimit:Math.max(16, Number(process.env.CRIX_SCRIPT_MEMORY_MB) || 512) });
+  const isolate = new ivm.Isolate({ memoryLimit:Math.max(16, Number(process.env.CRIX_SCRIPT_MEMORY_MB) || (LOWRES.low ? Math.max(24, Math.round(LOWRES.memMB * 0.12)) : 512)) });
   const context = isolate.createContextSync();
   const room = {
     id:String(message.roomId), mapId:String(message.mapId), instanceId:String(message.instanceId),

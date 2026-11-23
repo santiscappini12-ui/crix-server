@@ -6,6 +6,12 @@
 // en el proxy): sigue reintentando y mientras tanto muestra el motivo en pantalla.
 // Nunca arranca con una base vacía, para no pisar la copia del bucket.
 const http = require('http');
+const LR = require('./low-resource');
+if (LR.low) {
+  // Contenedor pequeño: limitar el heap a ~45 % de la memoria para que el recolector actúe antes de que el sistema mate el proceso.
+  try { require('v8').setFlagsFromString('--max-old-space-size=' + Math.max(64, Math.round(LR.memMB * 0.45))); } catch (_) {}
+  console.log(`[RECURSOS] Modo ligero: ${LR.memMB} MB de RAM, ${Math.round(LR.cpus * 100) / 100} vCPU`);
+}
 const persist = require('./persist');
 
 const PORT = process.env.PORT || 3000;

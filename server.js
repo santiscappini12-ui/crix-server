@@ -8,6 +8,7 @@ const https    = require('https');
 const crypto   = require('crypto');
 const { fork } = require('node:child_process');
 const persist  = require('./persist');
+const LOWRES = require('./low-resource');   // detecta contenedores pequeños (poca RAM / CPU) y baja la carga
 const worldPhysics = require('./world-physics');
 const CrixRigid = require('./crix-rigid');   // física realista (Rapier); mientras no cargue, rige la física clásica
 let rapierLib = null;
@@ -39,6 +40,8 @@ try {
   const { monitorEventLoopDelay } = require('perf_hooks'), h = monitorEventLoopDelay({ resolution: 20 }); h.enable();
   setInterval(() => { const max = h.max / 1e6; h.reset(); if (max > 1000) console.warn(`[LAG] El bucle de eventos se bloqueó ${Math.round(max)} ms`); }, 10000).unref();
 } catch (_) { /* sin perf_hooks */ }
+// Memoria: si el proceso supera el límite del hosting lo mata el sistema sin avisar (parece «el servidor se cerró»). Se anota cada minuto.
+setInterval(() => { const m = process.memoryUsage(), mb = n => Math.round(n / 1048576); console.log(`[MEM] rss ${mb(m.rss)} MB · heap ${mb(m.heapUsed)}/${mb(m.heapTotal)} MB · salas ${Object.keys(rooms).length}`); }, 60000).unref();
 
 const app    = express();
 const server = http.createServer(app);
@@ -46,7 +49,7 @@ const cluster = require('./cluster')();   // varias instancias jugando juntas (R
 const io     = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
   pingTimeout: 45000, pingInterval: 15000,
-  maxHttpBufferSize: 1e9,
+  maxHttpBufferSize: Math.round((Number(process.env.CRIX_MAX_SOCKET_MB) || 100) * 1024 * 1024),   // antes 1 GB: un solo mensaje podía agotar la memoria
 });
 // Node 22 corta por defecto cualquier petición que tarde más de 5 min en llegar entera (requestTimeout = 300000):
 // los videos/audios grandes en conexiones lentas morían con "timed out". Se desactiva para las subidas binarias.
@@ -165,7 +168,19 @@ function loadDB() {
 }
 
 let lastDbSig = null;
+// Guardar la base cuesta O(tamaño de la base) y es síncrono (reconcile + stringify + hash + disco). Se llamaba 59 veces desde las
+// rutas (cada mensaje, like, edición…) y cada llamada congelaba el servidor: sockets con ping timeout, «partida no activa», etc.
+// Ahora saveDB() solo AGENDA el guardado: todas las llamadas seguidas se funden en una, y la espera crece con lo que tarde cada guardado
+// (el servidor nunca pasa más de ~12 % del tiempo guardando). En el cierre se usa saveDBNow() para no perder nada.
+let _saveTimer = null, _saveCost = 0;
 function saveDB() {
+  if (_saveTimer) return;
+  const wait = Math.max(1500, Math.min(30000, Math.round(_saveCost * 8)));
+  _saveTimer = setTimeout(() => { _saveTimer = null; saveDBNow(); }, wait);
+}
+function saveDBNow() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  const t0 = Date.now();
   try {
     if (dbSync) dbSync.reconcile();   // estampa `_u` en lo que cambió y deja lápidas de lo que se borró
     // Solo se escribe (y se sube al almacenamiento externo) si el contenido cambió.
@@ -182,6 +197,10 @@ function saveDB() {
     lastDbSig = sig;
     persist.saveDb(json);
   } catch(e) { console.error('[DB] Error al guardar:', e.message); }
+  finally {
+    const cost = Date.now() - t0; _saveCost = _saveCost ? Math.round(_saveCost * 0.6 + cost * 0.4) : cost;
+    if (cost > 500) console.warn(`[DB] Guardar la base tardó ${cost} ms (bloquea el servidor mientras tanto)`);
+  }
 }
 
 loadDB();
@@ -233,7 +252,7 @@ persist.startSync();
 const push = require('./push')({ getDB: () => DB, saveDB });
 push.init();
 // Guardar cada 10 segundos para no perder datos
-setInterval(saveDB, 10000);
+setInterval(saveDB, 20000);
 
 // ══════════════════════════════════════════════
 // ESTADO EN MEMORIA (sesiones activas)
@@ -417,7 +436,7 @@ function ensureScriptRunner() {
   if(scriptRunnerError){if(Date.now()-scriptRunnerFailedAt<15000)return null;scriptRunnerError=null;}
   try{
     const major=Number(process.versions.node.split('.')[0]);
-    scriptRunner=fork(path.join(__dirname,'script-runner.js'),[],{execArgv:major>=20?['--no-node-snapshot']:[],stdio:['ignore','inherit','inherit','ipc']});
+    scriptRunner=fork(path.join(__dirname,'script-runner.js'),[],{execArgv:(major>=20?['--no-node-snapshot']:[]).concat(LOWRES.low?['--max-old-space-size='+Math.max(32,Math.round(LOWRES.memMB*0.2))]:[]),stdio:['ignore','inherit','inherit','ipc']});
     scriptRunner.on('message',handleScriptRunnerMessage);
     scriptRunner.on('error',error=>{scriptRunnerError=error.message;scriptRunnerFailedAt=Date.now();log('SCRIPT_RUNNER',error.message);});
     scriptRunner.on('exit',(code)=>{scriptRunner=null;if(code!==0){scriptRunnerError='El proceso aislado de scripts terminó ('+code+'). Se reintentará solo en unos segundos.';scriptRunnerFailedAt=Date.now();log('SCRIPT_RUNNER',scriptRunnerError);for(const room of Object.values(rooms)){if(room.scriptStarted){room.scriptStarted=false;room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError});}}}});
@@ -601,7 +620,7 @@ function stepRoomPhysicsSafe(room,now) {
     if(result.events.length&&scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'contacts',roomId,events:result.events});
     // Resincronización de seguridad cada 2 s: estado autoritativo de TODAS las piezas con física.
     // Corrige a cualquier cliente que se haya perdido un paquete o estuviera en segundo plano.
-    if(!room.lastSyncAt||now-room.lastSyncAt>=2000){
+    if(!room.lastSyncAt||now-room.lastSyncAt>=(LOWRES.low?4000:2000)){
       room.lastSyncAt=now;
       const parts=[];
       for(const part of Object.values(room.worldParts)){
@@ -630,14 +649,16 @@ function stepServerWorldPhysics() {
     }
   }
 }
-// Bucle autoprogramado (en vez de setInterval): si un tick tarda, se espera al menos 8 ms antes del siguiente para que el servidor
-// pueda atender sockets y latidos; así la física nunca ahoga al resto del servidor.
+// Bucle autoprogramado (en vez de setInterval): si un tick tarda, se espera antes del siguiente para que el servidor pueda atender
+// sockets y latidos. En contenedores pequeños (0,1 vCPU) la física va a ~15 Hz, y si un tick tarda mucho (CPU limitada por el hosting)
+// el intervalo crece solo: la física nunca ocupa más de ~40 % del tiempo y el servidor no se cuelga.
+const PHYS_BASE_MS = LOWRES.low ? 66 : 33;
 (function physicsLoop(){
   const t0=Date.now();
   try{stepServerWorldPhysics();}catch(err){console.error('[FÍSICA]',err&&err.stack?err.stack:err);}
   const spent=Date.now()-t0;
   if(spent>100)console.warn('[FÍSICA] Tick lento: '+spent+' ms');
-  const t=setTimeout(physicsLoop,Math.max(8,33-spent));
+  const t=setTimeout(physicsLoop,Math.max(8,PHYS_BASE_MS-spent,Math.round(spent*1.5)));
 })();
 
 // Presencia visible para todos: qué juego e instancia está jugando cada persona.
@@ -3530,7 +3551,7 @@ let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) return; shuttingDown = true;
   console.log(`[${signal}] Guardando datos antes de salir…`);
-  try { cluster.shutdown(); saveDB(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
+  try { cluster.shutdown(); saveDBNow(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
   process.exit(0);
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
