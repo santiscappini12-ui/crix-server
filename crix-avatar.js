@@ -85,8 +85,8 @@
   const PART_LABELS = { Head: 'Cabeza', Chest: 'Pecho', Spine: 'Abdomen', Hips: 'Pelvis', UpperArmL: 'Brazo izq.', UpperArmR: 'Brazo der.', LowerArmL: 'Antebrazo izq.', LowerArmR: 'Antebrazo der.', HandL: 'Mano izq.', HandR: 'Mano der.', UpperLegL: 'Muslo izq.', UpperLegR: 'Muslo der.', LowerLegL: 'Pantorrilla izq.', LowerLegR: 'Pantorrilla der.', FootL: 'Pie izq.', FootR: 'Pie der.' };
   const CLAY_HEX = '#dcdad6';
   const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1, equip: [], parts: {} };
-  const MAX_ACCESSORIES = 24;
-  const MAX_EQUIPPED = 6, MAX_ACC_PARTS = 16;   // accesorios del perfil que se pueden llevar puestos / piezas por accesorio
+  const MAX_ACCESSORIES = Infinity;   // sin límite de accesorios por avatar
+  const MAX_EQUIPPED = Infinity, MAX_ACC_PARTS = 16;   // accesorios del perfil que se pueden llevar puestos / piezas por accesorio
   const ACC_ID_RE = /^ac_[a-z0-9]{6,24}$/;
   // Todos los avatares son el muñeco de arcilla de un solo color (la referencia). Poner en false para volver a permitir 'cartoon'.
   const FORCE_CLAY = true;

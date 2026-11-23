@@ -3073,7 +3073,7 @@ async function accLoadList() {
 }
 function accListHTML() {
   const A = avEd.accs, eq = avEd.look.equip || [];
-  let h = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><b>Accesorios <span class="set-note" style="font-weight:400">(${eq.length}/${CrixAvatar.MAX_EQUIPPED} puestos)</span></b><button class="btn btn-p" style="${accBtn}" onclick="accCreate()">＋ Crear</button></div>`;
+  let h = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><b>Accesorios <span class="set-note" style="font-weight:400">(${eq.length}${isFinite(CrixAvatar.MAX_EQUIPPED) ? '/' + CrixAvatar.MAX_EQUIPPED : ''} puestos)</span></b><button class="btn btn-p" style="${accBtn}" onclick="accCreate()">＋ Crear</button></div>`;
   if (!A || A.loading) return h + '<div class="set-note">Cargando accesorios…</div>';
   if (A.err) h += `<div class="set-note">No se pudo cargar el catálogo: ${esc(A.err)}</div>`;
   const row = (a, mine) => {
