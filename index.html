@@ -4427,7 +4427,7 @@ function applyNetworkPartUpsert(part,snap) {
     _syncRuntimeCollider(existing);
   }else{
     // Movimiento normal: el servidor manda ~20 paquetes/s; el cliente interpola a 60/s (ver _stepNetInterp).
-    if(existing.predAt&&performance.now()-existing.predAt<300)_reconcilePredicted(existing,d);
+    if((existing.predAt&&performance.now()-existing.predAt<300)||(existing.predOn&&performance.now()-existing.predOn<200))_reconcilePredicted(existing,d);
     else existing.netTarget={x:d.x,y:d.y,z:d.z,rx:d.rx||0,ry:d.ry||0,rz:d.rz||0};
   }
 }
@@ -4545,24 +4545,31 @@ function _stepLocalSpheres(predict) {
   const rg = _clientRigidOn();
   let nearSet = null;
   if (predict) {
-    if (!gPlayer) return;
-    const nowP = performance.now(), px = gPlayer.position.x, py = gPlayer.position.y, pz = gPlayer.position.z;
+    const nowP = performance.now();
     nearSet = new Set();
     const JD = window.CrixJoints, defs = (window.gJointDefs ? gJointDefs() : []).filter(j => j && !j.local && j.enabled !== false && j.part0 && j.part1);
-    const blockP = new Set(), defP = new Set(), drivenP = new Set(); _predKids = new Map();
+    const blockP = new Set(), defP = new Set(), drivenP = new Set(), adjP = new Map(); _predKids = new Map();
     for (const j of defs) {
       const a = String(j.part0), b = String(j.part1); defP.add(a); defP.add(b);
+      if (!adjP.has(a)) adjP.set(a, []); if (!adjP.has(b)) adjP.set(b, []); adjP.get(a).push(b); adjP.get(b).push(a);
       if (JD && JD.KINEMATIC.includes(j.class)) { drivenP.add(b); if (!_predKids.has(a)) _predKids.set(a, []); _predKids.get(a).push(b); }
       else { blockP.add(a); blockP.add(b); }   // uniones dinámicas (resortes, bisagras con física): no se predicen
+    }
+    // Grupos unidos: si alguna pieza del grupo está anclada, el grupo entero está sostenido y no cae → no se predice.
+    const heldP = new Set(), seenP = new Set();
+    for (const start of adjP.keys()) {
+      if (seenP.has(start)) continue;
+      const grp = [], st = [start]; seenP.add(start); let held = false;
+      while (st.length) { const cur = st.pop(); grp.push(cur); const co = runtimeObjects.get(cur); if (co && co.data.anchored !== false) held = true; for (const nb of adjP.get(cur)) if (!seenP.has(nb)) { seenP.add(nb); st.push(nb); } }
+      if (held) for (const g of grp) heldP.add(g);
     }
     for (const o of runtimeObjects.values()) {
       const d = o.data;
       if (d.anchored !== false || !o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC || d.canCollide === false || (window.gJointDriven && gJointDriven.has(String(o.id)))) continue;
       const oid = String(o.id);
-      if (drivenP.has(oid) || blockP.has(oid) || (o.jointLinked && !defP.has(oid)) || _predDesc(oid).some(x => blockP.has(x))) continue;   // hijos de uniones siguen a su raíz; uniones desconocidas/dinámicas no se predicen
-      if ((o.noPredUntil && nowP < o.noPredUntil) || (o.netVel && o.netVel.y < -3)) continue;   // cayendo de verdad (solo hacia abajo y rápido): manda el servidor
-      const reach = Math.max(d.sx || 1, d.sz || 1) / 2 + 1.6;
-      if ((o.predAt && nowP - o.predAt < 400) || (Math.hypot(o.mesh.position.x - px, o.mesh.position.z - pz) < reach && Math.abs(o.mesh.position.y - py) < Math.max(d.sy || 1, 3) + 1.5)) nearSet.add(String(o.id));
+      if (heldP.has(oid) || drivenP.has(oid) || blockP.has(oid) || (o.jointLinked && !defP.has(oid)) || _predDesc(oid).some(x => blockP.has(x))) continue;   // hijos de uniones siguen a su raíz; uniones desconocidas/dinámicas no se predicen
+      nearSet.add(oid); o.predOn = nowP;   // toda pieza suelta se simula también en el cliente; luego se reconcilia con el servidor
+      for (const k of _predDesc(oid)) { const ko = runtimeObjects.get(k); if (ko) ko.predOn = nowP; }
     }
     if (!nearSet.size) { _localRoom = null; _localPrev = null; return; }
   }
@@ -4600,10 +4607,7 @@ function _stepLocalSpheres(predict) {
     o.mesh.position.set(p.x, p.y, p.z); o.mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
     Object.assign(o.data, { x: p.x, y: p.y, z: p.z, rx: p.rx || 0, ry: p.ry || 0, rz: p.rz || 0 });
     // Caída real = bajada continua de más de 0.5 studs en frames seguidos; las vibraciones pequeñas de la física no cuentan.
-    const drop = predict && o._pp ? (o._pp.y - p.y) : 0;
-    o._fallAcc = drop > 0.01 ? (o._fallAcc || 0) + drop : 0;
-    const fell = predict && o._fallAcc > 0.5;
-    if (fell) o._fallAcc = 0;
+    const fell = false;   // las caídas también se predicen en el cliente
     o._pp = { x: p.x, y: p.y, z: p.z };
     if (predict) { if (fell) { o.predAt = 0; o.noPredUntil = performance.now() + 800; } else { o.predAt = performance.now(); o.netTarget = null; o.netVel = null; o.netAng = null; } }
     _syncRuntimeCollider(o);

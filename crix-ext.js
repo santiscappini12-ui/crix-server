@@ -450,7 +450,7 @@
   }
   function netPoses(msg) {
     if (!msg || !Array.isArray(msg.parts)) return;
-    for (const p of msg.parts) { if (!Array.isArray(p) || p.length < 7) continue; const jo = runtimeObjects.get(String(p[0])); if (jo) { jo.jointLinked = true; if (jo.predAt && jo.mesh && performance.now() - jo.predAt < 300 && Math.hypot(p[1] - jo.mesh.position.x, p[2] - jo.mesh.position.y, p[3] - jo.mesh.position.z) <= 2.5) continue; G.targets.set(String(p[0]), { x: p[1], y: p[2], z: p[3], rx: p[4], ry: p[5], rz: p[6] }); } }
+    for (const p of msg.parts) { if (!Array.isArray(p) || p.length < 7) continue; const jo = runtimeObjects.get(String(p[0])); if (jo) { jo.jointLinked = true; if (jo.mesh && ((jo.predAt && performance.now() - jo.predAt < 300) || (jo.predOn && performance.now() - jo.predOn < 200)) && Math.hypot(p[1] - jo.mesh.position.x, p[2] - jo.mesh.position.y, p[3] - jo.mesh.position.z) <= 2.5) continue; G.targets.set(String(p[0]), { x: p[1], y: p[2], z: p[3], rx: p[4], ry: p[5], rz: p[6] }); } }
   }
   function gameCommand(message) {
     const c = message.command, p = message.payload || {};
