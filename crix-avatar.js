@@ -83,10 +83,6 @@
   // Piezas del cuerpo a las que se les puede elegir color por separado (look.parts = { Hueso: '#rrggbb' }; sin entrada = color de arcilla).
   const PART_KEYS = ['Head', 'Chest', 'Spine', 'Hips', 'UpperArmL', 'UpperArmR', 'LowerArmL', 'LowerArmR', 'HandL', 'HandR', 'UpperLegL', 'UpperLegR', 'LowerLegL', 'LowerLegR', 'FootL', 'FootR'];
   const PART_LABELS = { Head: 'Cabeza', Chest: 'Pecho', Spine: 'Abdomen', Hips: 'Pelvis', UpperArmL: 'Brazo izq.', UpperArmR: 'Brazo der.', LowerArmL: 'Antebrazo izq.', LowerArmR: 'Antebrazo der.', HandL: 'Mano izq.', HandR: 'Mano der.', UpperLegL: 'Muslo izq.', UpperLegR: 'Muslo der.', LowerLegL: 'Pantorrilla izq.', LowerLegR: 'Pantorrilla der.', FootL: 'Pie izq.', FootR: 'Pie der.' };
-  const _G = window.CrixGFX;   // render realista (crix-gfx.js): materiales PBR y color lineal; si falta, cae a los materiales de siempre
-  const _mBasic = p => _G ? _G.basic(p) : new THREE.MeshBasicMaterial(p);
-  const _mStd = p => { if (_G) return _G.std(p); const q = Object.assign({}, p); delete q.roughness; delete q.metalness; delete q.clearcoat; delete q.clearcoatRoughness; q.shininess = 30; return new THREE.MeshPhongMaterial(q); };
-  const _mLin = c => _G ? _G.lin(c) : new THREE.Color(c);
   const CLAY_HEX = '#dcdad6';
   const DEFAULT_LOOK = { style: 'stick', skin: '#ffd9b3', shirt: null, pants: '#3a4668', shoes: '#22262e', hair: 'none', hairColor: '#3b2a1e', eyes: '#1b1f2a', face: 'happy', scale: 1, equip: [], parts: {} };
   const MAX_ACCESSORIES = 24;
@@ -543,9 +539,9 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (!head || !head.isObject3D) return null;
     detachRigFace(head);
     const look = sanitizeLook(lookIn && typeof lookIn === 'object' ? lookIn : {});
-    const mk = c => _mBasic({ color: c });
-    const mats = { eyeW: mk(0xffffff), eye: mk(look.eyes || '#1b1f2a'), line: mk(0x1b1f2a), mouthIn: _mBasic({ color: 0x6a1d2a, side: THREE.DoubleSide }), mouthW: mk(0x2b1118),
-      teeth: _mBasic({ color: 0xfaf6ea, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), tongue: mk(0xe5566f), heart: _mBasic({ color: 0xff3b5c, side: THREE.DoubleSide }), tear: mk(0x7fd0ff) };
+    const mk = c => new THREE.MeshBasicMaterial({ color: c });
+    const mats = { eyeW: mk(0xffffff), eye: mk(look.eyes || '#1b1f2a'), line: mk(0x1b1f2a), mouthIn: new THREE.MeshBasicMaterial({ color: 0x6a1d2a, side: THREE.DoubleSide }), mouthW: mk(0x2b1118),
+      teeth: new THREE.MeshBasicMaterial({ color: 0xfaf6ea, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), tongue: mk(0xe5566f), heart: new THREE.MeshBasicMaterial({ color: 0xff3b5c, side: THREE.DoubleSide }), tear: mk(0x7fd0ff) };
     mats.head = mats.eyeW;
     const holder = new THREE.Group(); holder.name = 'CrixFace'; holder.scale.setScalar(BASE_SCALE); holder.userData.noShadow = true; head.add(holder);   // la malla de la cabeza ya viene a escala BASE_SCALE
     const visuals = {}; for (const n of BONE_NAMES) visuals[n] = new THREE.Group();
@@ -614,21 +610,21 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     }
     const av = { root, bones, visuals, look, mats, parts: {}, accessories: {}, face: null, hair: null, joints: [], style: null, kind: MODEL.state === 'failed' ? 'legacy' : 'model', built: false };
     layoutBones(av, av.kind === 'model');
-    av.mats.skin = _mStd({ color: 0xffd9b3, roughness: 0.52, clearcoat: 0.12, clearcoatRoughness: 0.55 });   // piel: mate con un leve brillo
-    av.mats.shirt = _mStd({ color: 0x5b8def, roughness: 0.82 });
-    av.mats.pants = _mStd({ color: 0x3a4668, roughness: 0.88 });
-    av.mats.shoes = _mStd({ color: 0x22262e, roughness: 0.45, clearcoat: 0.35, clearcoatRoughness: 0.3 });
-    av.mats.hair = _mStd({ color: 0x3b2a1e, roughness: 0.42, metalness: 0.05, clearcoat: 0.25, clearcoatRoughness: 0.35 });
-    av.mats.white = _mStd({ color: CLAY, roughness: 0.7 });
-    av.mats.joint = _mStd({ color: 0xb9c2d0, roughness: 0.35, metalness: 0.6 });
-    av.mats.eyeW = _mBasic({ color: 0xffffff });
-    av.mats.eye = _mBasic({ color: 0x1b1f2a });
-    av.mats.line = _mBasic({ color: 0x1b1f2a });
-    av.mats.mouthIn = _mBasic({ color: 0x6a1d2a, side: THREE.DoubleSide });
+    av.mats.skin = new THREE.MeshPhongMaterial({ color: 0xffd9b3, shininess: 20 });
+    av.mats.shirt = new THREE.MeshPhongMaterial({ color: 0x5b8def, shininess: 25 });
+    av.mats.pants = new THREE.MeshPhongMaterial({ color: 0x3a4668, shininess: 15 });
+    av.mats.shoes = new THREE.MeshPhongMaterial({ color: 0x22262e, shininess: 30 });
+    av.mats.hair = new THREE.MeshPhongMaterial({ color: 0x3b2a1e, shininess: 40 });
+    av.mats.white = new THREE.MeshPhongMaterial({ color: CLAY, shininess: 8 });
+    av.mats.joint = new THREE.MeshPhongMaterial({ color: 0xb9c2d0, shininess: 40 });
+    av.mats.eyeW = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    av.mats.eye = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
+    av.mats.line = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
+    av.mats.mouthIn = new THREE.MeshBasicMaterial({ color: 0x6a1d2a, side: THREE.DoubleSide });
     av.mats.head = av.mats.skin;   // la cabeza usa el color de piel (arcilla en el estilo 'stick'), igual que el cuerpo: ya no es negra
-    av.mats.mouthW = _mBasic({ color: 0x2b1118 });   // interior de la boca (oscuro, para que resalten los dientes sobre la cabeza clara)
-    av.mats.teeth = _mBasic({ color: 0xfaf6ea, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); av.mats.tongue = _mBasic({ color: 0xe5566f });
-    av.mats.heart = _mBasic({ color: 0xff3b5c, side: THREE.DoubleSide }); av.mats.tear = _mBasic({ color: 0x7fd0ff });
+    av.mats.mouthW = new THREE.MeshBasicMaterial({ color: 0x2b1118 });   // interior de la boca (oscuro, para que resalten los dientes sobre la cabeza clara)
+    av.mats.teeth = new THREE.MeshBasicMaterial({ color: 0xfaf6ea, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); av.mats.tongue = new THREE.MeshBasicMaterial({ color: 0xe5566f });
+    av.mats.heart = new THREE.MeshBasicMaterial({ color: 0xff3b5c, side: THREE.DoubleSide }); av.mats.tear = new THREE.MeshBasicMaterial({ color: 0x7fd0ff });
         av.pose = {}; av.target = {}; av.layers = { anim: null, emote: null, over: {} };
     av.state = { t: Math.random() * 10, blinkT: 2 + Math.random() * 3, blink: 0, face: look.face, faceT: 0, talk: 0, loco: 'idle', locoBlend: 0, phase: 0, landT: 0, lastGround: true, lastVy: 0, sitting: false };
     for (const n of BONE_NAMES) { av.pose[n] = { q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(1, 1, 1) }; }
@@ -760,26 +756,26 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
         if (!col) { if (c.userData.baseMat) { c.material = c.userData.baseMat; delete c.userData.baseMat; } continue; }
         if (!c.userData.baseMat) c.userData.baseMat = c.material;
         let m = av.partMats[bone]; if (!m) { m = c.userData.baseMat.clone(); av.partMats[bone] = m; }
-        m.color.set(col).convertSRGBToLinear(); c.material = m;
+        m.color.set(col); c.material = m;
       }
     }
   }
   function applyLook(av, look) {
     av.look = sanitizeLook(look, av.look);
     const L = av.look, M = av.mats;
-    M.skin.color.set((L.parts && L.parts.Head) || (L.style === 'stick' ? CLAY : L.skin)).convertSRGBToLinear(); M.pants.color.set(L.pants).convertSRGBToLinear(); M.shoes.color.set(L.shoes).convertSRGBToLinear(); M.hair.color.set(L.hairColor).convertSRGBToLinear(); M.eye.color.set(L.eyes).convertSRGBToLinear();
-    const shirt = L.shirt || (av.userColor || '#5b8def'); M.shirt.color.set(shirt).convertSRGBToLinear();
+    M.skin.color.set((L.parts && L.parts.Head) || (L.style === 'stick' ? CLAY : L.skin)); M.pants.color.set(L.pants); M.shoes.color.set(L.shoes); M.hair.color.set(L.hairColor); M.eye.color.set(L.eyes);
+    const shirt = L.shirt || (av.userColor || '#5b8def'); M.shirt.color.set(shirt);
     if (av.style !== L.style) { av.style = L.style; buildBody(av, L.style); }
     else buildHair(av, L.hair);
     // Monigote: cabeza y cejas visibles; cejas siempre en oscuro
-    M.hair.color.set(L.style === 'stick' && L.hair === 'none' ? '#1b1f2a' : L.hairColor).convertSRGBToLinear();
+    M.hair.color.set(L.style === 'stick' && L.hair === 'none' ? '#1b1f2a' : L.hairColor);
     av.root.scale.setScalar(L.scale * BASE_SCALE);
     av.state.face = L.face; av.state.faceT = 0;
     applyPartColors(av);
     syncEquip(av, L.equip);
     av.root.traverse(o => { if (o.isMesh && !o.userData.noShadow && o.userData.tag !== 'face') o.castShadow = true; });
   }
-  function setUserColor(av, color) { av.userColor = color; if (!av.look.shirt) av.mats.shirt.color.set(color).convertSRGBToLinear(); }
+  function setUserColor(av, color) { av.userColor = color; if (!av.look.shirt) av.mats.shirt.color.set(color); }
 
   // ── Animación ────────────────────────────────────────────────────────────────────────────────
   // Una pose = { Bone: [rx, ry, rz] (radianes), Hips_y: offset vertical, Hips_z... }. Se arma por funciones puras de (t, ctx).
@@ -1031,7 +1027,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   }
   function setBoneColor(av, n, color) {
     const c = normalizeHex(color, null); if (!c) return;
-    av.visuals[n].traverse(m => { if (m.isMesh && m.userData.tag === 'body') { if (!m.userData.ownMat) { m.material = m.material.clone(); m.userData.ownMat = true; } m.material.color.set(c).convertSRGBToLinear(); } });
+    av.visuals[n].traverse(m => { if (m.isMesh && m.userData.tag === 'body') { if (!m.userData.ownMat) { m.material = m.material.clone(); m.userData.ownMat = true; } m.material.color.set(c); } });
   }
   function resetBone(av, n) {
     if (n) { delete av.layers.over[n]; av.visuals[n].visible = true; if (n === 'Teeth') av.teethMode = null; av.visuals[n].traverse(m => { if (m.isMesh && m.userData.ownMat) { m.userData.ownMat = false; } }); return; }
@@ -1046,8 +1042,8 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   function addAccessory(av, id, bone, rawSpec) {
     id = accId(id); const sp = sanitizeAccessory(bone, rawSpec); if (!id || !sp) return false;
     removeAccessory(av, id); if (Object.keys(av.accessories).length >= MAX_ACCESSORIES) return false;
-    const mat = _mStd({ color: sp.color, roughness: 0.45, transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 });
-    if (sp.emissive) mat.emissive = _mLin(sp.emissive);
+    const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(sp.color), shininess: 40, transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 });
+    if (sp.emissive) mat.emissive = new THREE.Color(sp.emissive);
     const m = new THREE.Mesh(G('acc_' + sp.shape, ACC_SHAPES[sp.shape]), mat); m.castShadow = true; m.userData.tag = 'acc';
     m.scale.set(sp.size[0], sp.size[1], sp.size[2]); m.position.set(sp.offset[0], sp.offset[1], sp.offset[2]); m.rotation.set(sp.rotation[0] * DEG, sp.rotation[1] * DEG, sp.rotation[2] * DEG);
     av.visuals[sp.bone].add(m); av.accessories[id] = { mesh: m, bone: sp.bone }; return true;
@@ -1099,8 +1095,8 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       let obj;
       if (sp.shape === 'model') { if (!model) continue; obj = model.clone(true); }
       else {
-        const mat = _mStd({ color: sp.color, roughness: 0.45, transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 });
-        if (sp.emissive) mat.emissive = _mLin(sp.emissive);
+        const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(sp.color), shininess: 40, transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 });
+        if (sp.emissive) mat.emissive = new THREE.Color(sp.emissive);
         mats.push(mat); obj = new THREE.Mesh(G('acc_' + sp.shape, ACC_SHAPES[sp.shape]), mat); obj.castShadow = true;
       }
       obj.userData.eqacc = true;
