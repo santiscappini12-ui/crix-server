@@ -10,11 +10,14 @@
   if (!T) return;
   const mobile = /Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || Math.min(innerWidth, innerHeight) < 600;
   let pref = ''; try { pref = String(localStorage.getItem('crix_gfx') || ''); } catch (e) {}
+  if (pref === 'off') return;   // sin CrixGFX el juego usa sus materiales y luces de siempre
   const QUALITY = (pref === 'low' || pref === 'high' || pref === 'ultra') ? pref : (mobile ? 'low' : 'high');
-  // SRGB=false: se conserva el flujo de color original del juego (salida lineal, colores tal cual se eligen, sin tone mapping),
-  // así avatares, accesorios y mapas existentes no cambian de color. Solo mejoran materiales, reflejos, cielo y sombras.
-  const SRGB = false;
-  const Q = { srgb: SRGB, quality: QUALITY, clouds: QUALITY !== 'low', bump: QUALITY !== 'low', physical: QUALITY !== 'low', env: true, anisotropy: QUALITY === 'ultra' ? 16 : QUALITY === 'high' ? 8 : 2 };
+  // Flujo de color correcto: salida sRGB + tone mapping ACES, con todos los colores de entrada convertidos a lineal.
+  // Los materiales "viejos" (Basic/Phong/Lambert/Points/Sprite, p. ej. los del avatar) se parchean más abajo para convertir
+  // solos lo que se les asigna: sus archivos no se tocan y sus colores se ven igual que se eligieron.
+  // Para volver al aspecto anterior: localStorage.setItem('crix_gfx','off') y recargar.
+  const SRGB = true;
+  const Q = { srgb: SRGB, quality: QUALITY, clouds: true, bump: QUALITY !== 'low', physical: QUALITY !== 'low', env: true, anisotropy: QUALITY === 'ultra' ? 16 : QUALITY === 'high' ? 8 : 2 };
 
   // ── Color ────────────────────────────────────────────────────────────────────────────────────
   // Los colores del juego están escritos en sRGB (#rrggbb). Con salida sRGB, los materiales necesitan color lineal.
@@ -22,10 +25,24 @@
   const lin = c => { const k = c && c.isColor ? c.clone() : new T.Color(c); return SRGB ? k.convertSRGBToLinear() : k; };
   const roughFromShine = s => Math.max(0.04, Math.min(1, 1 - 0.85 * Math.min(1, Math.sqrt(Math.max(0, s) / 150))));
 
-  function basic(params) {          // material sin luz (ojos, sangre, gizmos…): mismo color en pantalla que antes
-    const m = new T.MeshBasicMaterial(params || {});
-    if (SRGB) m.color.convertSRGBToLinear(); m.toneMapped = false; return m;
+  // Color "de entrada sRGB": al asignarle un valor (hex, nombre, css) lo guarda ya en lineal. Copiar de otro Color no convierte.
+  class SColor extends T.Color {
+    setHex(h) { super.setHex(h); if (!this._in) this.convertSRGBToLinear(); return this; }
+    setStyle(st) { this._in = true; try { super.setStyle(st); } finally { this._in = false; } return this.convertSRGBToLinear(); }
   }
+  function patchColor(proto, key) {
+    if (!proto) return; const k = '__' + key;
+    Object.defineProperty(proto, key, { configurable: true, enumerable: true,
+      get() { return this[k]; },
+      set(v) { if (!v || v instanceof SColor) { this[k] = v; return; } const c = new SColor(); c.r = v.r; c.g = v.g; c.b = v.b; this[k] = c; } });
+  }
+  if (SRGB) {
+    ['MeshBasicMaterial', 'MeshPhongMaterial', 'MeshLambertMaterial', 'PointsMaterial', 'SpriteMaterial', 'LineBasicMaterial'].forEach(n => patchColor(T[n] && T[n].prototype, 'color'));
+    ['MeshPhongMaterial', 'MeshLambertMaterial'].forEach(n => patchColor(T[n] && T[n].prototype, 'emissive'));
+    // Lo que no tiene luz (ojos, sangre, gizmos, etiquetas) no pasa por el tone mapping: se ve del color exacto.
+    ['MeshBasicMaterial', 'SpriteMaterial'].forEach(n => { const pr = T[n] && T[n].prototype; if (pr) Object.defineProperty(pr, 'toneMapped', { configurable: true, enumerable: true, get() { return false; }, set() {} }); });
+  }
+  function basic(params) { return new T.MeshBasicMaterial(params || {}); }   // la conversión de color la hace el parche de arriba
   function std(params) {            // reemplazo PBR de MeshPhongMaterial ({color, shininess, opacity, emissive…})
     const p = Object.assign({}, params || {});
     if (p.shininess !== undefined) { if (p.roughness === undefined) p.roughness = roughFromShine(p.shininess); delete p.shininess; }
@@ -47,7 +64,7 @@
   // ── Renderer ─────────────────────────────────────────────────────────────────────────────────
   function setupRenderer(r, o) {
     o = o || {};
-    if (SRGB) { r.outputEncoding = T.sRGBEncoding; r.toneMapping = T.ACESFilmicToneMapping; r.toneMappingExposure = o.exposure || 1.0; }
+    if (SRGB) { r.outputEncoding = T.sRGBEncoding; r.toneMapping = T.ACESFilmicToneMapping; r.toneMappingExposure = o.exposure || 0.9; }
     if (r.shadowMap) { r.shadowMap.enabled = true; r.shadowMap.type = T.PCFSoftShadowMap; }
     Q.maxAniso = Math.min(Q.anisotropy, r.capabilities && r.capabilities.getMaxAnisotropy ? r.capabilities.getMaxAnisotropy() : 4);
     Q.anisotropy = Q.maxAniso || Q.anisotropy;
@@ -62,7 +79,7 @@
     'float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }',
     'float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
     '  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }',
-    'float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * vnoise(p); p = p * 2.03 + 17.0; a *= 0.5; } return s; }',
+    '#ifndef CLOUD_OCT\n#define CLOUD_OCT 5\n#endif\nfloat fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < CLOUD_OCT; i++) { s += a * vnoise(p); p = p * 2.03 + 17.0; a *= 0.5; } return s; }',
     'void main(){',
     '  vec3 d = normalize(vDir); float h = d.y;',
     '  vec3 col = mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.42));',
@@ -71,12 +88,22 @@
     '  float haze = pow(sd, 5.0) * (1.0 - clamp(h, 0.0, 1.0) * 0.6);',
     '  col += uSunCol * (haze * 0.16 + pow(sd, 48.0) * 0.38 + pow(sd, 3500.0) * uSunBoost);',
     '#ifdef CLOUDS',
-    '  if (h > 0.015) {',
-    '    vec2 uv = d.xz / (h + 0.22) * 0.55 + vec2(uTime * 0.004, uTime * 0.0015);',
-    '    float n = fbm(uv * 1.7); float cov = smoothstep(0.47 - uCloudAmt * 0.12, 0.84, n);',
-    '    float lit = clamp(0.55 + 0.45 * dot(normalize(vec3(sd3.x, 0.0, sd3.z) + 1e-4), normalize(vec3(d.x, 0.0, d.z) + 1e-4)) * 0.5 + 0.3 * sd3.y, 0.0, 1.0);',
-    '    vec3 cc = mix(uHorizon * 0.55 + uZenith * 0.25, vec3(1.0) * (0.78 + 0.5 * lit) * mix(vec3(1.0), uSunCol, 0.35), lit);',
-    '    col = mix(col, cc, cov * smoothstep(0.015, 0.2, h) * 0.9);',
+    '  if (h > 0.02) {',
+    '    vec2 uv = d.xz / (h + 0.2) * 0.5 + vec2(uTime * 0.006, uTime * 0.002);',
+    '    float n = fbm(uv * 1.6);',
+    '    float dens = smoothstep(0.5 - uCloudAmt * 0.14, 0.82, n);',
+    '    if (dens > 0.001) {',
+    '      vec2 sdir = normalize(sd3.xz + 1e-4) * (0.35 - 0.2 * sd3.y);',
+    '      float nl = fbm((uv + sdir * 0.12) * 1.6);',
+    '      float shade = clamp(1.0 - (nl - n) * 7.0 - 0.12, 0.0, 1.0);',
+    '      float thick = smoothstep(0.55, 0.9, n);',
+    '      vec3 lit = uSunCol * (0.85 + 0.3 * sd3.y);',
+    '      vec3 base = mix(uHorizon, uZenith, 0.55) * 0.9 + vec3(0.12);',
+    '      vec3 cc = mix(base * (0.5 - 0.14 * thick), lit, shade * (1.0 - 0.55 * thick));',
+    '      cc += uSunCol * pow(sd, 6.0) * (1.0 - dens) * 0.55;',
+    '      float fade = smoothstep(0.02, 0.28, h);',
+    '      col = mix(col, cc, dens * fade * 0.96);',
+    '    }',
     '  }',
     '#endif',
     '  gl_FragColor = vec4(col * uExposure, 1.0);',
@@ -89,7 +116,7 @@
         uExposure: { value: 1 }, uSunBoost: { value: 30 }, uTime: { value: 0 }, uCloudAmt: { value: 0.5 } },
       vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, side: T.BackSide, depthWrite: false, depthTest: false, fog: false, toneMapped: false
     });
-    if (clouds) m.defines = { CLOUDS: 1 };
+    if (clouds) m.defines = { CLOUDS: 1, CLOUD_OCT: Q.quality === 'low' ? 3 : 5 };
     return m;
   }
   const SKY_GEO = new T.SphereGeometry(1, clampSeg(32), clampSeg(18));
@@ -139,7 +166,7 @@
       const pm = renderer.userData && renderer.userData._pmrem || (renderer.userData = renderer.userData || {}, renderer.userData._pmrem = new T.PMREMGenerator(renderer));
       const es = new T.Scene(), dome = sky(false);
       dome.scale.set(50, 50, 50);
-      applySky(dome, P, 6, (0.55 + 0.45 * P.day) * P.B * 0.6);
+      applySky(dome, P, 6, (0.55 + 0.45 * P.day) * P.B * 0.8);
       es.add(dome);
       const rt = pm.fromScene(es, 0.02, 1, 100);
       const old = st.envRT; scene.environment = rt.texture; st.envRT = rt; st.envKey = key;

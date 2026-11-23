@@ -3018,6 +3018,7 @@ function openAvatarEditor() {
   if (!avEd) {
     const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }), scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(30, cv.width / cv.height, 0.1, 100);
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(cv.width, cv.height, false);
+    if (window.CrixGFX) CrixGFX.setupRenderer(renderer, { exposure: 1.0 });   // misma salida de color que el juego (el avatar usa sus materiales de siempre)
         scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa4b8, window.CrixGFX ? 0.5 : 0.8), new THREE.AmbientLight(0xffffff, 0.3)); const sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(3, 6, 5); scene.add(sun);
     cam.position.set(0, 1.9, 11); cam.lookAt(0, 1.55, 0);
     avEd = { renderer, scene, cam, av: null, mode: 'idle', raf: 0, yaw: 0.35, last: 0 };
@@ -3499,8 +3500,8 @@ function applyLightRig(rig, L) {
   const ibl = !!(window.CrixGFX && rig.scene.environment);   // con entorno IBL el cielo ya aporta la luz ambiental: se baja el relleno
   const toLin = c => window.CrixGFX ? CrixGFX.lin(c) : c;
   const amb = new THREE.Color(L.ambient), sky = new THREE.Color(L.fogColor || '#87ceeb').lerp(new THREE.Color(0xffffff), 0.45);
-  rig.amb.color.copy(toLin(amb)); rig.amb.intensity = (ibl ? 0.1 : 0.2) * B;
-  rig.hemi.color.copy(toLin(sky)); rig.hemi.groundColor.copy(toLin(amb)).multiplyScalar(0.45); rig.hemi.intensity = (ibl ? 0.2 : 0.42) * B;
+  rig.amb.color.copy(toLin(amb)); rig.amb.intensity = (ibl ? 0.05 : 0.2) * B;
+  rig.hemi.color.copy(toLin(sky)); rig.hemi.groundColor.copy(toLin(amb)).multiplyScalar(0.45); rig.hemi.intensity = (ibl ? 0.12 : 0.42) * B;
   rig.sun.castShadow = L.shadows !== false;
   const sh = rig.sun.shadow, ext = rig.extent, dist = ext * 2.6, cam = sh.camera;
   cam.left = -ext; cam.right = ext; cam.top = ext; cam.bottom = -ext; cam.near = 1; cam.far = dist + ext * 2.2;
@@ -4457,7 +4458,7 @@ function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE
 function _loadMap(m) {
   const toRemove=[]; gScene.traverse(object=>{if(object!==gScene)toRemove.push(object);});toRemove.forEach(object=>gScene.remove(object));
   gColliders=[];gNPCs=[];runtimeObjects.clear();_localRoom=null;_localPrev=null;networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];_ragAbort();gPlayer=null;
-  disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:2048});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
+  disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:((window.CrixGFX&&CrixGFX.Q.quality==='ultra')?4096:2048)});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
   const parts=m.parts||[];runtimeWorkspaceBase=scriptPartsSnapshot(parts).filter(part=>part.type==='Spawn'||part.isNPC);let spawn={x:0,y:3,z:0};
   parts.forEach((part,index)=>{
     if(part.type==='Spawn'){spawn={x:part.x||0,y:(part.y||0)+(part.sy||0.4)/2,z:part.z||0};return;}
@@ -8755,7 +8756,7 @@ function buildPartMaterial(d) {
     if (def.coat) { p.clearcoat = def.coat; p.clearcoatRoughness = def.coatRough || 0.1; }
     if (def.emissive) p.emissive = d.color || '#00ff88';
     mat = G.std(p); mat.envMapIntensity = def.env || 1;
-    if (def.emissive) { mat.emissiveIntensity = def.emissive; }
+    if (def.emissive) { mat.emissiveIntensity = def.glow || def.emissive; }
   } else {
     mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color || '#888888'), transparent: tr > 0, opacity: 1 - tr, wireframe: d.type === 'TrussPart', shininess: def.shine });
     if (def.specular) mat.specular = new THREE.Color(def.specular);
