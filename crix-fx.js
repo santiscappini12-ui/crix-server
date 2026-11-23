@@ -4,7 +4,7 @@
   const MAX_LIGHTS = 6, MAX_PARTICLES = 300;
   function create(THREE, scene) {
     let lights = [], systems = [], tmp = new THREE.Vector3(), warned = false;
-    const col = (c, d) => new THREE.Color(/^#/.test(String(c)) ? c : d);
+    const col = (c, d) => { const k = new THREE.Color(/^#/.test(String(c)) ? c : d); return window.CrixGFX ? k.convertSRGBToLinear() : k; };   // color lineal para la salida sRGB
 
     function clear() {
       for (const l of lights) { if (l.target && l.target.parent) l.target.parent.remove(l.target); if (l.parent) l.parent.remove(l); }

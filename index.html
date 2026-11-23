@@ -1139,6 +1139,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <script src="/crix-console.js"></script>
 <script src="/crix-native.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="/crix-gfx.js"></script>
 <script src="/GLTFLoader.js"></script>
 <script src="/crix-avatar.js"></script>
 <script src="/crix-joints.js"></script>
@@ -3017,7 +3018,8 @@ function openAvatarEditor() {
   if (!avEd) {
     const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }), scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(30, cv.width / cv.height, 0.1, 100);
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(cv.width, cv.height, false);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa4b8, 0.8), new THREE.AmbientLight(0xffffff, 0.3)); const sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(3, 6, 5); scene.add(sun);
+    if (window.CrixGFX) { CrixGFX.setupRenderer(renderer, { exposure: 1.05 }); CrixGFX.applyScene(scene, { fogColor: '#cfdcf0', sunElevation: 48, sunAzimuth: 35, brightness: 1 }, renderer, { sky: false }); }
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa4b8, window.CrixGFX ? 0.12 : 0.8), new THREE.AmbientLight(0xffffff, window.CrixGFX ? 0.05 : 0.3)); const sun = new THREE.DirectionalLight(0xffffff, window.CrixGFX ? 1.15 : 0.7); sun.position.set(3, 6, 5); scene.add(sun);
     cam.position.set(0, 1.9, 11); cam.lookAt(0, 1.55, 0);
     avEd = { renderer, scene, cam, av: null, mode: 'idle', raf: 0, yaw: 0.35, last: 0 };
     if (window.ResizeObserver) new ResizeObserver(() => avEdResize()).observe(cv);   // la vista previa sigue el tamaño real del recuadro (celular, tablet, PC, al girar)
@@ -3470,6 +3472,7 @@ function createLightRig(scene, renderer, L, opts) {
   opts = opts || {};
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  if (window.CrixGFX) CrixGFX.applyScene(scene, L, renderer);   // cielo + reflejos de entorno (antes de calcular las luces)
   const rig = {
     scene, renderer, extent: opts.extent || 36, mapSize: opts.mapSize || 2048, dir: new THREE.Vector3(0, 1, 0),
     hemi: new THREE.HemisphereLight(0xffffff, 0x555566, 0.4), amb: new THREE.AmbientLight(0xffffff, 0.18),
@@ -3477,7 +3480,7 @@ function createLightRig(scene, renderer, L, opts) {
     _r: new THREE.Vector3(), _u: new THREE.Vector3(), _f: new THREE.Vector3(), _up: new THREE.Vector3()
   };
   const sh = rig.sun.shadow;
-  sh.mapSize.set(rig.mapSize, rig.mapSize); sh.bias = -0.0004; sh.normalBias = 0.04;
+  sh.mapSize.set(rig.mapSize, rig.mapSize); sh.bias = -0.0003; sh.normalBias = 0.035; if ('radius' in sh) sh.radius = 2;
   scene.add(rig.hemi, rig.amb, rig.sun, rig.sun.target);
   applyLightRig(rig, L);
   return rig;
@@ -3494,9 +3497,12 @@ function applyLightRig(rig, L) {
   const warm = Math.max(0, Math.min(1, (28 - L.sunElevation) / 28));
   rig.sun.color.setRGB(1, 1 - 0.28 * warm, 1 - 0.55 * warm);
   rig.sun.intensity = 0.82 * B * L.sunIntensity * (1 - 0.35 * warm);
+  const ibl = !!(window.CrixGFX && rig.scene.environment);   // con entorno IBL el cielo ya aporta la luz ambiental: se baja el relleno
+  const toLin = c => window.CrixGFX ? CrixGFX.lin(c) : c;
   const amb = new THREE.Color(L.ambient), sky = new THREE.Color(L.fogColor || '#87ceeb').lerp(new THREE.Color(0xffffff), 0.45);
-  rig.amb.color.copy(amb); rig.amb.intensity = 0.2 * B;
-  rig.hemi.color.copy(sky); rig.hemi.groundColor.copy(amb).multiplyScalar(0.45); rig.hemi.intensity = 0.42 * B;
+  rig.amb.color.copy(toLin(amb)); rig.amb.intensity = (ibl ? 0.06 : 0.2) * B;
+  rig.hemi.color.copy(toLin(sky)); rig.hemi.groundColor.copy(toLin(amb)).multiplyScalar(0.45); rig.hemi.intensity = (ibl ? 0.1 : 0.42) * B;
+  if (ibl) rig.sun.intensity *= 1.35;   // sol más marcado: sombras con contraste y volumen
   rig.sun.castShadow = L.shadows !== false;
   const sh = rig.sun.shadow, ext = rig.extent, dist = ext * 2.6, cam = sh.camera;
   cam.left = -ext; cam.right = ext; cam.top = ext; cam.bottom = -ext; cam.near = 1; cam.far = dist + ext * 2.2;
@@ -3520,6 +3526,7 @@ function updateLightRigFocus(rig, pos) {
 }
 // Cielo, niebla y corrección de color de la pantalla (brillo, contraste y saturación).
 function applyLightingToScene(scene, L, canvas) {
+  if (window.CrixGFX) CrixGFX.applyScene(scene, L);
   scene.fog = L.fog ? new THREE.FogExp2(new THREE.Color(L.fogColor), L.fogDensity) : null;
   scene.background = new THREE.Color(L.fogColor || '#87ceeb');
   if (canvas) {
@@ -3536,7 +3543,7 @@ function setShadowFlags(mesh) {
   mesh.castShadow = !(m && ((m.transparent && m.opacity < 0.6) || m.wireframe));
 }
 function shadowAllMeshes(root) { root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); }
-function _setupStRenderer() { stScene = new THREE.Scene(); stScene.background = new THREE.Color(0x0d1020); stScene.fog = new THREE.FogExp2(0x0d1020, 0.007); const wrap = document.getElementById('stu-canvas-wrap'); stCamera = new THREE.PerspectiveCamera(60, wrap.clientWidth/wrap.clientHeight, 0.1, 1000); stRenderer = new THREE.WebGLRenderer({antialias:true}); stRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); wrap.appendChild(stRenderer.domElement); stRig = createLightRig(stScene, stRenderer, stLighting, { extent: GFX_MOBILE ? 50 : 70, mapSize: GFX_MOBILE ? 1024 : 2048 }); applyLightingToScene(stScene, stLighting, stRenderer.domElement); const grid = new THREE.GridHelper(200, 50, 0x1a2035, 0x111828); stScene.add(grid); new ResizeObserver(() => { stCamera.aspect = wrap.clientWidth/wrap.clientHeight; stCamera.updateProjectionMatrix(); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); }).observe(wrap); }
+function _setupStRenderer() { stScene = new THREE.Scene(); stScene.background = new THREE.Color(0x0d1020); stScene.fog = new THREE.FogExp2(0x0d1020, 0.007); const wrap = document.getElementById('stu-canvas-wrap'); stCamera = new THREE.PerspectiveCamera(60, wrap.clientWidth/wrap.clientHeight, 0.1, 1000); stRenderer = new THREE.WebGLRenderer({antialias:true}); stRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); if (window.CrixGFX) CrixGFX.setupRenderer(stRenderer, { exposure: 1.0 }); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); wrap.appendChild(stRenderer.domElement); stRig = createLightRig(stScene, stRenderer, stLighting, { extent: GFX_MOBILE ? 50 : 70, mapSize: GFX_MOBILE ? 1024 : 2048 }); applyLightingToScene(stScene, stLighting, stRenderer.domElement); const grid = new THREE.GridHelper(200, 50, 0x1a2035, 0x111828); stScene.add(grid); new ResizeObserver(() => { stCamera.aspect = wrap.clientWidth/wrap.clientHeight; stCamera.updateProjectionMatrix(); stRenderer.setSize(wrap.clientWidth, wrap.clientHeight); }).observe(wrap); }
 function _setupStInput() { const el = stRenderer.domElement; el.addEventListener('mousedown', e => { if (e.button === 1 || e.button === 2) { stDrag = true; stLX = e.clientX; stLY = e.clientY; } if (e.button === 0) onStClick(e); }); window.addEventListener('mouseup', () => { const wasDragging = gizmoDragging; stDrag = false; gizmoDragging = false; if (wasDragging && selPart) { updateGizmoPos(); renderProps(selPart); } }); window.addEventListener('mousemove', e => { if (gizmoDragging && selPart) onGizmoDrag(e); if (stDrag) { stCamTheta -= (e.clientX - stLX) * 0.01; stCamPhi = Math.max(0.05, Math.min(Math.PI/2.1, stCamPhi + (e.clientY - stLY) * 0.01)); stLX = e.clientX; stLY = e.clientY; } }); el.addEventListener('wheel', e => { stCamDist = Math.max(3, Math.min(200, stCamDist + e.deltaY * 0.07)); e.preventDefault(); }, {passive:false}); el.style.touchAction = 'none'; let stPinch = 0; const stPD = e => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
   el.addEventListener('touchstart', e => { if (e.touches.length === 2) stPinch = stPD(e); }, {passive:true});
   el.addEventListener('touchmove', e => { if (e.touches.length === 2) { e.preventDefault(); const d = stPD(e); if (stPinch > 0 && d > 0) stCamDist = Math.max(3, Math.min(200, stCamDist * stPinch / d)); stPinch = d; } }, {passive:false});
@@ -3606,11 +3613,11 @@ function stuPaste() { if(!stClip){showToast('No hay nada copiado');return;} reco
 function stuNudge(dx,dy,dz) { if(!selPart)return; const st=stSnap||0.5,d=selPart.data; recordStudioHistory(); d.x=(Number(d.x)||0)+dx*st; d.y=(Number(d.y)||0)+dy*st; d.z=(Number(d.z)||0)+dz*st; selPart.mesh.position.set(d.x,d.y,d.z); updateSelectionOutline(); updateGizmoPos(); renderProps(selPart); }
 function stuDuplicate() { if(!selPart){showToast('Seleccioná algo primero');return;}recordStudioHistory();const d={...selPart.data,id:'p'+Date.now(),x:selPart.data.x+2,z:selPart.data.z+2};const entry=addPartMesh(d);refreshExplorer();selectPart(entry);}
 function setTool(t) { stTool = t; ['sel','mov','rot','scl'].forEach(x => { const el = document.getElementById('tool-'+x); if (el) el.classList.toggle('active', x===t); }); if (selPart) buildGizmo(selPart); }
-function buildGizmo(entry) { clearGizmo();if(stTool==='sel')return;const pos=entry.mesh.position.clone();[{axis:'x',color:0xff3333},{axis:'y',color:0x22ff22},{axis:'z',color:0x3366ff}].forEach(a=>{let geo;if(stTool==='scl')geo=new THREE.BoxGeometry(0.4,0.4,0.4);else if(stTool==='rot')geo=new THREE.TorusGeometry(a.axis==='y'?2:1.7,0.07,6,28,Math.PI*2);else geo=new THREE.ConeGeometry(0.22,1.3,8);const dirs={x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)},mat=new THREE.MeshBasicMaterial({color:a.color,depthTest:false}),m=new THREE.Mesh(geo,mat);m.position.copy(pos).add(dirs[a.axis].clone().multiplyScalar(stTool==='rot'?0:3));if(stTool==='mov')m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dirs[a.axis]);if(stTool==='rot'){if(a.axis==='x')m.rotation.y=Math.PI/2;if(a.axis==='y')m.rotation.x=Math.PI/2;}m.userData.axis=a.axis;m.renderOrder=999;stScene.add(m);gizmoArrows.push(m);});}
+function buildGizmo(entry) { clearGizmo();if(stTool==='sel')return;const pos=entry.mesh.position.clone();[{axis:'x',color:0xff3333},{axis:'y',color:0x22ff22},{axis:'z',color:0x3366ff}].forEach(a=>{let geo;if(stTool==='scl')geo=new THREE.BoxGeometry(0.4,0.4,0.4);else if(stTool==='rot')geo=new THREE.TorusGeometry(a.axis==='y'?2:1.7,0.07,6,28,Math.PI*2);else geo=new THREE.ConeGeometry(0.22,1.3,8);const dirs={x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)},mat=(window.CrixGFX ? CrixGFX.basic : (p => new THREE.MeshBasicMaterial(p)))({color:a.color,depthTest:false}),m=new THREE.Mesh(geo,mat);m.position.copy(pos).add(dirs[a.axis].clone().multiplyScalar(stTool==='rot'?0:3));if(stTool==='mov')m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dirs[a.axis]);if(stTool==='rot'){if(a.axis==='x')m.rotation.y=Math.PI/2;if(a.axis==='y')m.rotation.x=Math.PI/2;}m.userData.axis=a.axis;m.renderOrder=999;stScene.add(m);gizmoArrows.push(m);});}
 function clearGizmo() { gizmoArrows.forEach(m => stScene.remove(m)); gizmoArrows = []; }
 function updateGizmoPos() { if(!selPart)return;const pos=selPart.mesh.position,dirs={x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)};gizmoArrows.forEach(m=>m.position.copy(pos).add(dirs[m.userData.axis].clone().multiplyScalar(stTool==='rot'?0:3))); }
 function updateSelectionOutline() { if(!selOutline||!selPart)return;if(selOutline.isBoxHelper){selOutline.update();return;}selOutline.position.copy(selPart.mesh.position);selOutline.rotation.copy(selPart.mesh.rotation);selOutline.scale.copy(selPart.mesh.scale).multiplyScalar(1.02); }
-function selectPart(entry) { if (!entry) return; deselect(); selPart = entry; try { if(entry.mesh.isMesh){const og=entry.mesh.geometry.clone(),om=new THREE.MeshBasicMaterial({color:0x5b8def,wireframe:true,depthTest:false});selOutline=new THREE.Mesh(og,om);selOutline.renderOrder=998;}else selOutline=new THREE.BoxHelper(entry.mesh,0x5b8def);stScene.add(selOutline);updateSelectionOutline(); } catch {} buildGizmo(entry); renderProps(entry); refreshExplorer(); }
+function selectPart(entry) { if (!entry) return; deselect(); selPart = entry; try { if(entry.mesh.isMesh){const og=entry.mesh.geometry.clone(),om=(window.CrixGFX ? CrixGFX.basic : (p => new THREE.MeshBasicMaterial(p)))({color:0x5b8def,wireframe:true,depthTest:false});selOutline=new THREE.Mesh(og,om);selOutline.renderOrder=998;}else selOutline=new THREE.BoxHelper(entry.mesh,0x5b8def);stScene.add(selOutline);updateSelectionOutline(); } catch {} buildGizmo(entry); renderProps(entry); refreshExplorer(); }
 function deselect() { if (selOutline) { stScene.remove(selOutline); selOutline = null; } clearGizmo(); selPart = null; document.getElementById('props-body').innerHTML = '<div style="padding:20px 12px;color:var(--text3);font-size:11px;text-align:center;line-height:1.6">Seleccioná un objeto<br>para editar sus propiedades</div>'; refreshExplorer(); }
 function renderProps(entry) { const d=entry.data,materials=['SmoothPlastic','Brick','Wood','Metal','Neon','Glass','Grass','Sand','Concrete','Ice','Rock','DiamondPlate'],degrees=key=>((Number(d[key])||0)*180/Math.PI).toFixed(1),step=stSnap||0.5; document.getElementById('props-body').innerHTML=`<div class="prop-row"><div class="prop-lbl">Nombre</div><input class="prop-inp" value="${esc(d.name||'')}" maxlength="80" onchange="sp('name',this.value);refreshExplorer()"></div><div class="prop-row"><div class="prop-lbl">Posición · studs (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${Number(d.x||0).toFixed(2)}" step="${step}" onchange="spn('x',this.value)"><input class="prop-inp" type="number" value="${Number(d.y||0).toFixed(2)}" step="${step}" onchange="spn('y',this.value)"><input class="prop-inp" type="number" value="${Number(d.z||0).toFixed(2)}" step="${step}" onchange="spn('z',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Rotación · grados (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${degrees('rx')}" step="15" onchange="spRot('rx',this.value)"><input class="prop-inp" type="number" value="${degrees('ry')}" step="15" onchange="spRot('ry',this.value)"><input class="prop-inp" type="number" value="${degrees('rz')}" step="15" onchange="spRot('rz',this.value)"></div></div><div class="prop-row"><div class="prop-lbl">Tamaño (X Y Z)</div><div class="prop-grid3"><input class="prop-inp" type="number" value="${d.sx||4}" step="${step}" min="0.1" onchange="spSize('sx',this.value)"><input class="prop-inp" type="number" value="${d.sy||4}" step="${step}" min="0.1" onchange="spSize('sy',this.value)"><input class="prop-inp" type="number" value="${d.sz||4}" step="${step}" min="0.1" onchange="spSize('sz',this.value)"></div></div>${appearanceFields(d)}<div class="prop-row"><div class="tgl-row" onclick="toggleProp('anchored')"><div class="tgl ${d.anchored?'on':''}" id="tgl-anchored"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">Anchored</span></div></div><div class="prop-row"><div class="tgl-row" onclick="toggleProp('canCollide')"><div class="tgl ${d.canCollide?'on':''}" id="tgl-canCollide"><div class="tgl-k"></div></div><span class="prop-lbl" style="margin:0">CanCollide</span></div></div>${behaviorFields(d)}<div style="padding:8px;display:flex;gap:4px"><button class="st-btn" style="flex:1" onclick="stuDuplicate()">⎘ Duplicar</button><button class="st-btn red" style="flex:1" onclick="stuDelete()">✕ Borrar</button></div>`; }
 function sp(k,v){if(!selPart)return;recordStudioHistory();selPart.data[k]=String(v).slice(0,80);}
@@ -4448,7 +4455,7 @@ function playMap(mapId) {
   if(runtimePhysicsHandle)clearInterval(runtimePhysicsHandle);runtimePhysicsHandle=setInterval(_stepScriptParts,16);
   document.getElementById('g-map-name').textContent = m.name;
 }
-function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); gRenderer.shadowMap.enabled = true; gRenderer.shadowMap.type = THREE.PCFSoftShadowMap; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
+function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, GFX_MOBILE ? 1.5 : 2)); gRenderer.setSize(innerWidth, innerHeight); if (window.CrixGFX) CrixGFX.setupRenderer(gRenderer, { exposure: 1.0 }); gRenderer.shadowMap.enabled = true; gRenderer.shadowMap.type = THREE.PCFSoftShadowMap; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
 function _loadMap(m) {
   const toRemove=[]; gScene.traverse(object=>{if(object!==gScene)toRemove.push(object);});toRemove.forEach(object=>gScene.remove(object));
   gColliders=[];gNPCs=[];runtimeObjects.clear();_localRoom=null;_localPrev=null;networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];_ragAbort();gPlayer=null;
@@ -4826,7 +4833,7 @@ function netSendChat(text) { if (!socket || !netConnected) return false; socket.
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
 function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const built = _buildHumanoid(playerData.color || '#f97316', playerData.look); const group = built.group; group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, av: built.avatar, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false, og: true, spd: 0, vy: 0 }; flushAvatarPending(playerData.socketId); }
 function _buildAvatar(color) { return _buildHumanoid(color).group; }
-function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
+function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); if (window.CrixGFX) tex.encoding = THREE.sRGBEncoding; const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
 function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); if (rp.av) CrixAvatar.dispose(rp.av); }); remotePlayers = {}; }
 function netUpdateRemotes() { const LERP = 0.18, now = performance.now(), dt = Math.min(0.1, Math.max(0.001, (now - (netUpdateRemotes._t || now)) / 1000)); netUpdateRemotes._t = now;
   for (const rp of Object.values(remotePlayers)) {
@@ -6890,7 +6897,7 @@ function _remoteBloodUpdate(dt) {
     const P = b.pool; if (P) { P.grow = Math.min(1, (P.grow || 0) + dt / 2.2); const r = 0.25 + 1.5 * P.grow; P.mesh.scale.set(r, r * P.squash, 1); }
   }
 }
-function _bloodInit() { if (gBlood.geo) return; gBlood.geo = new THREE.SphereGeometry(0.09, 6, 5); gBlood.dropMat = new THREE.MeshBasicMaterial({ color: 0xa30b14 }); gBlood.stainGeo = new THREE.CircleGeometry(1, 18); }
+function _bloodInit() { if (gBlood.geo) return; gBlood.geo = new THREE.SphereGeometry(0.09, 6, 5); gBlood.dropMat = (window.CrixGFX ? CrixGFX.basic : (p => new THREE.MeshBasicMaterial(p)))({ color: 0xa30b14 }); gBlood.stainGeo = new THREE.CircleGeometry(1, 18); }
 function _bloodGroundY(x, z, y) {   // superficie horizontal más alta bajo la gota (cajas de colisión del mapa)
   let best = -Infinity;
   for (const col of gColliders) { const b = col.box; if (b && x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z && b.max.y <= y + 0.4 && b.max.y > best) best = b.max.y; }
@@ -6898,7 +6905,7 @@ function _bloodGroundY(x, z, y) {   // superficie horizontal más alta bajo la g
 }
 function _bloodStain(x, y, z, r, life, opacity) {
   _bloodInit(); if (!gScene) return null;
-  const mat = new THREE.MeshBasicMaterial({ color: 0x8a0a12, transparent: true, opacity: opacity || 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const mat = (window.CrixGFX ? CrixGFX.basic : (p => new THREE.MeshBasicMaterial(p)))({ color: 0x8a0a12, transparent: true, opacity: opacity || 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const m = new THREE.Mesh(gBlood.stainGeo, mat); m.rotation.x = -Math.PI / 2; m.rotation.z = Math.random() * 6.28; m.position.set(x, y + 0.02, z);
   const sq = _ragRand(0.65, 1); m.scale.set(r, r * sq, 1); m.renderOrder = 2; gScene.add(m);
   const st = { mesh: m, mat, age: 0, life, op: mat.opacity }; gBlood.stains.push(st);
@@ -8663,24 +8670,25 @@ window.addEventListener('beforeunload', () => { if (_callState && socket && sock
 
 // ═══ Materiales con aspecto real, color y texturas ═══
 var texLib = {}, stTexData = {}, stTexNames = {};
+// rough/metal/coat/bump = parámetros PBR (rugosidad, metalicidad, barniz, relieve); shine se conserva por compatibilidad.
 const MATERIAL_DEFS = {
-  SmoothPlastic:{label:'Plástico liso',shine:70},
-  Plastic:{label:'Plástico',shine:25,pattern:'speck'},
-  Brick:{label:'Ladrillo',shine:4,pattern:'brick'},
-  Wood:{label:'Madera',shine:14,pattern:'wood'},
-  WoodPlanks:{label:'Tablones',shine:12,pattern:'planks'},
-  Metal:{label:'Metal',shine:140,specular:0xaaaaaa,pattern:'brushed'},
-  DiamondPlate:{label:'Chapa',shine:110,specular:0x999999,pattern:'diamond'},
-  Neon:{label:'Neón',shine:30,emissive:0.7},
-  Glass:{label:'Vidrio',shine:200,glass:true},
-  Ice:{label:'Hielo',shine:150,ice:true,pattern:'ice'},
-  Grass:{label:'Pasto',shine:2,pattern:'grass'},
-  Sand:{label:'Arena',shine:1,pattern:'sand'},
-  Concrete:{label:'Hormigón',shine:3,pattern:'concrete'},
-  Rock:{label:'Roca',shine:6,pattern:'rock'},
-  Marble:{label:'Mármol',shine:90,pattern:'marble'},
-  Cobblestone:{label:'Adoquín',shine:5,pattern:'cobble'},
-  Fabric:{label:'Tela',shine:1,pattern:'weave'}
+  SmoothPlastic:{label:'Plástico liso',shine:70,rough:0.34,coat:0.5,coatRough:0.15},
+  Plastic:{label:'Plástico',shine:25,pattern:'speck',rough:0.55,bump:0.6},
+  Brick:{label:'Ladrillo',shine:4,pattern:'brick',rough:0.92,bump:2.4},
+  Wood:{label:'Madera',shine:14,pattern:'wood',rough:0.68,bump:0.9,coat:0.25,coatRough:0.5},
+  WoodPlanks:{label:'Tablones',shine:12,pattern:'planks',rough:0.7,bump:1.6,coat:0.2,coatRough:0.55},
+  Metal:{label:'Metal',shine:140,specular:0xaaaaaa,pattern:'brushed',rough:0.3,metal:1,bump:0.35,env:1.25},
+  DiamondPlate:{label:'Chapa',shine:110,specular:0x999999,pattern:'diamond',rough:0.38,metal:0.92,bump:2.2,env:1.15},
+  Neon:{label:'Neón',shine:30,emissive:0.7,rough:0.5,glow:1.7},
+  Glass:{label:'Vidrio',shine:200,glass:true,rough:0.02,coat:1,coatRough:0.02,env:1.7},
+  Ice:{label:'Hielo',shine:150,ice:true,pattern:'ice',rough:0.12,coat:0.8,coatRough:0.08,env:1.4,bump:0.5},
+  Grass:{label:'Pasto',shine:2,pattern:'grass',rough:1,bump:1.4,env:0.8},
+  Sand:{label:'Arena',shine:1,pattern:'sand',rough:1,bump:0.9,env:0.8},
+  Concrete:{label:'Hormigón',shine:3,pattern:'concrete',rough:0.95,bump:1.1},
+  Rock:{label:'Roca',shine:6,pattern:'rock',rough:0.9,bump:2.8},
+  Marble:{label:'Mármol',shine:90,pattern:'marble',rough:0.22,coat:0.7,coatRough:0.1,env:1.1},
+  Cobblestone:{label:'Adoquín',shine:5,pattern:'cobble',rough:0.9,bump:3.0},
+  Fabric:{label:'Tela',shine:1,pattern:'weave',rough:1,bump:0.7,env:0.7}
 };
 const COLOR_PALETTE = ['#ffffff','#e5e7eb','#9ca3af','#6b7280','#374151','#111827','#78350f','#ef4444','#f97316','#f59e0b','#eab308','#84cc16','#22c55e','#10b981','#14b8a6','#06b6d4','#0ea5e9','#3b82f6','#6366f1','#1d4ed8','#a855f7','#d946ef','#ec4899','#f43f5e','#a16207','#365314','#1e3a8a','#7f1d1d'];
 function _rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -8713,7 +8721,12 @@ function patternCanvas(kind) {
 var _procTex = {};
 function proceduralTexture(kind) {
   if (_procTex[kind]) return _procTex[kind];
-  const t = new THREE.CanvasTexture(patternCanvas(kind)); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; _procTex[kind] = t; return t;
+  const t = new THREE.CanvasTexture(patternCanvas(kind)); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; if (window.CrixGFX) CrixGFX.tex(t); _procTex[kind] = t; return t;
+}
+var _procBump = {};   // mismo dibujo en espacio lineal para el relieve (bumpMap no es una textura de color)
+function proceduralBump(kind) {
+  if (_procBump[kind]) return _procBump[kind];
+  const t = new THREE.CanvasTexture(patternCanvas(kind)); t.wrapS = t.wrapT = THREE.RepeatWrapping; if (window.CrixGFX) CrixGFX.tex(t, false); _procBump[kind] = t; return t;
 }
 function applyPartUVs(geo, d, sx, sy, sz) {
   const T = Math.max(0.25, Math.min(64, Number(d.textureId ? d.texScale : 4) || 4)), uv = geo.attributes && geo.attributes.uv;
@@ -8736,18 +8749,31 @@ function applyPartUVs(geo, d, sx, sy, sz) {
   uv.needsUpdate = true;
 }
 function buildPartMaterial(d) {
-  const def = MATERIAL_DEFS[d.material] || MATERIAL_DEFS.SmoothPlastic, tr = Number(d.transparent || 0);
-  const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color || '#888888'), transparent: tr > 0, opacity: 1 - tr, wireframe: d.type === 'TrussPart', shininess: def.shine });
-  if (def.specular) mat.specular = new THREE.Color(def.specular);
-  if (def.emissive) { mat.emissive = new THREE.Color(d.color || '#00ff88'); mat.emissiveIntensity = def.emissive; }
+  const def = MATERIAL_DEFS[d.material] || MATERIAL_DEFS.SmoothPlastic, tr = Number(d.transparent || 0), G = window.CrixGFX;
+  let mat;
+  if (G) {
+    // Material PBR: rugosidad/metalicidad por tipo; vidrio, hielo, mármol y plástico liso llevan barniz (reflejo nítido encima).
+    const p = { color: d.color || '#888888', transparent: tr > 0, opacity: 1 - tr, wireframe: d.type === 'TrussPart', roughness: def.rough !== undefined ? def.rough : G.roughFromShine(def.shine), metalness: def.metal || 0 };
+    if (def.coat) { p.clearcoat = def.coat; p.clearcoatRoughness = def.coatRough || 0.1; }
+    if (def.emissive) p.emissive = d.color || '#00ff88';
+    mat = G.std(p); mat.envMapIntensity = def.env || 1;
+    if (def.emissive) { mat.emissiveIntensity = def.glow || def.emissive; }
+  } else {
+    mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color || '#888888'), transparent: tr > 0, opacity: 1 - tr, wireframe: d.type === 'TrussPart', shininess: def.shine });
+    if (def.specular) mat.specular = new THREE.Color(def.specular);
+    if (def.emissive) { mat.emissive = new THREE.Color(d.color || '#00ff88'); mat.emissiveIntensity = def.emissive; }
+  }
   if (def.glass) { mat.transparent = true; mat.opacity = Math.max(0.2, 1 - Number(d.transparent || 0.5)); }
   if (def.ice) { mat.transparent = true; mat.opacity = Math.max(0.35, 0.82 - tr); }
   if (tr >= 0.99 && !def.glass && !def.ice) mat.depthWrite = false;   // transparencia 1 = invisible de verdad (p. ej. HumanoidRootPart)
   const custom = d.textureId && texLib[d.textureId] && texLib[d.textureId].ready ? texLib[d.textureId] : null;
   if (custom) {
-    const t = new THREE.Texture(custom.img); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.needsUpdate = true;
+    const t = new THREE.Texture(custom.img); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; if (G) G.tex(t); else t.needsUpdate = true;
     mat.map = t; mat.userData.customTex = t; if (!d.texTint) mat.color = new THREE.Color('#ffffff');
-  } else if (def.pattern) mat.map = proceduralTexture(def.pattern);
+  } else if (def.pattern) {
+    mat.map = proceduralTexture(def.pattern);
+    if (G && G.Q.bump && def.bump && mat.isMeshStandardMaterial) { mat.bumpMap = proceduralBump(def.pattern); mat.bumpScale = def.bump; }
+  }
   return mat;
 }
 function updatePartAppearance(entry) {

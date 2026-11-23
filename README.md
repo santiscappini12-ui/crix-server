@@ -13,6 +13,10 @@ npm start
 
 Abrí `http://localhost:3000`.
 
+## Gráficos realistas
+
+`crix-gfx.js` activa un render PBR: salida sRGB con tone mapping ACES, materiales Standard/Physical (rugosidad, metal, barniz y relieve), iluminación por entorno generada desde el cielo (reflejos reales en metal, vidrio, hielo y mármol) y un cielo procedural con sol y nubes. La calidad se elige sola (celular = `low`, PC = `high`) y se puede forzar con `localStorage.setItem('crix_gfx', 'low' | 'high' | 'ultra')` y recargando.
+
 ## Cuentas y almacenamiento
 
 Las cuentas son globales para quienes usan la misma plataforma y dominio público de Crix; no dependen del dispositivo. Las contraseñas se guardan con hash scrypt y la sesión dura 30 días. Las cuentas locales anteriores se pueden migrar iniciando sesión desde el navegador donde están guardadas.

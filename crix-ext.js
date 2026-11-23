@@ -284,7 +284,7 @@
       d.attributes = a;
     } else d[key] = String(raw).slice(0, sch.max || 40);
     if (key === 'type') { stScene.remove(e.mesh); e.mesh = makeMesh(d); stScene.add(e.mesh); syncMesh(e); if (selPart === e) { selectPart(e); return; } }
-    if (key === 'reflectance' || key === 'castShadow') { try { e.mesh.traverse(m => { if (m.isMesh) { if (key === 'castShadow') m.castShadow = d.castShadow !== false; else if (m.material && m.material.specular) { m.material.specular.setScalar(0.15 + d.reflectance * 0.85); m.material.shininess = 30 + d.reflectance * 120; } } }); } catch (_) { /* material sin specular */ } }
+    if (key === 'reflectance' || key === 'castShadow') { try { e.mesh.traverse(m => { if (m.isMesh) { if (key === 'castShadow') m.castShadow = d.castShadow !== false; else if (m.material && m.material.isMeshStandardMaterial) { m.material.roughness = 1 - 0.85 * d.reflectance; m.material.envMapIntensity = 0.7 + d.reflectance * 1.1; } else if (m.material && m.material.specular) { m.material.specular.setScalar(0.15 + d.reflectance * 0.85); m.material.shininess = 30 + d.reflectance * 120; } } }); } catch (_) { /* material sin specular */ } }
     if (selPart === e) { const h = document.getElementById('cx-extra'); if (h) h.outerHTML = '<div id="cx-extra">' + extraPartHtml(e) + '</div>'; }
   }
 
@@ -315,7 +315,7 @@
 
   function applyLook(mesh, d) {
     if (!mesh || (!(d.reflectance > 0) && d.castShadow !== false)) return;
-    mesh.traverse(m => { if (!m.isMesh) return; if (d.castShadow === false) m.castShadow = false; if (d.reflectance > 0 && m.material && m.material.specular) { m.material.specular.setScalar(0.15 + d.reflectance * 0.85); m.material.shininess = 30 + d.reflectance * 120; } });
+    mesh.traverse(m => { if (!m.isMesh) return; if (d.castShadow === false) m.castShadow = false; if (d.reflectance > 0 && m.material && m.material.isMeshStandardMaterial) { m.material.roughness = 1 - 0.85 * d.reflectance; m.material.envMapIntensity = 0.7 + d.reflectance * 1.1; } else if (d.reflectance > 0 && m.material && m.material.specular) { m.material.specular.setScalar(0.15 + d.reflectance * 0.85); m.material.shininess = 30 + d.reflectance * 120; } });
   }
   // Datos de los Model para game.getModel() en los scripts locales (▶ Probar y LocalScript).
   function modelsInfo() {
