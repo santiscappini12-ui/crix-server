@@ -3716,7 +3716,28 @@ function typeIcon(t) { return {Block:'📦',Sphere:'🔵',Cylinder:'⬭',Wedge:'
 function updateStStatus() { document.getElementById('stu-status').textContent = `${stParts.length} partes · ${stScripts.length} scripts · #${stMapId||'?'}`; }
 function delScript(id) { if(!stScripts.some(s=>s.id===id))return;recordStudioHistory();stScripts = stScripts.filter(s => s.id !== id); refreshExplorer(); }
 function stuSave() { if(typeof stPhys!=='undefined'&&stPhys.on)stuTogglePhysics(); saveActiveScript(); if (!stMapId) return; const maps = getMaps(); if (!maps[stMapId]) { showToast('Error: mapa no encontrado'); return; } maps[stMapId].parts = stParts.map(p => ({...p.data})); maps[stMapId].scripts = stScripts.map(s => ({...s})); maps[stMapId].settings = {...stSettings}; maps[stMapId].guis = JSON.parse(JSON.stringify(stGuis)); maps[stMapId].maxPlayers = Math.max(1,Math.min(200,Number(stSettings.maxPlayers)||50)); maps[stMapId].textureNames = {...stTexNames}; setMaps(maps); showToast((CLOUD_READY && ME && DB.get('token')) ? '💾 Guardado' : '💾 Guardado solo en este navegador: inicia sesión para que el juego publicado use estos cambios y scripts'); if (Object.keys(stTexData).length) setTimeout(stPushTextures, 900); }
-function stuTest() { stuSave(); if(stMapId){stPlaytesting=true;const back=document.getElementById('g-back-btn');if(back)back.textContent='⏹ Volver a Crix Hub';playMap(stMapId);} }
+let _stuTestBusy = false;
+async function stuTest() {
+  if (_stuTestBusy) return;
+  stuSave();
+  if (!stMapId) return;
+  _stuTestBusy = true;
+  try {
+    // En el juego real los Script corren en el servidor con la copia que el servidor tiene guardada: esperamos a que suba lo que acabás de guardar,
+    // para que la prueba ejecute exactamente tus scripts actuales y en el mismo entorno que el juego publicado.
+    if (ME && DB.get('token')) {
+      try {
+        let up = MAP_UPLOADS[stMapId];
+        if (UNSYNCED_MAPS.has(stMapId)) up = queueMapUpload(stMapId);
+        const r = await up;
+        if (r && r.ok === false) showToast('⚠️ No se pudo guardar en el servidor: la prueba usará la versión anterior de tus scripts (' + (r.err || 'error') + ')');
+      } catch (_) {}
+    }
+    stPlaytesting = true;
+    const back = document.getElementById('g-back-btn'); if (back) back.textContent = '⏹ Volver a Crix Hub';
+    playMap(stMapId);
+  } finally { _stuTestBusy = false; }
+}
 let pubThumbData = null, pubIconData = null, pubMapId = null;
 // Recorta al centro y devuelve un PNG cuadrado (los íconos de pantalla de inicio tienen que ser cuadrados).
 function squareIconFromDataUrl(src, size = 512) {
@@ -4673,7 +4694,7 @@ async function crixShare(kind, key) {
     try { document.getElementById('mo-game-page').classList.remove('open'); if (route) crixOpenRoute(route); else goTab0('home'); } finally { setTimeout(() => { window.__crixLock = false; }, 0); }
   });
 })();
-function exitGame() { try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
+function exitGame() { try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;const backBtn=document.getElementById('g-back-btn');if(backBtn)backBtn.textContent='← Salir';goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
 const NET_RATE = 3;
 let remotePlayers = {};
@@ -4799,13 +4820,15 @@ window.playMap = function(mapId) { _origPlayMap(mapId); setTimeout(() => { netJo
 window.playMap = async function(mapId, instanceId = null) {
   try { await ensureFullMap(mapId); } catch (err) { showToast('No se pudo cargar el juego: ' + err.message); return; }
   let targetInstanceId = instanceId;
-  if (!targetInstanceId && ME && !stPlaytesting) {
+  if (!targetInstanceId && ME) {
     try {
-      const result = await apiRequest('/api/maps/'+encodeURIComponent(mapId)+'/instances', { method:'POST', body:{} });
+      const result = await apiRequest('/api/maps/'+encodeURIComponent(mapId)+'/instances', { method:'POST', body: stPlaytesting ? { playtest:true } : {} });
       targetInstanceId = result.instance.id;
     } catch (err) { console.warn('[NET] No se pudo reservar una instancia:', err.message); }
   }
-  netServerScriptsActive=!!(targetInstanceId&&ME&&!stPlaytesting&&!getMaps()[mapId]?.isHtmlGame);
+  // Sin sala del servidor los Script caen al navegador (otro entorno, otras funciones): en una prueba lo avisamos en vez de callar.
+  if (stPlaytesting && !targetInstanceId && !getMaps()[mapId]?.isHtmlGame) { try { showToast('⚠️ Sin conexión con el servidor: los Script se prueban en este navegador y pueden comportarse distinto que en el juego real.'); } catch (_) {} }
+  netServerScriptsActive=!!(targetInstanceId&&ME&&!getMaps()[mapId]?.isHtmlGame);
   crixAppReset(!!getMaps()[mapId]?.isHtmlGame, !!(targetInstanceId && ME));
   try { await registerMapTextures(getMaps()[mapId]); } catch {}
   _origPlayMap(mapId);

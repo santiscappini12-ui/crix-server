@@ -611,7 +611,7 @@ function publishPresence(userId) {
 }
 function publishRoom(room) {
   const players = Object.values(room.players);
-  cluster.setLocalRoom(roomKey(room.mapId, room.instanceId), players.length
+  cluster.setLocalRoom(roomKey(room.mapId, room.instanceId), players.length && !room.playtest
     ? { mapId:room.mapId, instanceId:room.instanceId, startedAt:room.createdAt, count:players.length, players:players.slice(0, 50).map(pl => ({ id:pl.userId, username:pl.username })) }
     : null);
 }
@@ -1870,7 +1870,7 @@ app.get('/api/maps/:id/instances', (req, res) => {
   const map = DB.maps[req.params.id];
   if (!map || !canReadMap(map, user)) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
   const instances = Object.values(rooms)
-    .filter(room => room.mapId === req.params.id && Object.keys(room.players).length > 0)
+    .filter(room => room.mapId === req.params.id && !room.playtest && Object.keys(room.players).length > 0)
     .map(room => ({
       id: room.instanceId,
       mapId: room.mapId,
@@ -1890,6 +1890,8 @@ app.post('/api/maps/:id/instances', requireAuth, (req, res) => {
   if (!canEnterAdult(map, req.user)) return ageRequired(res);
   const instanceId = cluster.nodeId + '-' + crypto.randomUUID();   // el prefijo dice qué instancia del servidor es dueña de la sala
   const room = getRoom(req.params.id, instanceId);
+  // ▶ Probar del Studio: misma sala y mismo entorno de scripts que el juego real, pero invisible para el resto (solo quien edita el juego).
+  if (req.body && req.body.playtest === true && canEditMap(map, req.user)) room.playtest = true;
   res.status(201).json({ ok:true, instance:{ id:room.instanceId, mapId:room.mapId, startedAt:room.createdAt } });
 });
 

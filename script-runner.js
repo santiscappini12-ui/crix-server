@@ -176,6 +176,23 @@ function emitSceneCommand(room, command, payload) {
 
 // Código que se evalúa dentro del aislamiento (no tiene acceso al servidor): Vector3, math ampliado, tweens, raycast,
 // eventos de jugadores, eventos remotos cliente↔servidor y control de jugadores. No usar acentos graves ni ${} aquí.
+// APIs que solo existen en el cliente (LocalScript). En un Script de servidor dan un error claro en vez de "x is not defined".
+const CLIENT_ONLY_STUBS = String.raw`
+    const __clientOnly = (what, hint) => new Error(what + ' es solo del cliente: este es un Script (corre en el servidor). Movelo a un LocalScript' + (hint ? ' o usá ' + hint : '') + '.');
+    const __clientFn = (what, hint) => function () { throw __clientOnly(what, hint); };
+    const __clientObj = (what, hint) => new Proxy({}, { get(_, key) { if (key === 'then' || typeof key === 'symbol') return undefined; throw __clientOnly(what + '.' + String(key), hint); }, set() { throw __clientOnly(what, hint); } });
+    const gui = __clientObj('gui');
+    const localPlayer = __clientObj('localPlayer', 'game.getPlayer()');
+    const device = __clientObj('device');
+    const time = () => Date.now() / 1000;
+    game.findPart = name => __getParts().find(part => part.name === String(name)) || null;
+    game.onKey = __clientFn('game.onKey');
+    game.fireServer = __clientFn('game.fireServer', 'game.onClientEvent para recibir de los clientes');
+    game.onServerEvent = __clientFn('game.onServerEvent', 'game.fireClient para avisarle al cliente');
+    game.vibrate = __clientFn('game.vibrate');
+    for (const key of ['player', 'gui', 'device']) Object.defineProperty(game, key, { enumerable:false, configurable:false, get() { throw __clientOnly('game.' + key); } });
+`;
+
 const ISOLATE_EXTRAS = String.raw`
     function __makeMath() {
       const m = {};
@@ -581,6 +598,7 @@ function bootstrapSource(modules) {
     game.OnTouchEnded = game.onTouchEnded;
     game.OnImpact = game.onImpact;
     ${ISOLATE_EXTRAS}
+    ${CLIENT_ONLY_STUBS}
     Object.freeze(game);
     const workspace = Object.freeze({
       getChildren: () => __getParts(),
@@ -647,8 +665,8 @@ function bootstrapSource(modules) {
       try {
         const fn=script[eventName];
         if (typeof fn==='function') {
-          if (eventName==='onUpdate') fn(dt,game.getPlayer(),game.getPlayers());
-          else fn(game.getPlayer(),game.getPlayers());
+          const ret = eventName==='onUpdate' ? fn(dt,game.getPlayer(),game.getPlayers()) : fn(game.getPlayer(),game.getPlayers());
+          if (ret && typeof ret.then==='function') ret.then(undefined, err => error(script.name+': '+(err && err.message || err)));
         }
         script.errors = 0;
       } catch (err) {
