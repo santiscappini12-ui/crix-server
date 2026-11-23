@@ -27,6 +27,8 @@
 
   // Color "de entrada sRGB": al asignarle un valor (hex, nombre, css) lo guarda ya en lineal. Copiar de otro Color no convierte.
   class SColor extends T.Color {
+    // Un THREE.Color común (p. ej. new THREE.Color('#8b5a2b') que le pasa el código del juego) está escrito en sRGB: se convierte.
+    set(v) { if (v && v.isColor && !(v instanceof SColor)) { this.copy(v); return this.convertSRGBToLinear(); } return super.set(v); }
     setHex(h) { super.setHex(h); if (!this._in) this.convertSRGBToLinear(); return this; }
     setStyle(st) { this._in = true; try { super.setStyle(st); } finally { this._in = false; } return this.convertSRGBToLinear(); }
   }
@@ -34,7 +36,7 @@
     if (!proto) return; const k = '__' + key;
     Object.defineProperty(proto, key, { configurable: true, enumerable: true,
       get() { return this[k]; },
-      set(v) { if (!v || v instanceof SColor) { this[k] = v; return; } const c = new SColor(); c.r = v.r; c.g = v.g; c.b = v.b; this[k] = c; } });
+      set(v) { if (!v || v instanceof SColor) { this[k] = v; return; } const c = new SColor(); c.r = v.r; c.g = v.g; c.b = v.b; this[k] = c.convertSRGBToLinear(); } });
   }
   if (SRGB) {
     ['MeshBasicMaterial', 'MeshPhongMaterial', 'MeshLambertMaterial', 'PointsMaterial', 'SpriteMaterial', 'LineBasicMaterial'].forEach(n => patchColor(T[n] && T[n].prototype, 'color'));
