@@ -11,6 +11,16 @@
 //   · el jugador mide 1 × 3.05 × 1 con el origen en los pies, y los toques usan los mismos márgenes que
 //     game.onTouched de los LocalScript.
 
+let Rigid = null;   // motor de cuerpos rígidos (crix-rigid.js, sobre Rapier); en el navegador lo expone window.CrixRigid
+const rigid = () => {
+  if (Rigid) return Rigid;
+  try { if (typeof require === 'function') Rigid = require('./crix-rigid'); } catch (_) { /* sin módulo */ }
+  if (!Rigid && typeof window !== 'undefined') Rigid = window.CrixRigid || null;
+  return Rigid;
+};
+// «realistic» (por defecto, si Rapier ya cargó) o «classic». Un mapa puede fijar map.physicsMode:'classic'.
+const useRigid = room => { const r = rigid(); return !!(r && r.isReady() && room.physicsMode !== 'classic'); };
+
 const STEP = 1 / 60;
 const GRAVITY = 0.018;
 const MAX_FALL = 0.8;
@@ -160,6 +170,7 @@ function stateOf(room) {
 
 // Para llamar cuando un script cambia a mano la posición de una pieza (teletransporte): se descarta su velocidad y apoyo.
 function resetBody(room, id) {
+  if (room.rigid) rigid().reset(room, id);
   if (room.physicsVelocities) room.physicsVelocities[id] = 0;
   if (room.phys) { room.phys.support.delete(id); if (room.phys.vel) room.phys.vel.delete(id); if (room.phys.spin) room.phys.spin.delete(id); }
 }
@@ -168,11 +179,13 @@ const clampSpeed = v => Math.max(-MAX_SPEED, Math.min(MAX_SPEED, Number(v) || 0)
 
 // Velocidad actual de una pieza suelta en studs/s (para scripts).
 function getVelocity(room, id) {
+  if (room.rigid) { const v = rigid().getVelocity(room, id); if (v) return v; }
   const ps = stateOf(room), h = ps.vel.get(id) || { x: 0, z: 0 };
   return { x: h.x / STEP, y: ((room.physicsVelocities && room.physicsVelocities[id]) || 0) / STEP, z: h.z / STEP };
 }
 // Fija la velocidad (studs/s). Los ejes que no se pasan se conservan.
 function setVelocity(room, id, v) {
+  if (room.rigid && rigid().setVelocity(room, id, v)) return;
   const ps = stateOf(room), h = ps.vel.get(id) || { x: 0, z: 0 };
   if (v.x !== undefined) h.x = clampSpeed(v.x * STEP);
   if (v.z !== undefined) h.z = clampSpeed(v.z * STEP);
@@ -181,6 +194,7 @@ function setVelocity(room, id, v) {
 }
 // Suma un impulso (studs/s) a la velocidad actual.
 function addImpulse(room, id, v) {
+  if (room.rigid && rigid().addImpulse(room, id, v)) return;
   const cur = getVelocity(room, id);
   setVelocity(room, id, { x: cur.x + (Number(v.x) || 0), y: cur.y + (Number(v.y) || 0), z: cur.z + (Number(v.z) || 0) });
 }
@@ -404,8 +418,18 @@ function stepRoom(room, now, players) {
     const entry = { part, box: partBox(part), dyn: !part.anchored && !part.jointDriven, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
     entries.push(entry); byId.set(part.id, entry);
   }
-  const dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
+  let dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
   const landings = [];
+
+  // Física realista: Rapier simula las piezas con colisión; el motor clásico solo se queda con las que no chocan con nada.
+  let rigidEntries = [];
+  if (useRigid(room)) {
+    const extentsOf = part => { const b = partBox(part); return { ex: (b.maxX - b.minX) / 2, ey: (b.maxY - b.minY) / 2, ez: (b.maxZ - b.minZ) / 2 }; };
+    const handled = rigid().step(room, entries, steps, players, landings, { extentsOf });
+    rigidEntries = dynamics.filter(entry => handled.has(entry.part.id));
+    dynamics = dynamics.filter(entry => !handled.has(entry.part.id));
+    for (const entry of rigidEntries) entry.box = partBox(entry.part);
+  } else if (room.rigid) rigid().dispose(room);
 
   // Plataformas móviles: si el soporte se movió desde el tick anterior (script o física), lo que está encima va con él.
   for (const entry of dynamics) {
@@ -446,6 +470,13 @@ function stepRoom(room, now, players) {
     }
   }
   for (let s = 0; s < steps; s++) for (const entry of dynamics) stepDynamic(room, ps, entry, entries, byId, landings);
+  for (const entry of rigidEntries) {
+    const part = entry.part;
+    if (Math.abs(part.y - entry.startY) > 1e-4 || Math.abs(part.x - entry.startX) > 1e-4 || Math.abs(part.z - entry.startZ) > 1e-4 ||
+        Math.abs((part.rx || 0) - entry.startRx) > 1e-4 || Math.abs((part.ry || 0) - entry.startRy) > 1e-4 || Math.abs((part.rz || 0) - entry.startRz) > 1e-4) {
+      result.changed.push({ id: part.id, x: r3(part.x), y: r3(part.y), z: r3(part.z), rx: r3(part.rx || 0), ry: r3(part.ry || 0), rz: r3(part.rz || 0) });
+    }
+  }
 
   for (const entry of dynamics) {
     const part = entry.part, sphere = part.type === 'Sphere';
@@ -605,4 +636,10 @@ function raycast(parts, origin, direction, opts = {}) {
   };
 }
 
-module.exports = { stepRoom, resetBody, partBox, playerBox, PLAYER, STEP, getVelocity, setVelocity, addImpulse, raycast, rayBox, MATERIALS };
+// Velocidad angular (rad/s) y masa de una pieza suelta: solo existen con la física realista activa (si no, devuelven null/false).
+function setAngularVelocity(room, id, w) { return !!(room.rigid && rigid().setAngularVelocity(room, id, w || {})); }
+function getAngularVelocity(room, id) { return room.rigid ? rigid().getAngularVelocity(room, id) : null; }
+function getMass(room, id) { return room.rigid ? rigid().getMass(room, id) : null; }
+function disposeRoom(room) { if (room && room.rigid && rigid()) rigid().dispose(room); }
+
+module.exports = { stepRoom, resetBody, partBox, playerBox, PLAYER, STEP, getVelocity, setVelocity, addImpulse, setAngularVelocity, getAngularVelocity, getMass, disposeRoom, raycast, rayBox, MATERIALS };

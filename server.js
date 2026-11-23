@@ -9,6 +9,10 @@ const crypto   = require('crypto');
 const { fork } = require('node:child_process');
 const persist  = require('./persist');
 const worldPhysics = require('./world-physics');
+const CrixRigid = require('./crix-rigid');   // física realista (Rapier); mientras no cargue, rige la física clásica
+let rapierLib = null;
+try { rapierLib = require('@dimforge/rapier3d-compat'); } catch (err) { console.warn('[FÍSICA] Rapier no instalado, se usa la física clásica:', err.message); }
+if (rapierLib) CrixRigid.init(rapierLib).then(() => console.log('[FÍSICA] Rapier listo: física realista activa')).catch(err => console.warn('[FÍSICA] No se pudo iniciar Rapier:', err.message));
 const CrixJoints = require('./crix-joints.js');
 const CrixObjects = require('./crix-objects.js');
 const CrixAnim = require('./crix-anim.js');   // uniones Weld / Motor6D / Hinge… (el mismo módulo que usa el cliente)
@@ -366,6 +370,8 @@ function normalizeRoomPart(id, source = {}) {
 function initializeRoomWorld(room, map) {
   { const legacy=CrixObjects.migrateLegacyNpcs(map||{});if(legacy.converted)map={...map,parts:legacy.parts,joints:legacy.joints,instances:legacy.instances}; }   // NPC antiguos → Model sin comportamiento
   room.avatars={}; room.npcs={};
+  worldPhysics.disposeRoom(room);
+  room.physicsMode=(map&&(map.physicsMode==='classic'||(map.settings&&map.settings.physicsMode==='classic')))?'classic':'realistic';
   room.worldParts={}; room.basePartIds=new Set(); room.changedPartIds=new Set(); room.removedPartIds=new Set(); room.physicsVelocities={};
   for(const [index,source] of (Array.isArray(map?.parts)?map.parts:[]).entries()){
     if(source&&source.isNPC){const nid=String(source.id||`map-part-${index}`);room.npcs[nid]={id:nid,name:String(source.name||'NPC').slice(0,80),look:source.look&&typeof source.look==='object'?CrixAvatar.sanitizeLook(source.look,{}):null};continue;}
@@ -585,7 +591,7 @@ function stepServerWorldPhysics() {
       for(const part of Object.values(room.worldParts)){
         if(part.anchored||part.type==='Spawn'||part.y<=-500)continue;
         const entry={id:part.id,x:part.x,y:part.y,z:part.z};
-        if(part.type==='Sphere'){entry.rx=part.rx||0;entry.ry=part.ry||0;entry.rz=part.rz||0;}
+        if(part.type==='Sphere'||room.rigid){entry.rx=part.rx||0;entry.ry=part.ry||0;entry.rz=part.rz||0;}
         parts.push(entry);
         if(parts.length>=400)break;
       }
@@ -951,7 +957,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
+const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
@@ -1037,6 +1043,22 @@ app.get('/juego/:id/manifest.webmanifest', (req, res) => {
 app.get(['/juego/:id', '/juego/:id/:slug'], sharePage('juego'));
 app.get(['/video/:id', '/video/:id/:slug'], sharePage('video'));
 app.get('/u/:username', sharePage('u'));
+// Rapier para el navegador: el paquete npm es CommonJS con el .wasm incrustado; se envuelve para exponerlo como window.CrixRapierLib.
+let rapierBrowserBundle = null, rapierBrowserGzip = null;
+app.get('/crix-rapier.js', (req, res) => {
+  try {
+    if (!rapierBrowserBundle) {
+      const file = require.resolve('@dimforge/rapier3d-compat');
+      rapierBrowserBundle = '(function(){var module={exports:{}},exports=module.exports;\n' + fs.readFileSync(file, 'utf8') + '\n;self.CrixRapierLib=module.exports.default||module.exports;})();';
+    }
+    res.set({ 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=604800, immutable', 'Vary': 'Accept-Encoding' });
+    if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {   // 4,3 MB → ~1,2 MB; se comprime una sola vez
+      if (!rapierBrowserGzip) rapierBrowserGzip = require('zlib').gzipSync(rapierBrowserBundle, { level: 9 });
+      res.set('Content-Encoding', 'gzip'); return res.send(rapierBrowserGzip);
+    }
+    res.send(rapierBrowserBundle);
+  } catch (err) { res.status(404).type('text/plain').send('Rapier no instalado'); }
+});
 app.get(PUBLIC_FILES, (req, res) => {
   // El service worker y el manifiesto no deben quedar en caché para que las actualizaciones lleguen rápido.
   if (req.path === '/service-worker.js' || req.path === '/manifest.webmanifest') res.set('Cache-Control', 'no-cache');

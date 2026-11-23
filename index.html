@@ -1146,6 +1146,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <script src="/crix-objects.js"></script>
 <script src="/crix-anim.js"></script>
 <script src="/socket.io/socket.io.js"></script>
+<script src="/crix-rigid.js"></script>
 <script>
 // Copia de world-physics.js (el mismo motor que usa el servidor). Se usa cuando el juego corre sin servidor (prueba desde el Studio).
 window.CrixWorldPhysics=(function(){const module={exports:{}};
@@ -1161,6 +1162,16 @@ window.CrixWorldPhysics=(function(){const module={exports:{}};
 //     y con el origen real de cada forma (la cuña, por ejemplo, tiene el origen en la base);
 //   · el jugador mide 1 × 3.05 × 1 con el origen en los pies, y los toques usan los mismos márgenes que
 //     game.onTouched de los LocalScript.
+
+let Rigid = null;   // motor de cuerpos rígidos (crix-rigid.js, sobre Rapier); en el navegador lo expone window.CrixRigid
+const rigid = () => {
+  if (Rigid) return Rigid;
+  try { if (typeof require === 'function') Rigid = require('./crix-rigid'); } catch (_) { /* sin módulo */ }
+  if (!Rigid && typeof window !== 'undefined') Rigid = window.CrixRigid || null;
+  return Rigid;
+};
+// «realistic» (por defecto, si Rapier ya cargó) o «classic». Un mapa puede fijar map.physicsMode:'classic'.
+const useRigid = room => { const r = rigid(); return !!(r && r.isReady() && room.physicsMode !== 'classic'); };
 
 const STEP = 1 / 60;
 const GRAVITY = 0.018;
@@ -1311,6 +1322,7 @@ function stateOf(room) {
 
 // Para llamar cuando un script cambia a mano la posición de una pieza (teletransporte): se descarta su velocidad y apoyo.
 function resetBody(room, id) {
+  if (room.rigid) rigid().reset(room, id);
   if (room.physicsVelocities) room.physicsVelocities[id] = 0;
   if (room.phys) { room.phys.support.delete(id); if (room.phys.vel) room.phys.vel.delete(id); if (room.phys.spin) room.phys.spin.delete(id); }
 }
@@ -1319,11 +1331,13 @@ const clampSpeed = v => Math.max(-MAX_SPEED, Math.min(MAX_SPEED, Number(v) || 0)
 
 // Velocidad actual de una pieza suelta en studs/s (para scripts).
 function getVelocity(room, id) {
+  if (room.rigid) { const v = rigid().getVelocity(room, id); if (v) return v; }
   const ps = stateOf(room), h = ps.vel.get(id) || { x: 0, z: 0 };
   return { x: h.x / STEP, y: ((room.physicsVelocities && room.physicsVelocities[id]) || 0) / STEP, z: h.z / STEP };
 }
 // Fija la velocidad (studs/s). Los ejes que no se pasan se conservan.
 function setVelocity(room, id, v) {
+  if (room.rigid && rigid().setVelocity(room, id, v)) return;
   const ps = stateOf(room), h = ps.vel.get(id) || { x: 0, z: 0 };
   if (v.x !== undefined) h.x = clampSpeed(v.x * STEP);
   if (v.z !== undefined) h.z = clampSpeed(v.z * STEP);
@@ -1332,6 +1346,7 @@ function setVelocity(room, id, v) {
 }
 // Suma un impulso (studs/s) a la velocidad actual.
 function addImpulse(room, id, v) {
+  if (room.rigid && rigid().addImpulse(room, id, v)) return;
   const cur = getVelocity(room, id);
   setVelocity(room, id, { x: cur.x + (Number(v.x) || 0), y: cur.y + (Number(v.y) || 0), z: cur.z + (Number(v.z) || 0) });
 }
@@ -1552,11 +1567,21 @@ function stepRoom(room, now, players) {
   const entries = [], byId = new Map();
   for (const part of Object.values(room.worldParts)) {
     if (part.type === 'Spawn' || part.isNPC) continue;
-    const entry = { part, box: partBox(part), dyn: !part.anchored, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
+    const entry = { part, box: partBox(part), dyn: !part.anchored && !part.jointDriven, startY: part.y, startX: part.x, startZ: part.z, startRx: part.rx || 0, startRy: part.ry || 0, startRz: part.rz || 0 };
     entries.push(entry); byId.set(part.id, entry);
   }
-  const dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
+  let dynamics = entries.filter(entry => entry.dyn && entry.part.y > VOID_Y);
   const landings = [];
+
+  // Física realista: Rapier simula las piezas con colisión; el motor clásico solo se queda con las que no chocan con nada.
+  let rigidEntries = [];
+  if (useRigid(room)) {
+    const extentsOf = part => { const b = partBox(part); return { ex: (b.maxX - b.minX) / 2, ey: (b.maxY - b.minY) / 2, ez: (b.maxZ - b.minZ) / 2 }; };
+    const handled = rigid().step(room, entries, steps, players, landings, { extentsOf });
+    rigidEntries = dynamics.filter(entry => handled.has(entry.part.id));
+    dynamics = dynamics.filter(entry => !handled.has(entry.part.id));
+    for (const entry of rigidEntries) entry.box = partBox(entry.part);
+  } else if (room.rigid) rigid().dispose(room);
 
   // Plataformas móviles: si el soporte se movió desde el tick anterior (script o física), lo que está encima va con él.
   for (const entry of dynamics) {
@@ -1597,6 +1622,13 @@ function stepRoom(room, now, players) {
     }
   }
   for (let s = 0; s < steps; s++) for (const entry of dynamics) stepDynamic(room, ps, entry, entries, byId, landings);
+  for (const entry of rigidEntries) {
+    const part = entry.part;
+    if (Math.abs(part.y - entry.startY) > 1e-4 || Math.abs(part.x - entry.startX) > 1e-4 || Math.abs(part.z - entry.startZ) > 1e-4 ||
+        Math.abs((part.rx || 0) - entry.startRx) > 1e-4 || Math.abs((part.ry || 0) - entry.startRy) > 1e-4 || Math.abs((part.rz || 0) - entry.startRz) > 1e-4) {
+      result.changed.push({ id: part.id, x: r3(part.x), y: r3(part.y), z: r3(part.z), rx: r3(part.rx || 0), ry: r3(part.ry || 0), rz: r3(part.rz || 0) });
+    }
+  }
 
   for (const entry of dynamics) {
     const part = entry.part, sphere = part.type === 'Sphere';
@@ -1756,8 +1788,13 @@ function raycast(parts, origin, direction, opts = {}) {
   };
 }
 
-module.exports = { stepRoom, resetBody, partBox, playerBox, PLAYER, STEP, getVelocity, setVelocity, addImpulse, raycast, rayBox, MATERIALS };
+// Velocidad angular (rad/s) y masa de una pieza suelta: solo existen con la física realista activa (si no, devuelven null/false).
+function setAngularVelocity(room, id, w) { return !!(room.rigid && rigid().setAngularVelocity(room, id, w || {})); }
+function getAngularVelocity(room, id) { return room.rigid ? rigid().getAngularVelocity(room, id) : null; }
+function getMass(room, id) { return room.rigid ? rigid().getMass(room, id) : null; }
+function disposeRoom(room) { if (room && room.rigid && rigid()) rigid().dispose(room); }
 
+module.exports = { stepRoom, resetBody, partBox, playerBox, PLAYER, STEP, getVelocity, setVelocity, addImpulse, setAngularVelocity, getAngularVelocity, getMass, disposeRoom, raycast, rayBox, MATERIALS };
 return module.exports;})();
 </script>
 <script>
@@ -4367,7 +4404,7 @@ function applyNetworkPartUpsert(part,snap) {
   const id=String(part.id||'');if(!id)return;
   const existing=runtimeObjects.get(id);
   if(!existing){if(part.sx===undefined)return;_createGameScriptPart(id,part);return;}
-  const rotKeys=existing.data.type==='Sphere'&&existing.data.anchored===false?[]:['rx','ry','rz'];const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
+  const rotKeys=existing.data.anchored===false?[]:['rx','ry','rz'];const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
   if(visualChanged){existing.netTarget=null;_updateGameScriptPart(id,part);return;}
   existing.data=normalizeGamePart(id,{...existing.data,...part});
   if(existing.data.anchored)existing.velocity.set(0,0,0);
@@ -4386,12 +4423,13 @@ function applyNetworkPartUpsert(part,snap) {
 function _stepNetInterp() {
   for(const object of runtimeObjects.values()){
     const t=object.netTarget,m=object.mesh;if(!t||!m)continue;
-    const k=0.4,p=m.position,r=m.rotation;
+    const k=0.4,p=m.position;
     p.x+=(t.x-p.x)*k;p.y+=(t.y-p.y)*k;p.z+=(t.z-p.z)*k;
-    // Rotación por el camino corto (las esferas rodando mandan rx/ry/rz).
-    const ang=(a,b)=>{let dd=b-a;while(dd>Math.PI)dd-=Math.PI*2;while(dd<-Math.PI)dd+=Math.PI*2;return dd;};
-    r.x+=ang(r.x,t.rx)*k;r.y+=ang(r.y,t.ry)*k;r.z+=ang(r.z,t.rz)*k;
-    if(Math.abs(t.x-p.x)<0.002&&Math.abs(t.y-p.y)<0.002&&Math.abs(t.z-p.z)<0.002){p.set(t.x,t.y,t.z);r.set(t.rx,t.ry,t.rz);object.netTarget=null;}
+    // Rotación por cuaternión (slerp): las piezas que vuelcan y ruedan con la física realista no deben pasar por ángulos de Euler.
+    if(!t.q){t.q=new THREE.Quaternion().setFromEuler(new THREE.Euler(t.rx,t.ry,t.rz,'XYZ'));}
+    m.quaternion.slerp(t.q,k);
+    const dq=Math.abs(m.quaternion.dot(t.q));
+    if(Math.abs(t.x-p.x)<0.002&&Math.abs(t.y-p.y)<0.002&&Math.abs(t.z-p.z)<0.002&&dq>0.99999){p.set(t.x,t.y,t.z);m.quaternion.copy(t.q);object.netTarget=null;}
   }
 }
 // Coleccionable recogido por otro jugador: desaparece también aquí.
@@ -4456,6 +4494,7 @@ function playMap(mapId) {
 }
 function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, GFX_MOBILE ? 1.5 : 2)); gRenderer.setSize(innerWidth, innerHeight); if (window.CrixGFX) CrixGFX.setupRenderer(gRenderer, { exposure: 1.0 }); gRenderer.shadowMap.enabled = true; gRenderer.shadowMap.type = THREE.PCFSoftShadowMap; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
 function _loadMap(m) {
+  window.gPhysicsMode=(m&&(m.physicsMode==='classic'||(m.settings&&m.settings.physicsMode==='classic')))?'classic':'realistic';
   const toRemove=[]; gScene.traverse(object=>{if(object!==gScene)toRemove.push(object);});toRemove.forEach(object=>gScene.remove(object));
   gColliders=[];gNPCs=[];runtimeObjects.clear();_localRoom=null;_localPrev=null;networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];_ragAbort();gPlayer=null;
   disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:((window.CrixGFX&&CrixGFX.Q.quality==='ultra')?4096:2048)});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
@@ -4471,19 +4510,25 @@ function _loadMap(m) {
 // Sin servidor (prueba desde el Studio) las esferas sueltas usan el mismo motor que el servidor: ruedan y se pueden empujar.
 // Las demás piezas entran al motor como obstáculos fijos, así que su comportamiento no cambia.
 let _localRoom = null, _localPrev = null;
+// Física realista (Rapier) en la prueba local: todas las piezas sueltas, no solo las esferas. Se descarga al primer uso.
+const _clientRigidOn = () => !!(window.CrixRigid && CrixRigid.isReady() && window.gPhysicsMode !== 'classic');
 function _stepLocalSpheres() {
   const WP = window.CrixWorldPhysics; if (!WP) return;
-  let any = false;
-  for (const o of runtimeObjects.values()) if (o.data.type === 'Sphere' && o.data.anchored === false && o.mesh && o.mesh.parent && !o.collected) { any = true; break; }
+  const rg = _clientRigidOn();
+  let any = false, anyLoose = false;
+  for (const o of runtimeObjects.values()) { if (!(o.data.anchored === false && o.mesh && o.mesh.parent && !o.collected)) continue; anyLoose = true; if (o.data.type === 'Sphere' || rg) { any = true; break; } }
+  if (anyLoose && !rg && window.CrixRigid && window.gPhysicsMode !== 'classic') CrixRigid.load();   // descarga Rapier; mientras tanto rige la física clásica
   if (!any) { _localRoom = null; return; }
   if (!_localRoom) _localRoom = { worldParts: {}, physicsVelocities: {}, phys: null };
+  _localRoom.physicsMode = rg ? 'realistic' : 'classic';
   const room = _localRoom, parts = room.worldParts, seen = new Set(), loose = [];
   for (const o of runtimeObjects.values()) {
     const d = o.data; if (!o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC) continue;
-    const free = d.type === 'Sphere' && d.anchored === false && !(window.gJointDriven && gJointDriven.has(String(o.id))), id = String(o.id), m = o.mesh;
+    const free = (d.type === 'Sphere' || rg) && d.anchored === false && !(window.gJointDriven && gJointDriven.has(String(o.id))), id = String(o.id), m = o.mesh;
     const p = parts[id] || (parts[id] = { id, name: d.name });
     seen.add(id);
     p.type = d.type; p.sx = d.sx; p.sy = d.sy; p.sz = d.sz; p.material = d.material; p.canCollide = d.canCollide !== false; p.anchored = !free;
+    p.friction = d.friction; p.bounce = d.bounce; p.density = d.density; p.drag = d.drag; p.gravityScale = d.gravityScale;
     if (free && o._pp && (Math.abs(m.position.x - o._pp.x) > 1e-5 || Math.abs(m.position.y - o._pp.y) > 1e-5 || Math.abs(m.position.z - o._pp.z) > 1e-5)) WP.resetBody(room, id); // un script la movió
     p.x = m.position.x; p.y = m.position.y; p.z = m.position.z;
     p.rx = free ? m.rotation.x : (d.rx || 0); p.ry = free ? m.rotation.y : (d.ry || 0); p.rz = free ? m.rotation.z : (d.rz || 0);
@@ -4507,7 +4552,7 @@ function _stepLocalSpheres() {
   }
   for (const o of loose) if (!o._pp) o._pp = { x: o.mesh.position.x, y: o.mesh.position.y, z: o.mesh.position.z };
 }
-function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gameStep();}catch(err){if(!window._cxStepErr){window._cxStepErr=1;appendOutput('[Uniones] '+err.message,'err');}}const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics;for(const object of runtimeObjects.values()){if(localSpheres&&object.data.type==='Sphere')continue;if(object.data.anchored||(window.gJointDriven&&gJointDriven.has(String(object.id)))||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
+function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gameStep();}catch(err){if(!window._cxStepErr){window._cxStepErr=1;appendOutput('[Uniones] '+err.message,'err');}}const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics,localRigid=localSpheres&&_clientRigidOn();for(const object of runtimeObjects.values()){if(localSpheres&&(object.data.type==='Sphere'||(localRigid&&object.data.anchored===false)))continue;if(object.data.anchored||(window.gJointDriven&&gJointDriven.has(String(object.id)))||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
 // Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
 // así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
 // (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
