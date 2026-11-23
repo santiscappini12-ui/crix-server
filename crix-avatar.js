@@ -464,11 +464,11 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     smug:      { open: 0,    curve: 0.4,  w: 0.2,  browA: 0.35, browY: 0,     cover: 0.38, brows: 1 },
     scared:    { open: 0.5,  curve: -0.3, w: 0.17, browA: -0.4, browY: 0.09,  cover: 0, ps: 0.45, big: 0.08, shake: 1, brows: 1 },
     talk:      { open: 0.2,  curve: 0.25, w: 0.18, browA: 0.05, browY: 0.01,  cover: 0, teeth: 1 },
-    dead:      { open: 0.2,  curve: -0.3, w: 0.15, browA: -0.2, browY: 0,     cover: 0, eye: 'x' },
+    dead:      { open: 0.2,  curve: -0.3, w: 0.15, browA: -0.2, browY: 0,     cover: 0, close: 1 },   // muerto: ojos cerrados (antes X)
     laugh:     { open: 0.95, curve: 0.75, w: 0.3,  browA: 0,    browY: 0.02,  cover: 0, eye: 'arc', bounce: 1, teeth: 1 },
     cry:       { open: 0.4,  curve: -0.7, w: 0.19, browA: -0.6, browY: 0.01,  cover: 0.2, ps: 1.15, tear: 1, shake: 0.5, brows: 1 },
     love:      { open: 0.2,  curve: 0.65, w: 0.22, browA: 0,    browY: 0.04,  cover: 0, eye: 'heart' },
-    dizzy:     { open: 0.18, curve: 0,    w: 0.15, browA: -0.1, browY: 0.02,  cover: 0, eye: 'spiral' },
+    dizzy:     { open: 0.18, curve: 0,    w: 0.15, browA: -0.1, browY: 0.02,  cover: 0, dizzy: 1 },   // mareado: las pupilas dan vueltas (antes espiral)
     hurt:      { open: 0.45, curve: -0.4, w: 0.2,  browA: -0.4, browY: 0.04,  cover: 0, eye: 'hurt', brows: 1 },
     yawn:      { open: 1.0,  curve: 0,    w: 0.13, browA: -0.1, browY: 0.05,  cover: 0, close: 1 },
     tongue:    { open: 0.4,  curve: 0.55, w: 0.22, browA: 0.1,  browY: 0.03,  cover: 0, tongue: 1, wink: 'L', teeth: 1 },
@@ -514,7 +514,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       if (shut) e.arc.visible = true;   // ojo cerrado (parpadeo/guiño) = una línea curva oscura; se compensa el aplastado del hueso para que no desaparezca
       e.arc.scale.y = shut ? 0.45 / (sq * big) : 1;
       // pupila: se mueve con la mirada, se achica o agranda
-      const ps = fv(P + 'ps', c.ps), elx = clamp(fv(P + 'lookX', c.lx), -1, 1), ely = clamp(fv(P + 'lookY', c.ly), -1, 1), [px, py] = fitPupil(elx * 0.035 - sx * PUPIL_IN + shake, ely * 0.028 - 0.03, PUPIL_R * ps);   // PUPIL_IN: las dos pupilas se acercan a la nariz (convergen) para que no miren cada una hacia un lado   // mirada contenida: la pupila nunca se acerca al borde
+      const ps = fv(P + 'ps', c.ps), elx = clamp(fv(P + 'lookX', c.lx), -1, 1), ely = clamp(fv(P + 'lookY', c.ly), -1, 1), [px, py] = pr.dizzy ? (() => { const ph = S.t * 7 + (s === 'L' ? 0 : 0.9); return fitPupil(Math.cos(ph) * 0.1, Math.sin(ph) * 0.1 - 0.01, PUPIL_R * ps); })() : fitPupil(elx * 0.035 - sx * PUPIL_IN + shake, ely * 0.028 - 0.03, PUPIL_R * ps);   // PUPIL_IN: las dos pupilas se acercan a la nariz (convergen) para que no miren cada una hacia un lado   // mirada contenida: la pupila nunca se acerca al borde
       e.pupil.position.set(px, py, sagZ(px, py, R) + 0.016); e.pupil.scale.set(ps, ps, 1); e.glint.position.set(px + 0.034 * ps, py + 0.038 * ps, sagZ(px, py, R) + 0.02);
       // párpado negro: baja desde arriba e inclina según la emoción (enojo: lado interior abajo; tristeza: al revés)
       const cov = clamp(fv(P + 'cover', c.cover), 0, 0.95); e.lid.visible = normal && cov > 0.01;
@@ -987,7 +987,8 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     const lx0 = clamp(num(ctx && ctx.lookX), -1, 1), ly0 = clamp(num(ctx && ctx.lookY), -1, 1);
     for (const s of ['L', 'R']) {
       const e = f.eyes[s], sx = s === 'L' ? -1 : 1, P = 'Eye' + s + '.', Q = 'Brow' + s + '.';
-      const lx = clamp(fv(P + 'lookX', lx0), -1, 1) * 0.04, ly = clamp(fv(P + 'lookY', ly0), -1, 1) * 0.03, lid = fv(P + 'cover', cur.lid);
+      let lx = clamp(fv(P + 'lookX', lx0), -1, 1) * 0.04, ly = clamp(fv(P + 'lookY', ly0), -1, 1) * 0.03; const lid = fv(P + 'cover', cur.lid);
+      if (name === 'dizzy') { const ph = S.t * 7 + (s === 'L' ? 0 : 0.9); lx = Math.cos(ph) * 0.04; ly = Math.sin(ph) * 0.04; }
       const closeAmt = clamp(fv(P + 'close', Math.max(blinkK, cur.lid, name === 'wink' && s === 'R' ? 1 : 0, name === 'dead' ? 1 : 0)), 0, 1);
       e.bone.scale.set(1, Math.max(0.08, 1 - closeAmt * 0.92 + Math.max(0, -lid) * 0.25), 1);
       e.pupil.position.x = lx; e.pupil.position.y = ly; e.glint.position.x = 0.025 + lx; e.glint.position.y = 0.03 + ly;

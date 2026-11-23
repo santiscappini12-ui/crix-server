@@ -4772,6 +4772,7 @@ function netConnect() {
   socket.on('player_moved',({socketId,x,y,z,ry,anim,moving,og})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.targetRY=ry;rp.anim=anim;rp.moving=moving;rp.og=og!==false;});
   socket.on('sound_cmd',cmd=>{try{CrixAudio.command(cmd);}catch(_){}});
   socket.on('avatar_cmd',({target,diff}={})=>{if(target&&diff)applyAvatarDiff(target,diff);});
+  socket.on('player_died',({socketId}={})=>{if(socketId&&gSettings.blood===true)_remoteBlood(socketId);});
   socket.on('player_left',({socketId})=>{const rp=remotePlayers[socketId];if(rp){if(gScene)gScene.remove(rp.group);addGMsg(`← ${rp.data.username} salió`,'sys');delete remotePlayers[socketId];}updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});
   socket.on('pong_res',ts=>{const ping=Date.now()-ts,pill=document.getElementById('g-net-pill');if(pill)pill.textContent=`🟢 ${Object.keys(remotePlayers).length+1}p · ${ping}ms`;});
@@ -6819,7 +6820,7 @@ function _ragStart(source, av) {
   try { CrixAvatar.setFace(av, 'dead'); } catch (_) {}
   _playDeathScream();
   if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('avatar_self', { cmds: [{ op: 'anim', name: 'dead' }] });   // los demás te ven tirado
-  if (gRag.blood) _bloodBurst(_ragCenter(), 26, 1);
+  if (gRag.blood) { _bloodBurst(_ragCenter(), 26, 1); if (typeof socket !== 'undefined' && socket && netConnected) socket.emit('player_died'); }   // los demás también ven la sangre
 }
 function _ragCenter() { const v = new THREE.Vector3(); gRag.pivot.getWorldPosition(v); return v; }
 function _ragImpact(speed) {
@@ -6867,6 +6868,28 @@ function _ragAbort() { if (gRag && gRag.audio) { try { gRag.audio.pause(); } cat
 // ── Sangre (opcional): gotas con gravedad que al caer en una superficie dejan una mancha que se desvanece ──
 const gBlood = { drops: [], stains: [], geo: null, dropMat: null, stainGeo: null };
 const BLOOD_MAX_STAINS = 140, BLOOD_GRAVITY = 60;
+// ── Sangre de OTROS jugadores: misma sangre que la propia (ráfaga al morir, otra al caer, chorritos y charco), si el juego la tiene activada ──
+const gRemoteBleeds = [];
+function _remoteBlood(id) {
+  const rp = remotePlayers[id]; if (!rp || !rp.group || !gScene) return;
+  const i = gRemoteBleeds.findIndex(b => b.rp === rp); if (i >= 0) gRemoteBleeds.splice(i, 1);
+  gRemoteBleeds.push({ rp, t: 0, bleedT: 0, hit: false, pool: null });
+  _bloodBurst(_remoteCenter(rp, 1.2), 26, 1);
+}
+function _remoteCenter(rp, h) { const p = rp.group.position; return new THREE.Vector3(p.x, p.y + h, p.z); }
+function _remoteBloodUpdate(dt) {
+  for (let i = gRemoteBleeds.length - 1; i >= 0; i--) {
+    const b = gRemoteBleeds[i], rp = b.rp; b.t += dt;
+    if (!rp.group.parent || b.t >= 2.6) { gRemoteBleeds.splice(i, 1); continue; }   // se fue o terminó (el charco queda y se desvanece solo)
+    if (!b.hit && b.t >= 0.45) {   // cae al suelo
+      b.hit = true; _bloodBurst(_remoteCenter(rp, 0.4), 18, 1.1);
+      const p = rp.group.position, gy = _bloodGroundY(p.x, p.z, p.y + 0.5), y = gy > -Infinity ? gy : p.y;
+      b.pool = _bloodPool(new THREE.Vector3(p.x, y, p.z));
+    }
+    if (b.hit && b.t < 1.6) { b.bleedT -= dt; if (b.bleedT <= 0) { b.bleedT = 0.09; _bloodBurst(_remoteCenter(rp, 0.35), 2, 0.35); } }
+    const P = b.pool; if (P) { P.grow = Math.min(1, (P.grow || 0) + dt / 2.2); const r = 0.25 + 1.5 * P.grow; P.mesh.scale.set(r, r * P.squash, 1); }
+  }
+}
 function _bloodInit() { if (gBlood.geo) return; gBlood.geo = new THREE.SphereGeometry(0.09, 6, 5); gBlood.dropMat = new THREE.MeshBasicMaterial({ color: 0xa30b14 }); gBlood.stainGeo = new THREE.CircleGeometry(1, 18); }
 function _bloodGroundY(x, z, y) {   // superficie horizontal más alta bajo la gota (cajas de colisión del mapa)
   let best = -Infinity;
@@ -6882,8 +6905,8 @@ function _bloodStain(x, y, z, r, life, opacity) {
   while (gBlood.stains.length > BLOOD_MAX_STAINS) _bloodRemoveStain(gBlood.stains[0]);
   return st;
 }
-function _bloodPool() {   // charco grande bajo el cuerpo: crece mientras está tirado
-  const c = gPlayer.position, st = _bloodStain(c.x, c.y, c.z, 0.25, 15, 0.8); if (!st) return null;
+function _bloodPool(pos) {   // charco grande bajo el cuerpo: crece mientras está tirado
+  const c = pos || gPlayer.position, st = _bloodStain(c.x, c.y, c.z, 0.25, 15, 0.8); if (!st) return null;
   st.mesh.rotation.z = 0; return { mesh: st.mesh, y: c.y + 0.03, squash: _ragRand(0.7, 1), ox: _ragRand(-0.15, 0.15), oz: _ragRand(-0.15, 0.15), grow: 0 };
 }
 function _bloodRemoveStain(st) { const i = gBlood.stains.indexOf(st); if (i >= 0) gBlood.stains.splice(i, 1); if (st.mesh.parent) st.mesh.parent.remove(st.mesh); st.mat.dispose(); }
@@ -6896,6 +6919,7 @@ function _bloodBurst(origin, n, power) {
   }
 }
 function _bloodUpdate(dt) {
+  if (gRemoteBleeds.length) _remoteBloodUpdate(dt);
   if (!gBlood.drops.length && !gBlood.stains.length) return;
   for (let i = gBlood.drops.length - 1; i >= 0; i--) {
     const d = gBlood.drops[i], p = d.mesh.position, prevY = p.y;
@@ -6913,6 +6937,7 @@ function _bloodUpdate(dt) {
   }
 }
 function _bloodClear() {
+  gRemoteBleeds.length = 0;
   for (const d of gBlood.drops) { if (d.mesh.parent) d.mesh.parent.remove(d.mesh); } gBlood.drops.length = 0;
   for (const s of gBlood.stains.slice()) _bloodRemoveStain(s);
 }

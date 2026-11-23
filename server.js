@@ -3024,6 +3024,15 @@ G('avatar_self', (socket, data) => {
     for (const diff of diffs) socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('avatar_cmd', { target:socket.id, diff });
 });
 
+// Muerte de un jugador: se avisa a los demás para que vean su sangre (cada cliente decide según la opción «Sangre» del juego)
+G('player_died', (socket) => {
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; const player = room?.players[socket.id]; if (!room || !player) return;
+    const now = Date.now(); if (player.diedAt && now - player.diedAt < 1500) return;   // antispam
+    player.diedAt = now;
+    socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_died', { socketId:socket.id });
+});
+
 G('part_collect', (socket, data) => {
     const meta = connSockets[socket.id]; if (!meta?.mapId) return;
     const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id] || !room.worldParts) return;
