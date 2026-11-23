@@ -4404,12 +4404,20 @@ function applyNetworkPartUpsert(part,snap) {
   const id=String(part.id||'');if(!id)return;
   const existing=runtimeObjects.get(id);
   if(!existing){if(part.sx===undefined)return;_createGameScriptPart(id,part);return;}
-  const rotKeys=existing.data.anchored===false?[]:['rx','ry','rz'];const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
+  const rotKeys=[];   // la rotación (también de las ancladas movidas por scripts) se interpola/extrapola, no se aplica de golpe
+  const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
   if(visualChanged){existing.netTarget=null;_updateGameScriptPart(id,part);return;}
   const prevD=existing.data,prevAt=existing.netAt||0,nowT=performance.now();
   existing.data=normalizeGamePart(id,{...existing.data,...part});
   if(existing.data.anchored)existing.velocity.set(0,0,0);
-  if(prevAt&&nowT-prevAt<250&&nowT-prevAt>5){const dtp=(nowT-prevAt)/1000;existing.netVel={x:(existing.data.x-prevD.x)/dtp,y:(existing.data.y-prevD.y)/dtp,z:(existing.data.z-prevD.z)/dtp};}else existing.netVel=null;
+  existing.netVel=null;existing.netAng=null;
+  if(prevAt&&nowT-prevAt<250&&nowT-prevAt>5){
+    const dtp=(nowT-prevAt)/1000,nd=existing.data,wrapA=a=>{a%=Math.PI*2;if(a>Math.PI)a-=Math.PI*2;else if(a<-Math.PI)a+=Math.PI*2;return a;};
+    const v={x:(nd.x-prevD.x)/dtp,y:(nd.y-prevD.y)/dtp,z:(nd.z-prevD.z)/dtp};
+    const w={x:wrapA((nd.rx||0)-(prevD.rx||0))/dtp,y:wrapA((nd.ry||0)-(prevD.ry||0))/dtp,z:wrapA((nd.rz||0)-(prevD.rz||0))/dtp};
+    if(Math.hypot(v.x,v.y,v.z)<150)existing.netVel=v;          // más rápido = teletransporte, no se extrapola
+    if(Math.hypot(w.x,w.y,w.z)<40)existing.netAng=w;
+  }
   existing.netAt=nowT;
   const d=existing.data,m=existing.mesh,far=Math.hypot(d.x-m.position.x,d.y-m.position.y,d.z-m.position.z)>12;
   if(snap||far||!existing.mesh.visible){
@@ -4432,15 +4440,18 @@ function _reconcilePredicted(o,d){
   const g=0.1*(err-0.8)/err;m.position.x+=ex*g;m.position.y+=ey*g;m.position.z+=ez*g;o._pp={x:m.position.x,y:m.position.y,z:m.position.z};_syncRuntimeCollider(o);
 }
 // Acerca suavemente cada pieza sincronizada a la última posición que mandó el servidor.
+const _netQ=new THREE.Quaternion(),_netE=new THREE.Euler();
 function _stepNetInterp() {
   for(const object of runtimeObjects.values()){
     const t=object.netTarget,m=object.mesh;if(!t||!m)continue;
-    const k=0.4,p=m.position,v=object.netVel,el=v&&object.netAt?(performance.now()-object.netAt)/1000:0,age=el<0.08?el:Math.max(0,0.16-el);
+    const k=0.4,p=m.position,v=object.netVel,el=(v||object.netAng)&&object.netAt?(performance.now()-object.netAt)/1000:0,age=el<0.08?el:Math.max(0,0.16-el);
     const tx=t.x+(v?v.x*age:0),ty=t.y+(v?v.y*age:0),tz=t.z+(v?v.z*age:0);
     p.x+=(tx-p.x)*k;p.y+=(ty-p.y)*k;p.z+=(tz-p.z)*k;
     // Rotación por cuaternión (slerp): las piezas que vuelcan y ruedan con la física realista no deben pasar por ángulos de Euler.
     if(!t.q){t.q=new THREE.Quaternion().setFromEuler(new THREE.Euler(t.rx,t.ry,t.rz,'XYZ'));}
-    m.quaternion.slerp(t.q,k);
+    let tq=t.q;const w=object.netAng;
+    if(w&&age>0){tq=_netQ.setFromEuler(_netE.set(t.rx+w.x*age,t.ry+w.y*age,t.rz+w.z*age,'XYZ'));}
+    m.quaternion.slerp(tq,k);
     const dq=Math.abs(m.quaternion.dot(t.q));
     if(Math.abs(t.x-p.x)<0.002&&Math.abs(t.y-p.y)<0.002&&Math.abs(t.z-p.z)<0.002&&dq>0.99999){p.set(t.x,t.y,t.z);m.quaternion.copy(t.q);object.netTarget=null;}
   }
@@ -4527,6 +4538,8 @@ let _localRoom = null, _localPrev = null;
 const _clientRigidOn = () => !!(window.CrixRigid && CrixRigid.isReady() && window.gPhysicsMode !== 'classic');
 // predict=true: el servidor manda la física, pero las piezas que el jugador local está tocando/empujando se simulan
 // también aquí (mismo módulo que el servidor) para que el empuje se vea al instante; luego se reconcilia con el servidor.
+let _predKids = null;   // id de pieza → ids de las piezas que la siguen por uniones cinemáticas (Weld, Motor6D…)
+function _predDesc(id) { const out = [], seen = new Set([id]), q = [id]; while (q.length) { const ks = _predKids && _predKids.get(q.pop()); if (!ks) continue; for (const k of ks) if (!seen.has(k)) { seen.add(k); out.push(k); q.push(k); } } return out; }
 function _stepLocalSpheres(predict) {
   const WP = window.CrixWorldPhysics; if (!WP) return;
   const rg = _clientRigidOn();
@@ -4535,10 +4548,19 @@ function _stepLocalSpheres(predict) {
     if (!gPlayer) return;
     const nowP = performance.now(), px = gPlayer.position.x, py = gPlayer.position.y, pz = gPlayer.position.z;
     nearSet = new Set();
+    const JD = window.CrixJoints, defs = (window.gJointDefs ? gJointDefs() : []).filter(j => j && !j.local && j.enabled !== false && j.part0 && j.part1);
+    const blockP = new Set(), defP = new Set(), drivenP = new Set(); _predKids = new Map();
+    for (const j of defs) {
+      const a = String(j.part0), b = String(j.part1); defP.add(a); defP.add(b);
+      if (JD && JD.KINEMATIC.includes(j.class)) { drivenP.add(b); if (!_predKids.has(a)) _predKids.set(a, []); _predKids.get(a).push(b); }
+      else { blockP.add(a); blockP.add(b); }   // uniones dinámicas (resortes, bisagras con física): no se predicen
+    }
     for (const o of runtimeObjects.values()) {
       const d = o.data;
-      if (d.anchored !== false || !o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC || d.canCollide === false || o.jointLinked || (window.gJointDriven && gJointDriven.has(String(o.id))) || (window.gJointParts && gJointParts.has(String(o.id)))) continue;
-      if ((o.noPredUntil && nowP < o.noPredUntil) || (o.netVel && Math.abs(o.netVel.y) > 1.5)) continue;   // cayendo: manda el servidor
+      if (d.anchored !== false || !o.mesh || !o.mesh.parent || o.collected || d.type === 'Spawn' || d.isNPC || d.canCollide === false || (window.gJointDriven && gJointDriven.has(String(o.id)))) continue;
+      const oid = String(o.id);
+      if (drivenP.has(oid) || blockP.has(oid) || (o.jointLinked && !defP.has(oid)) || _predDesc(oid).some(x => blockP.has(x))) continue;   // hijos de uniones siguen a su raíz; uniones desconocidas/dinámicas no se predicen
+      if ((o.noPredUntil && nowP < o.noPredUntil) || (o.netVel && o.netVel.y < -3)) continue;   // cayendo de verdad (solo hacia abajo y rápido): manda el servidor
       const reach = Math.max(d.sx || 1, d.sz || 1) / 2 + 1.6;
       if ((o.predAt && nowP - o.predAt < 400) || (Math.hypot(o.mesh.position.x - px, o.mesh.position.z - pz) < reach && Math.abs(o.mesh.position.y - py) < Math.max(d.sy || 1, 3) + 1.5)) nearSet.add(String(o.id));
     }
@@ -4574,12 +4596,30 @@ function _stepLocalSpheres(predict) {
   const result = WP.stepRoom(room, now, players);
   for (const c of result.changed) {
     const o = runtimeObjects.get(c.id), p = parts[c.id]; if (!o || !p) continue;
+    const kidIds = predict ? _predDesc(String(c.id)) : null, oldP = kidIds && kidIds.length ? o.mesh.position.clone() : null, oldQ = oldP ? o.mesh.quaternion.clone() : null;
     o.mesh.position.set(p.x, p.y, p.z); o.mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
     Object.assign(o.data, { x: p.x, y: p.y, z: p.z, rx: p.rx || 0, ry: p.ry || 0, rz: p.rz || 0 });
-    const fell = predict && o._pp && (o._pp.y - p.y) > 0.03;
+    // Caída real = bajada continua de más de 0.5 studs en frames seguidos; las vibraciones pequeñas de la física no cuentan.
+    const drop = predict && o._pp ? (o._pp.y - p.y) : 0;
+    o._fallAcc = drop > 0.01 ? (o._fallAcc || 0) + drop : 0;
+    const fell = predict && o._fallAcc > 0.5;
+    if (fell) o._fallAcc = 0;
     o._pp = { x: p.x, y: p.y, z: p.z };
-    if (predict) { if (fell) { o.predAt = 0; o.noPredUntil = performance.now() + 800; } else { o.predAt = performance.now(); o.netTarget = null; o.netVel = null; } }
+    if (predict) { if (fell) { o.predAt = 0; o.noPredUntil = performance.now() + 800; } else { o.predAt = performance.now(); o.netTarget = null; o.netVel = null; o.netAng = null; } }
     _syncRuntimeCollider(o);
+    // Ensamblaje: los hijos de las uniones se mueven con la misma transformación que su raíz (solo si no es una caída).
+    if (kidIds && kidIds.length) {
+      if (fell) { for (const kid of kidIds) { const ko = runtimeObjects.get(kid); if (ko) ko.predAt = 0; } }
+      else {
+        const ts = performance.now(), dq = o.mesh.quaternion.clone().multiply(oldQ.clone().invert()), np = o.mesh.position;
+        for (const kid of kidIds) {
+          const ko = runtimeObjects.get(kid); if (!ko || !ko.mesh) continue; const km = ko.mesh;
+          km.position.sub(oldP).applyQuaternion(dq).add(np); km.quaternion.premultiply(dq);
+          Object.assign(ko.data, { x: km.position.x, y: km.position.y, z: km.position.z, rx: km.rotation.x, ry: km.rotation.y, rz: km.rotation.z });
+          ko.predAt = ts; ko.netTarget = null; ko.netVel = null; ko.netAng = null; _syncRuntimeCollider(ko);
+        }
+      }
+    }
   }
   for (const o of loose) if (!o._pp) o._pp = { x: o.mesh.position.x, y: o.mesh.position.y, z: o.mesh.position.z };
 }
