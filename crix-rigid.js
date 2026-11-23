@@ -24,6 +24,7 @@
   const MIN_SIZE = 0.05;
   const PLAYER_PUSH_MASS = 80;       // masa máxima que un jugador puede empujar «a pulso»
   const PLAYER_PUSH_GAIN = 0.45;
+  const MAX_SUB = 3;                 // subpasos de Rapier por tick del servidor
 
   let R = null;                      // librería Rapier
   const isReady = () => !!R;
@@ -87,14 +88,16 @@
     }
   }
 
-  const signature = part => [part.type, part.sx, part.sy, part.sz, part.material, part.friction, part.bounce, part.density, part.drag, part.gravityScale].join('|');
+  const SIG_KEYS = ['type', 'sx', 'sy', 'sz', 'material', 'friction', 'bounce', 'density', 'drag', 'gravityScale'];
+  const signature = part => SIG_KEYS.map(k => part[k]);
+  const sameSig = (sig, part) => { for (let i = 0; i < SIG_KEYS.length; i++) if (sig[i] !== part[SIG_KEYS[i]]) return false; return true; };
 
   // ── Estado por sala ────────────────────────────────────────────────────────────────────────────
   function stateOf(room) {
     if (!room.rigid) {
       const world = new R.World({ x: 0, y: -GRAVITY, z: 0 });
       world.timestep = STEP;
-      try { world.integrationParameters.numSolverIterations = 8; } catch (_) { /* versiones sin esta propiedad */ }
+      try { world.integrationParameters.numSolverIterations = 6; } catch (_) { /* versiones sin esta propiedad */ }
       room.rigid = { world, queue: new R.EventQueue(true), bodies: new Map(), byHandle: new Map(), pendingPush: new Map() };
     }
     return room.rigid;
@@ -157,7 +160,7 @@
       seen.add(id);
       const kind = dynamic ? 'dynamic' : 'fixed';
       let rec = rs.bodies.get(id);
-      if (rec && (rec.sig !== signature(part) || (rec.kind === 'dynamic') !== dynamic)) { removeBody(rs, id); rec = null; }
+      if (rec && (!sameSig(rec.sig, part) || (rec.kind === 'dynamic') !== dynamic)) { removeBody(rs, id); rec = null; }
       if (!rec) rec = createBody(rs, part, kind);
       if (dynamic) {
         handled.add(id);
@@ -190,7 +193,11 @@
     // Velocidades antes de chocar (para el «speed» de los eventos de aterrizaje/choque).
     for (const rec of rs.bodies.values()) if (rec.kind === 'dynamic') { const v = rec.body.linvel(); rec.v.x = v.x; rec.v.y = v.y; rec.v.z = v.z; }
 
-    for (let s = 0; s < steps; s++) {
+    // Tiempo real aunque el servidor vaya justo: como mucho MAX_SUB subpasos por tick, cada uno con el dt que haga falta.
+    // (Antes se descartaba el tiempo que no daba abasto y todo caía en cámara lenta.)
+    const sub = Math.min(steps, MAX_SUB), subDt = sub > 0 ? (steps * STEP) / sub : STEP;
+    rs.world.timestep = subDt;
+    for (let s = 0; s < sub; s++) {
       rs.world.step(rs.queue);
       rs.queue.drainCollisionEvents((h1, h2, started) => {
         if (!started || !landings) return;
@@ -205,6 +212,11 @@
     for (const [id, rec] of rs.bodies) {
       if (rec.kind !== 'dynamic') continue;
       const part = room.worldParts[id]; if (!part) continue;
+      if (rec.body.isSleeping() && !rec.written) {
+        if (!rec.slept) { rec.slept = true; if (room.physicsVelocities) room.physicsVelocities[id] = 0; if (room.phys && room.phys.vel) room.phys.vel.set(id, { x: 0, z: 0 }); }
+        continue;
+      }
+      rec.slept = false;
       let lv = rec.body.linvel();
       const sp = Math.hypot(lv.x, lv.y, lv.z);
       if (sp > MAX_SPEED) { const f = MAX_SPEED / sp; rec.body.setLinvel({ x: lv.x * f, y: lv.y * f, z: lv.z * f }, true); lv = rec.body.linvel(); }

@@ -409,6 +409,7 @@ function stepRoom(room, now, players) {
   ps.lastAt = now;
   ps.acc += dtMs / 1000;
   let steps = Math.floor(ps.acc / STEP);
+  const rawSteps = steps;   // la física realista no descarta tiempo: usa hasta 15 pasos (0,25 s) aunque el clásico solo 12
   if (steps > MAX_CATCHUP_STEPS) { steps = MAX_CATCHUP_STEPS; ps.acc = 0; } else ps.acc -= steps * STEP;
   const dt = Math.max(dtMs / 1000, 1e-3);
 
@@ -425,7 +426,7 @@ function stepRoom(room, now, players) {
   let rigidEntries = [];
   if (useRigid(room)) {
     const extentsOf = part => { const b = partBox(part); return { ex: (b.maxX - b.minX) / 2, ey: (b.maxY - b.minY) / 2, ez: (b.maxZ - b.minZ) / 2 }; };
-    const handled = rigid().step(room, entries, steps, players, landings, { extentsOf });
+    const handled = rigid().step(room, entries, Math.min(rawSteps, 15), players, landings, { extentsOf });
     rigidEntries = dynamics.filter(entry => handled.has(entry.part.id));
     dynamics = dynamics.filter(entry => !handled.has(entry.part.id));
     for (const entry of rigidEntries) entry.box = partBox(entry.part);
