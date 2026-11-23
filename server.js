@@ -23,6 +23,23 @@ if (persist.enabled && !persist.restored) {
   process.exit(1);
 }
 
+// Un error no controlado (en un timer, un evento de socket o una promesa) ya NO cierra el proceso: antes tumbaba el servidor
+// entero y todas las partidas decían «se cerró / creá una nueva». Ahora se registra y el servidor sigue en pie.
+let _fatalCount = 0, _fatalWindowAt = 0;
+function _onFatal(kind, err) {
+  console.error(`[${kind}]`, err && err.stack ? err.stack : err);
+  const t = Date.now(); if (t - _fatalWindowAt > 60000) { _fatalWindowAt = t; _fatalCount = 0; }
+  if (++_fatalCount > 200) { console.error('[FATAL] Demasiados errores seguidos; reinicio limpio.'); process.exit(1); }
+}
+process.on('uncaughtException', err => _onFatal('uncaughtException', err));
+process.on('unhandledRejection', err => _onFatal('unhandledRejection', err));
+// Vigía del bucle de eventos: si algo lo bloquea mucho rato (física, guardado de la base…), los sockets caen por ping timeout
+// y las demás instancias dan por muerta a esta. Queda anotado en el log para poder encontrar al culpable.
+try {
+  const { monitorEventLoopDelay } = require('perf_hooks'), h = monitorEventLoopDelay({ resolution: 20 }); h.enable();
+  setInterval(() => { const max = h.max / 1e6; h.reset(); if (max > 1000) console.warn(`[LAG] El bucle de eventos se bloqueó ${Math.round(max)} ms`); }, 10000).unref();
+} catch (_) { /* sin perf_hooks */ }
+
 const app    = express();
 const server = http.createServer(app);
 const cluster = require('./cluster')();   // varias instancias jugando juntas (Redis); sin CRIX_REDIS_URL queda inactivo
@@ -567,10 +584,9 @@ function stepRoomJoints(room,now,channel,roomId,mark) {
   if(list.length){io.to(channel).emit('joint_poses',{t:now,parts:list.slice(0,600)});scriptRunner?.send({type:'worldPositions',roomId,parts:update,appliedSeq:room.appliedSeq||0});}
 }
 
-function stepServerWorldPhysics() {
-  const now=Date.now();
-  for(const room of Object.values(rooms)){
-    if(!Object.keys(room.players).length||!room.worldParts){if(room.phys)room.phys.lastAt=0;continue;}
+function stepRoomPhysicsSafe(room,now) {
+  {
+    if(!Object.keys(room.players).length||!room.worldParts){if(room.phys)room.phys.lastAt=0;return;}
     const roomId=roomKey(room.mapId,room.instanceId),channel=gameChannel(room.mapId,room.instanceId);
     stepRoomJoints(room,now,channel,roomId,true);
     const result=worldPhysics.stepRoom(room,now,playersForRunner(room));
@@ -599,7 +615,30 @@ function stepServerWorldPhysics() {
     }
   }
 }
-setInterval(stepServerWorldPhysics,33);   // ~30 Hz (antes 20 Hz): menos intervalo entre paquetes = menos que predecir
+
+function stepServerWorldPhysics() {
+  const now=Date.now();
+  for(const room of Object.values(rooms)){
+    try{stepRoomPhysicsSafe(room,now);}
+    catch(err){
+      // Una sala con la física rota no debe afectar a las demás ni al servidor: se registra, se libera Rapier y esa sala sigue con la física clásica.
+      room._physErrors=(room._physErrors||0)+1;
+      console.error('[FÍSICA] Error en la sala '+roomKey(room.mapId,room.instanceId)+':',err&&err.stack?err.stack:err);
+      try{if(room.rigid)CrixRigid.dispose(room);}catch(_){}
+      try{if(room.phys){room.phys.lastAt=0;room.phys.acc=0;}}catch(_){}
+      if(room._physErrors>=3&&room.physicsMode!=='classic'){room.physicsMode='classic';console.warn('[FÍSICA] La sala '+roomKey(room.mapId,room.instanceId)+' pasa a física clásica por errores repetidos.');}
+    }
+  }
+}
+// Bucle autoprogramado (en vez de setInterval): si un tick tarda, se espera al menos 8 ms antes del siguiente para que el servidor
+// pueda atender sockets y latidos; así la física nunca ahoga al resto del servidor.
+(function physicsLoop(){
+  const t0=Date.now();
+  try{stepServerWorldPhysics();}catch(err){console.error('[FÍSICA]',err&&err.stack?err.stack:err);}
+  const spent=Date.now()-t0;
+  if(spent>100)console.warn('[FÍSICA] Tick lento: '+spent+' ms');
+  const t=setTimeout(physicsLoop,Math.max(8,33-spent));
+})();
 
 // Presencia visible para todos: qué juego e instancia está jugando cada persona.
 // Presencia de una persona: la de esta instancia o, si está conectada a otra, la que esa instancia anunció.
