@@ -404,6 +404,7 @@
     const dict = {}; for (const [id, o] of runtimeObjects) dict[id] = o.data;
     G.driven = J.drivenIds(G.joints.filter(j => !netOnline() || j.local), dict);
     window.gJointDriven = G.driven;
+    window.gJointParts = G.used;   // toda pieza que participe en CUALQUIER unión (también las del servidor): nunca se predice en local
   }
   const netOnline = () => (typeof netServerScriptsActive !== 'undefined' && netServerScriptsActive && typeof netConnected !== 'undefined' && netConnected);
   function applyGamePose(id) {
@@ -448,7 +449,7 @@
   }
   function netPoses(msg) {
     if (!msg || !Array.isArray(msg.parts)) return;
-    for (const p of msg.parts) { if (!Array.isArray(p) || p.length < 7) continue; if (runtimeObjects.has(String(p[0]))) G.targets.set(String(p[0]), { x: p[1], y: p[2], z: p[3], rx: p[4], ry: p[5], rz: p[6] }); }
+    for (const p of msg.parts) { if (!Array.isArray(p) || p.length < 7) continue; const jo = runtimeObjects.get(String(p[0])); if (jo) { jo.jointLinked = true; jo.predAt = 0; G.targets.set(String(p[0]), { x: p[1], y: p[2], z: p[3], rx: p[4], ry: p[5], rz: p[6] }); } }
   }
   function gameCommand(message) {
     const c = message.command, p = message.payload || {};
