@@ -1022,6 +1022,15 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
   <h3>🤖 NPCs</h3>
   <h3>🤖 Humanoides</h3>
   <div class="npc-grid" id="npc-grid"></div>
+  <div style="margin-top:14px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">👤 Con el avatar de un jugador</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <input class="inp" id="npc-user" list="npc-user-list" placeholder="Nombre de usuario" autocomplete="off" style="flex:1;min-width:140px" onkeydown="if(event.key==='Enter')spawnNpcFromPlayer()">
+      <button class="btn btn-p" onclick="spawnNpcFromPlayer()">Crear</button>
+      <button class="btn btn-g" onclick="spawnNpcFromPlayer(true)">Mi avatar</button>
+    </div>
+    <datalist id="npc-user-list"></datalist>
+  </div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-npc')">Cerrar</button></div>
 </div>
 </div>
@@ -3799,8 +3808,22 @@ async function confirmPublish() {
   else showToast('⚠️ No se pudo publicar: ' + ((r && r.err) || 'sin conexión') + '. Se reintenta solo.');
 }
 const NPC_LIB = [{id:'player',name:'Personaje',icon:'🧍',type:'Jugador',skin:'#ffd9b3',color:'#2f80ff',pants:'#3a4668',hp:100}];
-function openNpcPanel() { document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
-function spawnNpc(npcId) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; recordStudioHistory();const d = { id:'npc'+Date.now(), type:'NPC', name:npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:3.05, sz:1, rx:0, ry:0, rz:0, color:npc.color, skinColor:'#ffd9b3', look:Object.assign({}, NPC_LOOKS[npc.id]||{}), anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(`🤖 ${npc.name} agregado (igual que un jugador)`); }
+function openNpcPanel() { try { const dl = document.getElementById('npc-user-list'); if (dl) dl.innerHTML = Object.values(getUsers()).filter(u => u && u.username && !u.banned).slice(0, 1000).map(u => '<option value="' + esc(u.username) + '"></option>').join(''); const inp = document.getElementById('npc-user'); if (inp) inp.value = ''; } catch (_) {} document.getElementById('npc-grid').innerHTML = NPC_LIB.map(n => `<div class="npc-card" onclick="spawnNpc('${n.id}')"><div class="npc-icon">${n.icon}</div><div class="npc-name">${n.name}</div><div class="npc-type">${n.type} · ${n.hp}HP</div></div>`).join(''); openModal('mo-npc'); }
+function spawnNpcFromPlayer(mine) {
+  let user = null;
+  if (mine) user = ME ? { username: ME.username, color: ME.color, look: myLook() } : null;
+  else {
+    const name = String((document.getElementById('npc-user') || {}).value || '').trim().replace(/^@/, '').toLowerCase();
+    if (!name) { showToast('Escribí el nombre de un jugador'); return; }
+    user = Object.values(getUsers()).find(u => u && !u.banned && String(u.username || '').toLowerCase() === name) || null;
+  }
+  if (!user) { showToast(mine ? 'Iniciá sesión para usar tu avatar' : 'No encontré a ese jugador'); return; }
+  spawnNpc('player', user);
+}
+function spawnNpc(npcId, player) { const npc = NPC_LIB.find(n => n.id === npcId); if (!npc) return; recordStudioHistory();
+  // Con un jugador: se copia su avatar tal como está ahora (aspecto, accesorios y color); el NPC no cambia si él cambia el suyo después.
+  const pLook = player ? CrixAvatar.profileLook(player.look && typeof player.look === 'object' ? player.look : {}) : null;
+  const d = { id:'npc'+Date.now(), type:'NPC', name:player ? String(player.username || npc.name).slice(0, 80) : npc.name, x:stCamTarget.x+(Math.random()-.5)*10, y:0.5, z:stCamTarget.z+(Math.random()-.5)*10, sx:1, sy:3.05, sz:1, rx:0, ry:0, rz:0, color:(player && player.color) || npc.color, skinColor:(pLook && pLook.skin) || '#ffd9b3', look:pLook ? pLook : Object.assign({}, NPC_LOOKS[npc.id]||{}), anchored:false, canCollide:true, transparent:0, material:'SmoothPlastic', isNPC:true, npcType:npc.type, hp:npc.hp, maxHp:npc.hp, npcIcon:npc.icon }; const entry = addPartMesh(d); refreshExplorer(); selectPart(entry); closeModal('mo-npc'); showToast(player ? `🤖 NPC con el avatar de ${d.name} agregado` : `🤖 ${npc.name} agregado (igual que un jugador)`); }
 const TOOLBOX_ITEMS = [{name:'Castillo',icon:'🏰',cat:'Edificios',type:'Block',color:'#888888',sx:8,sy:12,sz:8},{name:'Árbol',icon:'🌲',cat:'Naturaleza',type:'Cylinder',color:'#228b22',sx:2,sy:8,sz:2},{name:'Roca',icon:'🪨',cat:'Naturaleza',type:'Block',color:'#666655',sx:3,sy:2,sz:3},{name:'Puerta',icon:'🚪',cat:'Edificios',type:'Block',color:'#8B4513',sx:2,sy:4,sz:0.3},{name:'Escalera',icon:'🪜',cat:'Edificios',type:'Wedge',color:'#aaaaaa',sx:2,sy:4,sz:6},{name:'Poste de luz',icon:'💡',cat:'Decoración',type:'Cylinder',color:'#f7c948',sx:0.3,sy:8,sz:0.3},{name:'Barril',icon:'🛢️',cat:'Decoración',type:'Cylinder',color:'#8B4513',sx:1.5,sy:2,sz:1.5},{name:'Fuente',icon:'⛲',cat:'Decoración',type:'Cylinder',color:'#aaaacc',sx:4,sy:0.5,sz:4},{name:'Pared',icon:'🧱',cat:'Edificios',type:'Block',color:'#cc8866',sx:8,sy:4,sz:0.5},{name:'Plataforma Neon',icon:'✨',cat:'Especial',type:'Block',color:'#00ffff',sx:6,sy:0.3,sz:6,material:'Neon'},{name:'Esfera Cristal',icon:'💎',cat:'Especial',type:'Sphere',color:'#88ccff',sx:3,sy:3,sz:3,material:'Glass'},{name:'Columna',icon:'🏛️',cat:'Edificios',type:'Cylinder',color:'#e8e0d0',sx:1.2,sy:8,sz:1.2}];
 let toolboxFilter = 'all';
 function openToolbox() { const cats = ['all', ...new Set(TOOLBOX_ITEMS.map(i => i.cat))]; document.getElementById('toolbox-cats').innerHTML = cats.map(c => `<button class="filter-btn ${toolboxFilter===c?'active':''}" onclick="setToolboxCat('${c}',this)">${c==='all'?'Todos':c}</button>`).join(''); renderToolboxGrid(); openModal('mo-toolbox'); }
