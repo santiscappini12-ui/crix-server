@@ -11,17 +11,20 @@
   const mobile = /Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || Math.min(innerWidth, innerHeight) < 600;
   let pref = ''; try { pref = String(localStorage.getItem('crix_gfx') || ''); } catch (e) {}
   const QUALITY = (pref === 'low' || pref === 'high' || pref === 'ultra') ? pref : (mobile ? 'low' : 'high');
-  const Q = { quality: QUALITY, clouds: QUALITY !== 'low', bump: QUALITY !== 'low', physical: QUALITY !== 'low', env: true, anisotropy: QUALITY === 'ultra' ? 16 : QUALITY === 'high' ? 8 : 2 };
+  // SRGB=false: se conserva el flujo de color original del juego (salida lineal, colores tal cual se eligen, sin tone mapping),
+  // así avatares, accesorios y mapas existentes no cambian de color. Solo mejoran materiales, reflejos, cielo y sombras.
+  const SRGB = false;
+  const Q = { srgb: SRGB, quality: QUALITY, clouds: QUALITY !== 'low', bump: QUALITY !== 'low', physical: QUALITY !== 'low', env: true, anisotropy: QUALITY === 'ultra' ? 16 : QUALITY === 'high' ? 8 : 2 };
 
   // ── Color ────────────────────────────────────────────────────────────────────────────────────
   // Los colores del juego están escritos en sRGB (#rrggbb). Con salida sRGB, los materiales necesitan color lineal.
   // La niebla y el fondo NO se convierten: Three r128 los mezcla después de codificar la imagen.
-  const lin = c => (c && c.isColor ? c.clone() : new T.Color(c)).convertSRGBToLinear();
+  const lin = c => { const k = c && c.isColor ? c.clone() : new T.Color(c); return SRGB ? k.convertSRGBToLinear() : k; };
   const roughFromShine = s => Math.max(0.04, Math.min(1, 1 - 0.85 * Math.min(1, Math.sqrt(Math.max(0, s) / 150))));
 
   function basic(params) {          // material sin luz (ojos, sangre, gizmos…): mismo color en pantalla que antes
     const m = new T.MeshBasicMaterial(params || {});
-    m.color.convertSRGBToLinear(); m.toneMapped = false; return m;
+    if (SRGB) m.color.convertSRGBToLinear(); m.toneMapped = false; return m;
   }
   function std(params) {            // reemplazo PBR de MeshPhongMaterial ({color, shininess, opacity, emissive…})
     const p = Object.assign({}, params || {});
@@ -31,22 +34,20 @@
     const ctor = (p.clearcoat !== undefined && Q.physical) ? T.MeshPhysicalMaterial : T.MeshStandardMaterial;
     if (ctor === T.MeshStandardMaterial) { delete p.clearcoat; delete p.clearcoatRoughness; }
     const m = new ctor(p);
-    m.color.convertSRGBToLinear();
+    if (SRGB) m.color.convertSRGBToLinear();
     if (emissive !== undefined) m.emissive = lin(emissive);
     return m;
   }
   function tex(t, srgb) {           // textura de color: se decodifica como sRGB; con mipmaps y anisotropía
     if (!t) return t;
-    if (srgb !== false) t.encoding = T.sRGBEncoding;
+    if (SRGB && srgb !== false) t.encoding = T.sRGBEncoding;
     t.anisotropy = Q.anisotropy; t.needsUpdate = true; return t;
   }
 
   // ── Renderer ─────────────────────────────────────────────────────────────────────────────────
   function setupRenderer(r, o) {
     o = o || {};
-    r.outputEncoding = T.sRGBEncoding;
-    r.toneMapping = T.ACESFilmicToneMapping;
-    r.toneMappingExposure = o.exposure || 1.0;
+    if (SRGB) { r.outputEncoding = T.sRGBEncoding; r.toneMapping = T.ACESFilmicToneMapping; r.toneMappingExposure = o.exposure || 1.0; }
     if (r.shadowMap) { r.shadowMap.enabled = true; r.shadowMap.type = T.PCFSoftShadowMap; }
     Q.maxAniso = Math.min(Q.anisotropy, r.capabilities && r.capabilities.getMaxAnisotropy ? r.capabilities.getMaxAnisotropy() : 4);
     Q.anisotropy = Q.maxAniso || Q.anisotropy;
@@ -138,7 +139,7 @@
       const pm = renderer.userData && renderer.userData._pmrem || (renderer.userData = renderer.userData || {}, renderer.userData._pmrem = new T.PMREMGenerator(renderer));
       const es = new T.Scene(), dome = sky(false);
       dome.scale.set(50, 50, 50);
-      applySky(dome, P, 9, (0.55 + 0.45 * P.day) * P.B);
+      applySky(dome, P, 6, (0.55 + 0.45 * P.day) * P.B * 0.6);
       es.add(dome);
       const rt = pm.fromScene(es, 0.02, 1, 100);
       const old = st.envRT; scene.environment = rt.texture; st.envRT = rt; st.envKey = key;

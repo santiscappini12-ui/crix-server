@@ -3018,8 +3018,7 @@ function openAvatarEditor() {
   if (!avEd) {
     const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }), scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(30, cv.width / cv.height, 0.1, 100);
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(cv.width, cv.height, false);
-    if (window.CrixGFX) { CrixGFX.setupRenderer(renderer, { exposure: 1.05 }); CrixGFX.applyScene(scene, { fogColor: '#cfdcf0', sunElevation: 48, sunAzimuth: 35, brightness: 1 }, renderer, { sky: false }); }
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa4b8, window.CrixGFX ? 0.12 : 0.8), new THREE.AmbientLight(0xffffff, window.CrixGFX ? 0.05 : 0.3)); const sun = new THREE.DirectionalLight(0xffffff, window.CrixGFX ? 1.15 : 0.7); sun.position.set(3, 6, 5); scene.add(sun);
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa4b8, window.CrixGFX ? 0.5 : 0.8), new THREE.AmbientLight(0xffffff, 0.3)); const sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(3, 6, 5); scene.add(sun);
     cam.position.set(0, 1.9, 11); cam.lookAt(0, 1.55, 0);
     avEd = { renderer, scene, cam, av: null, mode: 'idle', raf: 0, yaw: 0.35, last: 0 };
     if (window.ResizeObserver) new ResizeObserver(() => avEdResize()).observe(cv);   // la vista previa sigue el tamaño real del recuadro (celular, tablet, PC, al girar)
@@ -3500,9 +3499,8 @@ function applyLightRig(rig, L) {
   const ibl = !!(window.CrixGFX && rig.scene.environment);   // con entorno IBL el cielo ya aporta la luz ambiental: se baja el relleno
   const toLin = c => window.CrixGFX ? CrixGFX.lin(c) : c;
   const amb = new THREE.Color(L.ambient), sky = new THREE.Color(L.fogColor || '#87ceeb').lerp(new THREE.Color(0xffffff), 0.45);
-  rig.amb.color.copy(toLin(amb)); rig.amb.intensity = (ibl ? 0.06 : 0.2) * B;
-  rig.hemi.color.copy(toLin(sky)); rig.hemi.groundColor.copy(toLin(amb)).multiplyScalar(0.45); rig.hemi.intensity = (ibl ? 0.1 : 0.42) * B;
-  if (ibl) rig.sun.intensity *= 1.35;   // sol más marcado: sombras con contraste y volumen
+  rig.amb.color.copy(toLin(amb)); rig.amb.intensity = (ibl ? 0.1 : 0.2) * B;
+  rig.hemi.color.copy(toLin(sky)); rig.hemi.groundColor.copy(toLin(amb)).multiplyScalar(0.45); rig.hemi.intensity = (ibl ? 0.2 : 0.42) * B;
   rig.sun.castShadow = L.shadows !== false;
   const sh = rig.sun.shadow, ext = rig.extent, dist = ext * 2.6, cam = sh.camera;
   cam.left = -ext; cam.right = ext; cam.top = ext; cam.bottom = -ext; cam.near = 1; cam.far = dist + ext * 2.2;
@@ -4833,7 +4831,7 @@ function netSendChat(text) { if (!socket || !netConnected) return false; socket.
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
 function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const built = _buildHumanoid(playerData.color || '#f97316', playerData.look); const group = built.group; group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, av: built.avatar, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false, og: true, spd: 0, vy: 0 }; flushAvatarPending(playerData.socketId); }
 function _buildAvatar(color) { return _buildHumanoid(color).group; }
-function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); if (window.CrixGFX) tex.encoding = THREE.sRGBEncoding; const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
+function _makeNameTag(username) { const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64; const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(8, 16, 240, 36, 8); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Segoe UI, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(username.substring(0, 14), 128, 34); const tex = new THREE.CanvasTexture(canvas); if (window.CrixGFX) CrixGFX.tex(tex); const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }); const sprite = new THREE.Sprite(mat); sprite.scale.set(2.2, 0.55, 1); sprite.position.y = 3.6; sprite.renderOrder = 999; return sprite; }
 function clearRemotePlayers() { Object.values(remotePlayers).forEach(rp => { if (gScene) gScene.remove(rp.group); if (rp.av) CrixAvatar.dispose(rp.av); }); remotePlayers = {}; }
 function netUpdateRemotes() { const LERP = 0.18, now = performance.now(), dt = Math.min(0.1, Math.max(0.001, (now - (netUpdateRemotes._t || now)) / 1000)); netUpdateRemotes._t = now;
   for (const rp of Object.values(remotePlayers)) {
@@ -8757,7 +8755,7 @@ function buildPartMaterial(d) {
     if (def.coat) { p.clearcoat = def.coat; p.clearcoatRoughness = def.coatRough || 0.1; }
     if (def.emissive) p.emissive = d.color || '#00ff88';
     mat = G.std(p); mat.envMapIntensity = def.env || 1;
-    if (def.emissive) { mat.emissiveIntensity = def.glow || def.emissive; }
+    if (def.emissive) { mat.emissiveIntensity = def.emissive; }
   } else {
     mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(d.color || '#888888'), transparent: tr > 0, opacity: 1 - tr, wireframe: d.type === 'TrussPart', shininess: def.shine });
     if (def.specular) mat.specular = new THREE.Color(def.specular);
