@@ -540,7 +540,7 @@ function handleScriptRunnerMessage(message) {
 
 function applyServerScriptCommand(room,command,payload) {
   const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
-  if(room.commandTimes.length>=6000)return;   // antes 300/s: los cambios de más se descartaban en silencio (varios tweens a 30 Hz ya lo superaban)
+  if(room.commandTimes.length>=300)return;
   room.commandTimes.push(now);
   const id=String(payload.id||'').slice(0,120);
   if(command==='physVelocity'||command==='physImpulse'){
@@ -636,7 +636,7 @@ function stepRoomPhysicsSafe(room,now) {
     if(result.events.length&&scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'contacts',roomId,events:result.events});
     // Resincronización de seguridad cada 2 s: estado autoritativo de TODAS las piezas con física.
     // Corrige a cualquier cliente que se haya perdido un paquete o estuviera en segundo plano.
-    if(!room.lastSyncAt||now-room.lastSyncAt>=(LOWRES.low?4000:500)){
+    if(!room.lastSyncAt||now-room.lastSyncAt>=(LOWRES.low?4000:2000)){
       room.lastSyncAt=now;
       const parts=[];
       for(const part of Object.values(room.worldParts)){
@@ -668,7 +668,7 @@ function stepServerWorldPhysics() {
 // Bucle autoprogramado (en vez de setInterval): si un tick tarda, se espera antes del siguiente para que el servidor pueda atender
 // sockets y latidos. En contenedores pequeños (0,1 vCPU) la física va a ~15 Hz, y si un tick tarda mucho (CPU limitada por el hosting)
 // el intervalo crece solo: la física nunca ocupa más de ~40 % del tiempo y el servidor no se cuelga.
-const PHYS_BASE_MS = LOWRES.low ? 66 : 16;   // ~60 Hz en servidores normales (antes 30 Hz); los planes chicos siguen en ~15 Hz. Si un tick tarda, el bucle se alarga solo.
+const PHYS_BASE_MS = LOWRES.low ? 66 : 33;
 (function physicsLoop(){
   const t0=Date.now();
   try{stepServerWorldPhysics();}catch(err){console.error('[FÍSICA]',err&&err.stack?err.stack:err);}
@@ -1908,7 +1908,7 @@ app.post('/api/classification/evaluate', requireAuth, (req, res) => {
 //   POST /api/v1/rating/evaluate                    { kind, country, answers, legal, declared } → insignia Crix del país (o 422 si es ilegal)
 //   GET  /api/v1/rating/badge.svg?system=AR&age=12  dibujo de la insignia (público, sin clave, para usar en <img>)
 // La clave va en la cabecera X-Crix-Key. Se guarda solo su hash, y se muestra una única vez al crearla.
-const API_KEY_RATE = Number.isFinite(Number(process.env.CRIX_API_RATE)) && process.env.CRIX_API_RATE !== undefined && process.env.CRIX_API_RATE !== '' ? Number(process.env.CRIX_API_RATE) : 600;   // pedidos por minuto por clave (0 = sin límite)
+const API_KEY_RATE = Number.isFinite(Number(process.env.CRIX_API_RATE)) && process.env.CRIX_API_RATE !== undefined && process.env.CRIX_API_RATE !== '' ? Number(process.env.CRIX_API_RATE) : 120;   // pedidos por minuto por clave (0 = sin límite)
 const apiKeyHits = new Map();                // id de clave → { n, reset }
 function publicKey(k) { return { id:k.id, name:k.name, prefix:k.prefix, createdAt:k.createdAt, lastUsed:k.lastUsed || null }; }
 app.get('/api/classification/keys', requireAuth, (req, res) => {
@@ -2999,7 +2999,7 @@ G('app_send', (socket, { type, data, to } = {}, cb) => {
     const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
     if (typeof type !== 'string' || !APP_KEY_RE.test(type)) return ack({ ok:false, err:'Tipo de mensaje inválido' });
     if (data !== undefined && jsonSize(data, Infinity) < 0) return ack({ ok:false, err:'Mensaje demasiado grande (máx. 8 KB)' });
-    if (!rateOk(socket, 'appsend', 240)) return ack({ ok:false, err:'Demasiados mensajes por segundo' });
+    if (!rateOk(socket, 'appsend', 90)) return ack({ ok:false, err:'Demasiados mensajes por segundo' });
     const p = ctx.room.players[socket.id], msg = { from:publicPlayer(p), type, data: data === undefined ? null : data };
     if (typeof to === 'string' && to) {
       const target = roomPlayers(ctx.room).find(q => q.socketId === to || q.userId === to);
@@ -3012,7 +3012,7 @@ G('app_send', (socket, { type, data, to } = {}, cb) => {
 G('app_state_set', (socket, { key, value } = {}, cb) => {
     const ack = ackFn(cb), ctx = appCtx(socket); if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
     if (typeof key !== 'string' || !APP_KEY_RE.test(key)) return ack({ ok:false, err:'Clave inválida' });
-    if (!rateOk(socket, 'appstate', 120)) return ack({ ok:false, err:'Demasiados cambios por segundo' });
+    if (!rateOk(socket, 'appstate', 40)) return ack({ ok:false, err:'Demasiados cambios por segundo' });
     const st = ctx.room.appState || (ctx.room.appState = {});
     if (value === null || value === undefined) delete st[key];
     else {
@@ -3032,7 +3032,7 @@ G('app_data_get', (socket, _, cb) => {
 G('app_data_set', (socket, { data } = {}, cb) => {
     const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
     if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para usar el guardado' });
-    if (!rateOk(socket, 'appdata', 12)) return ack({ ok:false, err:'Guardando demasiado seguido' });
+    if (!rateOk(socket, 'appdata', 4)) return ack({ ok:false, err:'Guardando demasiado seguido' });
     DB.appData = DB.appData || {};
     const bucket = DB.appData[ctx.meta.mapId] || (DB.appData[ctx.meta.mapId] = {});
     if (data === null || data === undefined) delete bucket[user.id];
@@ -3048,7 +3048,7 @@ G('app_score_submit', (socket, { board, score, mode } = {}, cb) => {
     const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
     if (!ctx || !user) return ack({ ok:false, err:'Iniciá sesión para guardar puntajes' });
     if (typeof board !== 'string' || !APP_KEY_RE.test(board) || !Number.isFinite(Number(score))) return ack({ ok:false, err:'Puntaje inválido' });
-    if (!rateOk(socket, 'appscore', 12)) return ack({ ok:false, err:'Demasiados envíos' });
+    if (!rateOk(socket, 'appscore', 4)) return ack({ ok:false, err:'Demasiados envíos' });
     const value = Math.max(-1e12, Math.min(1e12, Number(score)));
     DB.appScores = DB.appScores || {};
     const boards = DB.appScores[ctx.meta.mapId] || (DB.appScores[ctx.meta.mapId] = {});
@@ -3064,7 +3064,7 @@ G('app_score_top', (socket, { board, n } = {}, cb) => {
     const ack = ackFn(cb), ctx = appCtx(socket), user = socket.data.user;
     if (!ctx) return ack({ ok:false, err:'No estás en una sala' });
     if (typeof board !== 'string' || !APP_KEY_RE.test(board)) return ack({ ok:false, err:'Ranking inválido' });
-    if (!rateOk(socket, 'appscoretop', 20)) return ack({ ok:false, err:'Demasiadas consultas' });
+    if (!rateOk(socket, 'appscoretop', 6)) return ack({ ok:false, err:'Demasiadas consultas' });
     const b = DB.appScores?.[ctx.meta.mapId]?.[board];
     if (!b) return ack({ ok:true, mode:'max', top:[], me:null });
     const sorted = Object.entries(b.entries).map(([id, e]) => ({ id, username:e.username, score:e.score }))
@@ -3355,7 +3355,7 @@ io.on('connection', socket => {
     const ack = ackFn(cb), user = socket.data.user, mapId = socket.data.teamMapId;
     const sess = mapId && teamSessions[mapId], map = mapId && DB.maps[mapId];
     if (!sess || !sess.members.has(socket.id) || !map || !canEditMap(map, user)) return ack({ ok:false, err:'No estás en una sesión de equipo' });
-    if (!rateOk(socket, 'team', 90) || !Array.isArray(ops) || !ops.length) return ack({ ok:false });
+    if (!rateOk(socket, 'team', 30) || !Array.isArray(ops) || !ops.length) return ack({ ok:false });
     const applied = []; let budget = Infinity;
     for (const op of ops) {
       if (!op || typeof op !== 'object') continue;
@@ -3394,14 +3394,14 @@ io.on('connection', socket => {
   });
   socket.on('team_sel', ({ id } = {}) => {
     const mapId = socket.data.teamMapId, sess = mapId && teamSessions[mapId], me = sess?.members.get(socket.id);
-    if (!me || !rateOk(socket, 'teamsel', 60)) return;
+    if (!me || !rateOk(socket, 'teamsel', 20)) return;
     me.sel = id == null ? null : String(id).slice(0, 120);
     socket.to(teamChannel(mapId)).emit('team_sel', { socketId:socket.id, id:me.sel });
   });
   socket.on('team_chat', ({ text } = {}) => {
     const mapId = socket.data.teamMapId, sess = mapId && teamSessions[mapId], me = sess?.members.get(socket.id);
     text = String(text || '').trim().slice(0, 300);
-    if (!me || !text || !rateOk(socket, 'teamchat', 10)) return;
+    if (!me || !text || !rateOk(socket, 'teamchat', 5)) return;
     io.to(teamChannel(mapId)).emit('team_chat', { socketId:socket.id, username:me.username, color:me.color, text, at:Date.now() });
   });
 

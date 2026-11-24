@@ -279,7 +279,7 @@ function pullRemote() {
 let lastFreshPull = 0;
 // Se impone un piso al intervalo para no saturar el límite de solicitudes del proyecto. Con una sola instancia
 // no hace falta sincronizar nunca (CRIX_SYNC_MS=0 apaga todo el sondeo).
-const FRESH_MIN_MS = Math.max(5000, Number(env.CRIX_FRESH_MS) || 5000);
+const FRESH_MIN_MS = Math.max(5000, Number(env.CRIX_FRESH_MS) || 120000);
 const MISS_MIN_MS = 10000;   // cuando falta un juego/video concreto (maxAge 0)
 const SYNC_OFF = env.CRIX_SYNC_MS === '0';
 function pullFresh(maxAge = 2000, cap = 2500) {
@@ -293,7 +293,7 @@ function startSync() {
   if (!driver || !syncApi) return;
   if (SYNC_OFF) { console.log('[PERSIST] Sincronización entre instancias desactivada (CRIX_SYNC_MS=0)'); return; }
   // Por defecto cada 5 min (Supabase no cobra por solicitud, pero cada sondeo es una llamada HEAD al bucket).
-  const every = Math.max(30000, Number(env.CRIX_SYNC_MS) || 30000);
+  const every = Math.max(30000, Number(env.CRIX_SYNC_MS) || 300000);
   setInterval(() => { pullRemote(); }, every).unref();
   console.log(`[PERSIST] Sincronización entre instancias activa (cada ${every / 1000} s)`);
 }

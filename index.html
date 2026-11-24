@@ -2710,7 +2710,7 @@ async function refreshCloudContent(force) {
   // Si ya hay una actualización en curso (4 listados pesados) o acaba de terminar otra, no se pide de nuevo: cambiar de pestaña
   // varias veces seguidas disparaba una tanda completa por cada cambio.
   if (_cloudBusy) return force ? _cloudBusy.then(() => refreshCloudContent(true)) : undefined;   // un cambio hecho por la persona espera a la tanda en curso y vuelve a pedir
-  if (!force && Date.now() - _cloudLast < 1000) return;
+  if (!force && Date.now() - _cloudLast < 8000) return;
   let _done; _cloudBusy = new Promise(r => { _done = r; });
   try {
     const localVideos = getVideos();
@@ -4423,7 +4423,7 @@ function runScript(scriptOverride, partsOverride) {
   run.worker.postMessage({type:'init',config:bundle.config});
   run.watchdog=setTimeout(()=>{if(run.active){appendOutput('[error] El script superó el límite de ejecución (3 s)','err');finish();}},3000);
 }
-const SCRIPT_TICK_MS=16, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=Infinity, SCRIPT_MAX_PARTS=Infinity;
+const SCRIPT_TICK_MS=50, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=Infinity, SCRIPT_MAX_PARTS=Infinity;
 let runtimeScripts=new Map(), runtimeObjects=new Map(), runtimeWorkspaceBase=[], runtimeTickHandle=null, runtimePhysicsHandle=null, currentGameSession=0, netServerScriptsActive=false, networkRuntimePartIds=new Set();
 function normalizeGamePart(id,source={}) { const pos=source.position||{},size=source.size||{},num=(v,d,min=-10000,max=10000)=>{let n=Number(v);if(!Number.isFinite(n))n=d;return Math.max(min,Math.min(max,n));},type=['Block','Sphere','Cylinder','Wedge','TrussPart','ImportedMesh'].includes(source.type)?source.type:'Block',color=/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?source.color:'#2f80ff',materials=Object.keys(MATERIAL_DEFS);
   return {id:String(id),name:String(source.name||'Part').slice(0,80),type,x:num(source.x??pos.x??pos.X,0),y:num(source.y??pos.y??pos.Y,0),z:num(source.z??pos.z??pos.Z,0),sx:num(source.sx??size.x??size.X,4,0.1,1000),sy:num(source.sy??size.y??size.Y,4,0.1,1000),sz:num(source.sz??size.z??size.Z,4,0.1,1000),rx:num(source.rx,0,-1000,1000),ry:num(source.ry,0,-1000,1000),rz:num(source.rz,0,-1000,1000),color,material:materials.includes(source.material)?source.material:'SmoothPlastic',anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:num(source.transparent,0,0,1),behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',behaviorValue:num(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:num(source.texScale,4,0.25,64),texTint:source.texTint===true,meshData:source.type==='ImportedMesh'?source.meshData:undefined,avatarMesh:(typeof source.avatarMesh==='string'&&/^[A-Za-z]{2,20}$/.test(source.avatarMesh))?source.avatarMesh:undefined,parent:source.parent?String(source.parent).slice(0,120):undefined,attributes:(source.attributes&&typeof source.attributes==='object'&&!Array.isArray(source.attributes))?source.attributes:undefined,reflectance:source.reflectance===undefined?undefined:num(source.reflectance,0,0,1),density:source.density===undefined?undefined:num(source.density,0.7,0.01,100),castShadow:source.castShadow===undefined?undefined:source.castShadow!==false,canTouch:source.canTouch===undefined?undefined:source.canTouch!==false,canQuery:source.canQuery===undefined?undefined:source.canQuery!==false,massless:source.massless===true?true:undefined,locked:source.locked===true?true:undefined,collisionGroup:source.collisionGroup?String(source.collisionGroup).slice(0,40):undefined};
@@ -4993,7 +4993,7 @@ async function crixShare(kind, key) {
 })();
 function exitGame() { try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;const backBtn=document.getElementById('g-back-btn');if(backBtn)backBtn.textContent='← Salir';goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
-let NET_RATE = 1;   // 1 = posición en cada cuadro (hasta 60/s); con muchos jugadores se baja solo a 2 para no saturar
+const NET_RATE = 2;
 let remotePlayers = {};
 function netConnect() {
   const serverUrl=window.location.origin;
@@ -5095,7 +5095,7 @@ netConnect = function() {
 };
 function netJoinGame(mapId, instanceId = netCurrentInstanceId) { netCurrentMapId = mapId; netCurrentInstanceId = instanceId; if (!socket || !netConnected || !ME || !instanceId) return; socket.emit('join_game', { mapId, instanceId, userId: ME.id, username: ME.username, color: ME.color || '#2f80ff', look: myLook() }); }
 function netLeaveGame() { if (socket && netConnected) socket.emit('leave_game'); clearRemotePlayers(); netCurrentMapId = null; netCurrentInstanceId = null; const pill = document.getElementById('g-net-pill'); if (pill) pill.style.display = 'none'; }
-function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; NET_RATE = Object.keys(remotePlayers).length > 16 ? 2 : 1; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving, onGround:gOnGround }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
+function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving, onGround:gOnGround }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
 function netSendChat(text) { if (!socket || !netConnected) return false; socket.emit('game_chat', { text }); return true; }
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
 function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const built = _buildHumanoid(playerData.color || '#f97316', playerData.look); const group = built.group; group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, av: built.avatar, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false, og: true, spd: 0, vy: 0 }; flushAvatarPending(playerData.socketId); }
@@ -6767,7 +6767,7 @@ function stepEditorPhysics(){
 var _liveTimers = {}, _liveLast = {}, _livePending = {};
 setInterval(() => { if (_livePending.maps && !_screenActive('s-game') && !document.getElementById('code-overlay')?.classList.contains('open')) { _livePending.maps = false; refreshLive('maps'); } }, 2000);
 function _screenActive(id) { return !!document.getElementById(id)?.classList.contains('active'); }
-function liveRefresh(kind) { clearTimeout(_liveTimers[kind]); _liveTimers[kind] = setTimeout(() => refreshLive(kind), kind==='maps' ? 300 : 100); }
+function liveRefresh(kind) { clearTimeout(_liveTimers[kind]); _liveTimers[kind] = setTimeout(() => refreshLive(kind), kind==='maps' ? 1500 : 350); }
 async function refreshLive(kind) {
   if (!ME || !DB.get('token')) return;
   // Dentro de un juego o del editor de código no se toca el catálogo, pero el aviso NO se pierde: queda pendiente y se aplica al salir.
@@ -6889,7 +6889,7 @@ function _catalogNudge() {
   if (_screenActive('s-game')) { _livePending.maps = true; liveRefresh('videos'); liveRefresh('posts'); liveRefresh('users'); }
   else refreshCloudContent();
 }
-setInterval(_catalogNudge, 10000);
+setInterval(_catalogNudge, 90000);
 document.addEventListener('visibilitychange', _catalogNudge);
 window.addEventListener('online', _catalogNudge);
 function setupGlobalLiveEvents() {
@@ -6961,7 +6961,7 @@ function setupGlobalLiveEvents() {
     if (_screenActive('s-msg')) loadConvList();
   });
 }
-setInterval(() => { if (ME && CLOUD_READY && !document.hidden && !_screenActive('s-game')) refreshCloudContent(); }, 5000);
+setInterval(() => { if (ME && CLOUD_READY && !document.hidden && !_screenActive('s-game')) refreshCloudContent(); }, 60000);
 
 // ═══ Unirse al servidor de CUALQUIER persona (no solo amigos) ═══
 async function joinUserGame(userId) {
