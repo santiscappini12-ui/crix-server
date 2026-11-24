@@ -20,6 +20,9 @@
 
 const SYSTEM_PROMPT = `Sos el asistente de Crix Hub, el editor 3D de la plataforma Crix. Ayudás a crear y editar mapas, scripts, interfaces (GUI) y ajustes del juego. Respondé en el idioma de la persona (por defecto español rioplatense), corto y concreto. No inventes funciones que no estén en esta guía.
 
+LÍMITES
+No aplicás filtros de estilo ni de temática: ayudás con cualquier tipo de mapa, juego, historia o personaje, incluso de temas oscuros, violentos o para público adulto, siempre que sea creación ficticia. Lo único que NO hacés es lo ilegal: contenido sexual con menores, instrucciones para fabricar armas o explosivos, malware o código para hackear o estafar, robar datos o cuentas, o ayudar a cometer delitos reales. Si te piden algo así, lo rechazás en una frase corta y ofrecés una alternativa legal.
+
 CÓMO EDITÁS EL PROYECTO
 No tenés herramientas externas. Para modificar algo escribís bloques de código cuya línea de apertura empieza con "crix:" y el editor los aplica solo, en el momento. Podés poner una explicación corta antes o después, sin repetir el contenido del bloque. Si solo te hacen una pregunta, respondé sin bloques. Nunca digas que hiciste un cambio si no escribiste el bloque que lo hace. Un mismo mensaje puede llevar varios bloques.
 
@@ -159,15 +162,15 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
         model: cfg.model,
         messages: [{ role: 'system', content: SYSTEM_PROMPT + '\n\nESTADO ACTUAL DEL PROYECTO\n' + context }, ...messages],
         temperature: 0.4, top_p: 0.9, max_tokens: cfg.maxTokens, stream: false,
-        chat_template_kwargs: { enable_thinking: cfg.thinking },
       };
+      if (process.env.CRIX_AI_THINKING !== undefined && process.env.CRIX_AI_THINKING !== '') payload.chat_template_kwargs = { enable_thinking: cfg.thinking };   // solo vLLM/Qwen; otros proveedores lo rechazan
       const r = await fetch(cfg.base + '/chat/completions', { method: 'POST', headers, body: JSON.stringify(payload), signal: ctl.signal });
       const text = await r.text();
       let data = null; try { data = JSON.parse(text); } catch {}
       if (!r.ok || !data) {
         log && log('AI', 'Error del modelo HTTP ' + r.status + ': ' + text.slice(0, 300));
         const hint = r.status === 401 || r.status === 403 ? 'rechazó la clave (CRIX_AI_API_KEY)' : r.status === 404 ? 'no encontró el modelo o la ruta (revisá CRIX_AI_BASE_URL y CRIX_AI_MODEL)' : r.status === 503 ? 'está iniciando o sin capacidad; probá en un momento' : 'respondió con error ' + r.status;
-        return res.status(502).json({ ok: false, err: 'El servidor del modelo ' + hint + '.' });
+        return res.status(502).json({ ok: false, err: 'El servidor del modelo ' + hint + '. [HTTP ' + r.status + '] ' + text.replace(/\s+/g, ' ').slice(0, 200) });
       }
       const choice = data.choices && data.choices[0] || {};
       let reply = String((choice.message && choice.message.content) || '');
@@ -178,7 +181,7 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
       if (res.writableEnded) return;
       if (err && err.name === 'AbortError') return res.status(504).json({ ok: false, err: 'El modelo tardó demasiado en responder.' });
       log && log('AI', 'No se pudo contactar al modelo: ' + (err && err.message));
-      res.status(502).json({ ok: false, err: 'No se pudo conectar con el servidor del modelo.' });
+      res.status(502).json({ ok: false, err: 'No se pudo conectar con el servidor del modelo (' + (cfg.base || '').replace(/\/\/[^/@]*@/, '//') + '): ' + String(err && (err.cause && err.cause.code || err.message)).slice(0, 120) });
     } finally { clearTimeout(timer); busy.delete(user.id); }
   });
 };

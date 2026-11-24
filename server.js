@@ -78,7 +78,7 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'video-cuestionario-2026-11-17';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'video-cuestionario-2026-11-23-ia';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
