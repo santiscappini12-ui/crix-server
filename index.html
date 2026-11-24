@@ -2719,13 +2719,14 @@ async function syncCloudData() {
     const posts = postsResult.posts || [];   // el servidor es la fuente de verdad (antes la copia local pisaba likes y respuestas de otros)
     DB.set('users', users); DB.set('maps', maps); DB.set('crix_videos', videos); DB.set('crix_posts', posts);
     ME = users[ownProfile.id];
-    CLOUD_READY = true; _syncRetry = 0;
+    CLOUD_READY = true; _syncRetry = 0; window.CRIX_SERVER_DOWN = false; try { if (window.CrixOffline) CrixOffline.rerender(); } catch (_) {}
     try { if (window.CrixOffline) CrixOffline.reconcile(); } catch (_) {}   // si un creador retiró el permiso de descarga, la copia se borra
     checkNotifs();
     if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
   } catch (err) {
     console.warn('[CLOUD] No se pudieron sincronizar los datos:', err.message);
-    try { if (window.CrixOffline) CrixOffline.mergeIntoCatalog().then(n => { if (n && document.getElementById('s-home')?.classList.contains('active')) renderHome(); }); } catch (_) {}
+    window.CRIX_SERVER_DOWN = true;
+    try { if (window.CrixOffline) CrixOffline.mergeIntoCatalog().then(() => CrixOffline.rerender()); } catch (_) {}
     // Antes quedaba trabado para siempre con el catálogo viejo: ahora se reintenta solo.
     if (ME && DB.get('token')) { const wait = Math.min(30000, 4000 * ++_syncRetry); setTimeout(() => { if (!CLOUD_READY && ME && DB.get('token')) syncCloudData(); }, wait); }
   } finally { _syncBusy = false; }
@@ -2881,8 +2882,13 @@ function ensureDefaultMaps() {
 function defaultParts() { return [ {id:'ground',type:'Block',name:'Suelo',x:0,y:-0.5,z:0,sx:120,sy:1,sz:120,color:'#2d5a1e',anchored:true,canCollide:true,transparent:0,material:'Grass'}, {id:'build1',type:'Block',name:'Edificio',x:12,y:2,z:-12,sx:6,sy:4,sz:6,color:'#cc4444',anchored:true,canCollide:true,transparent:0,material:'Brick'}, {id:'plat1',type:'Block',name:'Plataforma A',x:-10,y:3.5,z:10,sx:8,sy:1,sz:4,color:'#7c3aed',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat2',type:'Block',name:'Plataforma B',x:0,y:6,z:-25,sx:10,sy:1,sz:6,color:'#059669',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat3',type:'Block',name:'Plataforma C',x:20,y:8,z:8,sx:5,sy:1,sz:5,color:'#d97706',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat4',type:'Block',name:'Plataforma D',x:-18,y:4.5,z:-8,sx:4,sy:1,sz:10,color:'#0369a1',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'plat5',type:'Block',name:'Plataforma E',x:5,y:10,z:18,sx:6,sy:1,sz:6,color:'#be185d',anchored:true,canCollide:true,transparent:0,material:'SmoothPlastic'}, {id:'tower',type:'Block',name:'Torre',x:0,y:11,z:0,sx:6,sy:1,sz:6,color:'#78350f',anchored:true,canCollide:true,transparent:0,material:'Wood'}, {id:'spawn',type:'Spawn',name:'SpawnLocation',x:0,y:0.5,z:0,sx:4,sy:0.4,sz:4,color:'#00ff88',anchored:true,canCollide:false,transparent:0.5,material:'Neon'}, ]; }
 const THUMB_ICONS = ['🏝️','🌋','🏙️','🌌','🏔️','🌊','🏰','🛸','⚔️','🎮','🌃','🗺️'];
 const THUMB_CLASSES = ['gt-blue','gt-red','gt-purple','gt-green','gt-orange','gt-teal'];
-function renderHome() { const allMaps = Object.values(getMaps()); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine');   renderOnlineNow(); }
-function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${gameThumbHtml(m, i)}${badgeHtml}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="clsReclassify('${m.id}')" title="${clsT('classify')}">🏷️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editUploadData('${m.id}')" title="Datos de subida">⚙️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}${clsBadge(m, isOwner)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author" style="display:flex;align-items:center;gap:5px">${authAv(m.authorId, m.authorName, 18)}<span>por ${esc(m.authorName)}</span></div></div></div>`; }).join(''); }
+// ── Sin conexión: cada sección muestra solo lo descargado ──
+function crixOffline() { return !navigator.onLine || window.CRIX_SERVER_DOWN === true; }
+function offOnly(arr, kind) { return (crixOffline() && window.CrixOffline) ? arr.filter(x => x && CrixOffline.has(kind || 'map', x.id)) : arr; }
+function offBadge(kind, id) { return (window.CrixOffline && CrixOffline.has(kind, id)) ? '<div class="game-badge" style="position:absolute;top:6px;right:6px;left:auto;bottom:auto;background:#16a34a;color:#fff">📥 DESCARGADO</div>' : ''; }
+function offEmpty(what) { return '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">📴 Sin conexión: no hay ' + what + ' descargados en esta sección.</div>'; }
+function renderHome() { const allMaps = offOnly(Object.values(getMaps())); const featured = [...allMaps].sort((a,b) => (b.plays||0)-(a.plays||0)).slice(0,8); const recent = [...allMaps].sort((a,b) => new Date(b.created)-new Date(a.created)).slice(0,6); const mine = allMaps.filter(m => m.authorId === ME.id); renderGrid('grid-featured', featured, 'hot'); renderGrid('grid-recent', recent, 'new'); renderGrid('grid-mine', mine, 'mine');   renderOnlineNow(); }
+function renderGrid(id, arr, badge = '') { const el = document.getElementById(id); if (!el) return; if (!arr.length) { el.innerHTML = crixOffline() ? offEmpty('juegos') : '<div style="color:var(--text3);font-size:12px;grid-column:1/-1;padding:8px 0">Todavía no hay juegos aquí.</div>'; return; } el.innerHTML = arr.map((m, i) => { const badgeHtml = badge === 'hot' ? `<div class="game-badge b-hot">🔥 POPULAR</div>` : badge === 'new' ? `<div class="game-badge b-new">✨ NUEVO</div>` : m.authorId === ME.id ? `<div class="game-badge b-top">✏️ MIO</div>` : ''; const isOwner = m.authorId === ME.id; return `<div class="game-card" onclick="openGamePage('${m.id}')"><div class="game-thumb ${THUMB_CLASSES[i%THUMB_CLASSES.length]}">${gameThumbHtml(m, i)}${badgeHtml}${offBadge(m.kind === 'app' || m.isHtmlGame ? 'app' : 'map', m.id)}<div class="game-actions" onclick="event.stopPropagation()">${isOwner ? `<button class="game-act-btn" onclick="clsReclassify('${m.id}')" title="${clsT('classify')}">🏷️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editUploadData('${m.id}')" title="Datos de subida">⚙️</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="editMap('${m.id}')">✏️ Editar</button>` : ''}${isOwner ? `<button class="game-act-btn" onclick="deleteMap('${m.id}')" style="color:var(--red)">🗑️</button>` : ''}</div></div><div class="game-info"><div class="game-name" title="${esc(m.name)}">${esc(m.name)}${clsBadge(m, isOwner)}</div><div class="game-meta"><span>👁 ${m.plays||0}</span><span>❤️ ${m.likes||0}</span></div><div class="game-author" style="display:flex;align-items:center;gap:5px">${authAv(m.authorId, m.authorName, 18)}<span>por ${esc(m.authorName)}</span></div></div></div>`; }).join(''); }
 function deleteMap(id) { const maps = getMaps(); if (!maps[id] || maps[id].authorId !== ME.id) { showToast('No podés borrar este mapa'); return; } if (!confirm(`¿Borrar "${maps[id].name}"?`)) return; delete maps[id]; ME.games = (ME.games||[]).filter(g => g !== id); saveMe(); setMaps(maps); showToast('🗑️ Mapa eliminado'); renderHome(); }
 // Editar los datos de subida (nombre, descripción, género, privacidad, miniatura, ícono, clasificación) de un juego/app YA subido,
 // sin abrir el estudio. Usa pubMapId para no tocar stMapId (si el estudio tiene otro juego abierto, no se mezcla).
@@ -3014,13 +3020,13 @@ function exitIframe() {
 let discCurrentFilter = 'all', discPage = 1;
 function renderDiscover(filter) {
   if(filter){discCurrentFilter=filter;discPage=1;}
-  const allMaps=Object.values(getMaps());let filtered=allMaps;
+  const allMaps=offOnly(Object.values(getMaps()));let filtered=allMaps;
   if(discCurrentFilter==='popular')filtered=[...allMaps].sort((a,b)=>(b.plays||0)-(a.plays||0));
   else if(discCurrentFilter==='new')filtered=[...allMaps].sort((a,b)=>new Date(b.created)-new Date(a.created));
   else if(discCurrentFilter!=='all')filtered=allMaps.filter(map=>map.genre===discCurrentFilter);
   const pageSize=24;renderGrid('grid-discover',filtered.slice(0,discPage*pageSize),'hot');
   const more=document.getElementById('discover-load-more');if(more)more.style.display=filtered.length>discPage*pageSize?'':'none';
-  const users=getUsers(),active=Object.values(users).filter(user=>user.id!==ME.id&&!user.banned);
+  const users=getUsers(),active=crixOffline()?[]:Object.values(users).filter(user=>user.id!==ME.id&&!user.banned);
   const el=document.getElementById('grid-creators');if(el){
     if(!active.length){el.innerHTML='<div style="color:var(--text3);font-size:12px">Todavía no hay otros creadores.</div>';return;}
     el.innerHTML=active.map(user=>`<div class="friend-card" onclick="renderProfile('${user.id}');goTab('profile','${user.id}')"><div class="friend-av" style="background:${profileAvatarSrc(user)?'transparent':(user.color||'#2f80ff')}">${avatarInnerHtml(user)}</div><div style="font-size:12px;font-weight:700">${esc(user.username)}</div><div style="font-size:9px;color:var(--text3)">#${user.id}</div></div>`).join('');
@@ -3030,7 +3036,7 @@ function loadMoreDiscover(){discPage++;renderDiscover();}
 function discFilter(f, el) { document.querySelectorAll('#s-discover .filter-btn').forEach(button=>button.classList.remove('active'));if(el)el.classList.add('active');renderDiscover(f); }
 let searchQuery = ''; let searchTab = 'games';
 function doSearch(q) { q = (q || '').trim(); if (!q) return; searchQuery = q; document.getElementById('search-query-lbl').textContent = q; goTab('search'); runSearch(); }
-function runSearch() { const q = searchQuery.toLowerCase(); const allMaps = Object.values(getMaps()); const allUsers = Object.values(getUsers()); const gResults = allMaps.filter(m => m.name.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q)); const uResults = allUsers.filter(u => (u.username||'').toLowerCase().includes(q)); renderGrid('search-games-results', gResults, 'hot'); const uEl = document.getElementById('search-users-results'); uEl.innerHTML = uResults.length ? uResults.map(u => renderUserCard(u)).join('') : '<div style="color:var(--text3);font-size:12px">Sin resultados.</div>'; }
+function runSearch() { const q = searchQuery.toLowerCase(); const allMaps = offOnly(Object.values(getMaps())); const allUsers = Object.values(getUsers()); const gResults = allMaps.filter(m => m.name.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q)); const uResults = allUsers.filter(u => (u.username||'').toLowerCase().includes(q)); renderGrid('search-games-results', gResults, 'hot'); const uEl = document.getElementById('search-users-results'); uEl.innerHTML = uResults.length ? uResults.map(u => renderUserCard(u)).join('') : '<div style="color:var(--text3);font-size:12px">Sin resultados.</div>'; }
 function switchSearchTab(tab) { searchTab = tab; document.getElementById('search-games-results').style.display = tab === 'games' ? 'grid' : 'none'; document.getElementById('search-users-results').style.display = tab === 'users' ? 'grid' : 'none'; document.getElementById('sf-games').classList.toggle('active', tab === 'games'); document.getElementById('sf-users').classList.toggle('active', tab === 'users'); }
 let viewingUserId = null;
 function renderProfile(uid) {
@@ -3051,7 +3057,7 @@ function renderProfile(uid) {
     return;
   }
   const isMe = viewingUserId === ME.id;
-  const myMaps = Object.values(getMaps()).filter(m => m.authorId === u.id);
+  const myMaps = offOnly(Object.values(getMaps())).filter(m => m.authorId === u.id);
   const isFriend = (ME.friends||[]).includes(u.id);
   const isBanned = u.banned && (u.banned.permanent || (u.banned.until && new Date(u.banned.until) > new Date()));
   const isOnline = !!u.online || (u.onlineAt && (Date.now() - u.onlineAt < 120000));
@@ -5651,11 +5657,11 @@ function vidFilter(f, el) {
 }
 function renderVideos() {
   const el = document.getElementById('video-grid'); if (!el) return;
-  let vids = getVideos();
+  let vids = offOnly(getVideos(), 'video');
   if (_vidFilter !== 'all') vids = vids.filter(v => v.cat === _vidFilter);
   vids = vids.sort((a,b) => new Date(b.created) - new Date(a.created));
   if (!vids.length) {
-    el.innerHTML = '<div style="color:var(--text3);font-size:13px;grid-column:1/-1;padding:20px 0;text-align:center">Sin videos todavía. ¡Subí el primero!</div>';
+    el.innerHTML = crixOffline() ? offEmpty('videos') : '<div style="color:var(--text3);font-size:13px;grid-column:1/-1;padding:20px 0;text-align:center">Sin videos todavía. ¡Subí el primero!</div>';
     return;
   }
   el.innerHTML = vids.map(v => {
@@ -5664,7 +5670,7 @@ function renderVideos() {
     const canDel = ME && (v.authorId === ME.id || isAdmin());
     return '<div class="video-card">' +
       '<div class="video-thumb" onclick="openVideoPlayer(\'' + v.id + '\')">' +
-      videoThumbHtml(v) +
+      videoThumbHtml(v) + offBadge('video', v.id) +
       '<div class="video-play-ov"><div class="video-play-btn">▶</div></div>' +
       '</div>' +
       '<div class="video-info">' +

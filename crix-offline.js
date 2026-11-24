@@ -238,10 +238,30 @@
   async function update(kind, id) { toast('⏳ Actualizando…'); try { const it = await download(kind, id); toast('✅ «' + it.name + '» actualizado'); } catch (e) { toast('⚠️ ' + ((e && e.message) || 'No se pudo actualizar'), 5000); } refreshManager(); }
   async function removeAsk(kind, id) { if (!confirm('¿Quitar esta descarga del dispositivo?')) return; await remove(kind, id); refreshManager(); }
 
-  // Sin conexión: se muestran los juegos y videos descargados; al volver, se revisan los permisos.
-  addEventListener('offline', () => { mergeIntoCatalog().then(n => { toast('📴 Sin conexión. Podés usar lo que descargaste.', 4000); try { if (n && document.getElementById('s-home') && document.getElementById('s-home').classList.contains('active')) renderHome(); } catch (_) {} }); });
-  addEventListener('online', () => { setTimeout(() => { try { if (typeof refreshCloudContent === 'function') refreshCloudContent().then(reconcile); } catch (_) {} }, 1500); });
-  if (!navigator.onLine) setTimeout(mergeIntoCatalog, 800);
+  // ── Modo sin conexión: cada sección muestra solo lo descargado (lo filtra index.html con crixOffline()/offOnly()) ──
+  function isOffline() { return !navigator.onLine || window.CRIX_SERVER_DOWN === true; }
+  function banner() {
+    let el = document.getElementById('off-banner');
+    if (!isOffline()) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div'); el.id = 'off-banner';
+      el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:9998;background:#0f172a;color:#fff;border:1px solid #16a34a;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;display:flex;gap:8px;align-items:center;max-width:92vw;box-shadow:0 4px 18px rgba(0,0,0,.4)';
+      el.innerHTML = '<span>📴 Sin conexión · solo lo descargado</span><button style="background:#16a34a;border:0;color:#fff;border-radius:12px;padding:3px 9px;font-weight:700;cursor:pointer" onclick="CrixOffline.openManager()">📥 Mis descargas</button>';
+      document.body.appendChild(el);
+    }
+  }
+  // Vuelve a dibujar las secciones con el filtro actual (descargados si no hay conexión, todo si la hay).
+  function rerender() {
+    banner();
+    const on = id => { const e = document.getElementById(id); return !!(e && e.classList.contains('active')); };
+    try { if (on('s-home') && typeof renderHome === 'function') renderHome(); } catch (_) {}
+    try { if (on('s-discover') && typeof renderDiscover === 'function') renderDiscover(); } catch (_) {}
+    try { if (on('s-videos') && typeof renderVideos === 'function') renderVideos(); } catch (_) {}
+    try { if (on('s-search') && typeof runSearch === 'function') runSearch(); } catch (_) {}
+  }
+  addEventListener('offline', () => { mergeIntoCatalog().then(() => { toast('📴 Sin conexión. Solo se muestra lo que descargaste.', 4000); rerender(); }); });
+  addEventListener('online', () => { window.CRIX_SERVER_DOWN = false; rerender(); setTimeout(() => { try { if (typeof refreshCloudContent === 'function') refreshCloudContent().then(reconcile); } catch (_) {} }, 1500); });
+  if (!navigator.onLine) setTimeout(() => mergeIntoCatalog().then(rerender), 800);
 
-  window.CrixOffline = { supported, has, list, download, remove, mayDownload, mergeIntoCatalog, cachedAccessories, reconcile, button, toggle, allowCheckboxHtml, openManager, update, removeAsk, fmt };
+  window.CrixOffline = { rerender, isOffline, supported, has, list, download, remove, mayDownload, mergeIntoCatalog, cachedAccessories, reconcile, button, toggle, allowCheckboxHtml, openManager, update, removeAsk, fmt };
 })();
