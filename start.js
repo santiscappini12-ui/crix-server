@@ -18,9 +18,11 @@ const PORT = process.env.PORT || 3000;
 let lastError = null;
 let attempt = 0;
 
+let restoring = true;
 const placeholder = http.createServer((req, res) => {
   if (req.url === '/healthz') { res.writeHead(200); return res.end('ok'); }
   res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8', 'Retry-After': '10' });
+  if (!restoring) return res.end('Crix está iniciando…\n\nDatos restaurados, arrancando el servidor. Recargá en unos segundos.');
   res.end(
     'Crix está iniciando…\n\n' +
     `Intento de restauración #${attempt}\n` +
@@ -55,9 +57,11 @@ async function boot() {
     }
   }
 
-  // Liberar el puerto y dejar que server.js lo tome.
-  placeholder.closeAllConnections?.();
-  await new Promise(r => placeholder.close(r));
+  // NO se cierra el puerto: antes se liberaba y server.js lo volvía a abrir recién después de cargar la base y (con Redis) de
+  // esperar hasta 10 s; en ese hueco el proxy respondía "upstream connect error ... Connection refused". Ahora server.js
+  // adopta este mismo servidor ya escuchando (ver adoptOrListen en server.js) y el puerto nunca queda cerrado.
+  global.__crixPlaceholder = placeholder;
+  restoring = false;
   require('./server.js');
 }
 

@@ -3540,7 +3540,18 @@ setInterval(() => {
   }
 }, 30000);
 
-cluster.init(io).finally(() => server.listen(PORT, () => {
+// Si start.js dejó un servidor ya escuchando (el "placeholder"), se reutiliza su puerto: las peticiones pasan a este servidor sin
+// que el puerto se cierre ni un instante (cerrarlo y reabrirlo producía "upstream connect error ... Connection refused").
+function adoptOrListen(cb) {
+  const ph = global.__crixPlaceholder;
+  if (!ph || !ph.listening) return server.listen(PORT, cb);
+  ph.requestTimeout = 0; ph.timeout = 0; ph.headersTimeout = 65000; ph.keepAliveTimeout = 65000;
+  ph.removeAllListeners('request'); ph.removeAllListeners('upgrade');
+  ph.on('request', (req, res) => server.emit('request', req, res));
+  ph.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head));
+  cb();
+}
+cluster.init(io).finally(() => adoptOrListen(() => {
   console.log('');
   console.log('  ╔══════════════════════════════════╗');
   console.log('  ║    CRIX — Servidor Multijugador  ║');
