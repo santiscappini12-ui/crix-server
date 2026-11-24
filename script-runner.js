@@ -20,6 +20,7 @@ const rooms = new Map();
 const MAX_ROOMS = Infinity;
 const CrixAvatar = require('./crix-avatar.js');
 const CrixObjects = require('./crix-objects.js');
+const scriptFetch = require('./script-fetch');
 const MAX_SCRIPTS_PER_ROOM = Infinity;
 const MAX_SOURCE_CHARS = Infinity;
 const MAX_PARTS = Infinity;
@@ -470,15 +471,15 @@ const ISOLATE_EXTRAS = String.raw`
     // ── Eventos entre scripts ──
     const __bus = new Map();
     game.on = (name, fn) => { if (typeof fn !== 'function') throw new TypeError('game.on necesita una función'); const key = String(name); if (!__bus.has(key)) __bus.set(key, []); __bus.get(key).push(fn); return () => { const list = __bus.get(key) || []; const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); }; };
-    game.emit = (name, ...args) => { for (const fn of (__bus.get(String(name)) || []).slice()) { try { fn(...args); } catch (err) { error('Evento ' + name + ': ' + (err && err.message || err)); } } };
+    game.emit = (name, ...args) => { for (const fn of (__bus.get(String(name)) || []).slice()) { try { __guard(fn(...args), 'Evento ' + name); } catch (err) { error('Evento ' + name + ': ' + (err && err.message || err)); } } };
 
     // ── Jugadores: entradas, salidas y control desde el servidor ──
     const __playerHandlers = { added: [], removed: [] };
     game.onPlayerAdded = (fn, existing) => { if (typeof fn !== 'function') throw new TypeError('onPlayerAdded necesita una función'); __playerHandlers.added.push(fn); if (existing !== false) for (const p of __getPlayers()) { try { fn(p); } catch (err) { error('onPlayerAdded: ' + (err && err.message || err)); } } };
     game.onPlayerRemoved = fn => { if (typeof fn !== 'function') throw new TypeError('onPlayerRemoved necesita una función'); __playerHandlers.removed.push(fn); };
     function __crixPlayerEvent(kind, player) {
-      for (const fn of __playerHandlers[kind].slice()) { try { fn(player); } catch (err) { error('Evento de jugador: ' + (err && err.message || err)); } }
-      for (const script of __crixScripts) { const fn = kind === 'added' ? script.onPlayerAdded : script.onPlayerRemoved; if (typeof fn === 'function' && !script.disabled) { try { fn(player); } catch (err) { error(script.name + ': ' + (err && err.message || err)); } } }
+      for (const fn of __playerHandlers[kind].slice()) { try { __guard(fn(player), 'Evento de jugador'); } catch (err) { error('Evento de jugador: ' + (err && err.message || err)); } }
+      for (const script of __crixScripts) { const fn = kind === 'added' ? script.onPlayerAdded : script.onPlayerRemoved; if (typeof fn === 'function' && !script.disabled) { try { __guard(fn(player), script.name); } catch (err) { error(script.name + ': ' + (err && err.message || err)); } } }
     }
     const __pc = (p, op, payload) => __playerCmd(__uid(p), op, JSON.stringify(payload || {}));
     game.teleportPlayer = (p, pos) => __pc(p, 'teleport', __v3(pos));
@@ -536,6 +537,96 @@ const ISOLATE_EXTRAS = String.raw`
     };
     game.playSound = game.sound.play; game.stopSound = game.sound.stop;
 
+    // ── Promesas: una función async que falla ya no se pierde en silencio, se muestra en la consola del juego ──
+    const __guard = (ret, label) => { if (ret && typeof ret.then === 'function') ret.then(undefined, err => error(label + ': ' + (err && err.message || err))); };
+
+    // ── Puente asíncrono hacia el servidor (DataStore y fetch). Cada pedido devuelve una Promesa; si el servidor no contesta en 12 s se rechaza. ──
+    const __async = new Map(); let __asyncSeq = 0;
+    function __asyncCall(kind, payload, seconds) {
+      return new Promise((resolve, reject) => {
+        if (__async.size >= 50) { reject(new Error('Demasiados pedidos pendientes (máx. 50)')); return; }
+        const id = ++__asyncSeq; __async.set(id, { resolve, reject, left: seconds || 12 });
+        try { __asyncStart(kind, id, JSON.stringify(payload)); } catch (err) { __async.delete(id); reject(new Error(err && err.message || String(err))); }
+      });
+    }
+    function __crixAsyncResult(id, ok, json) {
+      const p = __async.get(id); if (!p) return; __async.delete(id);
+      if (!ok) { let msg = json; try { msg = JSON.parse(json); } catch (_) {} p.reject(new Error(msg)); return; }
+      try { p.resolve(JSON.parse(json)); } catch (err) { p.reject(err); }
+    }
+    function __advanceAsync(dt) { for (const [id, p] of Array.from(__async)) { p.left -= dt; if (p.left <= 0) { __async.delete(id); p.reject(new Error('Tiempo de espera agotado')); } } }
+
+    // ── DataStore: guardado persistente por juego. Todo devuelve Promesa (usá await). Valores: cualquier JSON de hasta 16 KB. ──
+    //   const ds = game.getDataStore('Puntos');
+    //   await ds.set(String(jugador.userId), { monedas: 5 });  const d = await ds.get(String(jugador.userId));  // null si no existe
+    //   await ds.increment('partidas', 1);  await ds.update(clave, v => (v || 0) + 1);  await ds.remove(clave);
+    //   await ds.keys({ prefix:'j_', limit:50 });  await ds.top(10);   // top: [{key, value}] de mayor a menor entre los valores numéricos
+    const __dsQueues = new Map();
+    game.getDataStore = name => {
+      const store = String(name === undefined ? '' : name);
+      const call = (op, key, extra) => { const req = Object.assign({ store: store, op: op }, extra || {}); if (key !== undefined) req.key = String(key); return __asyncCall('ds', req, 12); };
+      const api = {
+        name: store,
+        get: key => call('get', key),
+        set: (key, value) => call('set', key, { value: value }),
+        remove: key => call('remove', key),
+        increment: (key, delta) => call('increment', key, { delta: delta === undefined ? 1 : delta }),
+        // update(clave, fn): lee, aplica fn(valorActual) y guarda lo que devuelva (si devuelve undefined no cambia nada). Las llamadas a la misma clave se hacen una por una.
+        update: (key, fn) => {
+          if (typeof fn !== 'function') return Promise.reject(new TypeError('update necesita una función'));
+          const qk = store + '|' + String(key), prev = __dsQueues.get(qk) || Promise.resolve();
+          const next = prev.catch(() => {}).then(async () => { const cur = await call('get', key); const nv = await fn(cur); if (nv === undefined) return cur; await call('set', key, { value: nv }); return nv; });
+          __dsQueues.set(qk, next);
+          const clean = () => { if (__dsQueues.get(qk) === next) __dsQueues.delete(qk); }; next.then(clean, clean);
+          return next;
+        },
+        keys: opts => call('keys', undefined, { opts: opts || {} }),
+        top: (limit, opts) => call('top', undefined, { opts: Object.assign({}, opts || {}, { limit: limit === undefined ? 10 : limit }) })
+      };
+      return Object.freeze(api);
+    };
+
+    // ── fetch: pide una URL http(s) desde el servidor. Devuelve Promesa de { ok, status, statusText, url, headers, truncated, text(), json() }. ──
+    //   const r = await fetch('https://api.ejemplo.com/dato', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:{ a:1 } });
+    //   if (r.ok) { const datos = await r.json(); }
+    // Límites: 8 s, respuesta máx. 256 KB, 30 pedidos por minuto por instancia, sin IPs privadas ni internas, puertos 80/443/8080/8443.
+    function __makeResponse(r) {
+      const headers = {}; for (const k of Object.keys(r.headers || {})) headers[k] = r.headers[k];
+      Object.defineProperty(headers, 'get', { enumerable: false, value: k => { const v = headers[String(k).toLowerCase()]; return v === undefined ? null : v; } });
+      const body = String(r.body === undefined ? '' : r.body);
+      return Object.freeze({ ok: !!r.ok, status: r.status, statusText: r.statusText, url: r.url, headers: Object.freeze(headers), truncated: !!r.truncated,
+        text: () => Promise.resolve(body),
+        json: () => new Promise((resolve, reject) => { try { resolve(JSON.parse(body)); } catch (err) { reject(new Error('La respuesta no es JSON válido' + (r.truncated ? ' (se cortó a 256 KB)' : ''))); } }) });
+    }
+    game.fetch = (url, opts) => {
+      opts = opts || {};
+      return __asyncCall('fetch', { url: String(url), method: opts.method, headers: opts.headers, body: opts.body }, 12).then(__makeResponse);
+    };
+    const fetch = (url, opts) => game.fetch(url, opts);
+
+    // ── Mover NPC. Los NPC caminan en línea recta (x/z; la altura no cambia) y se ven igual para todos los jugadores. ──
+    //   game.moveNpc('Guardia', { x:10, z:-5 }, { speed:8 })  → { eta, distance, done: Promesa(true al llegar | false si lo interrumpe otra orden), cancel() }
+    //   game.teleportNpc(nombre, {x,z}) · game.stopNpc(nombre) · game.getNpc(nombre) → { id, name, x, y, z, moving, eta } · game.getNpcs()
+    //   Mover un NPC deja de hacerlo pasear; game.setNpcWander(nombre, true) vuelve a pasearlo alrededor de donde esté.
+    const __npcTok = new Map();
+    const __npcJson = (name, opts) => { const r = __npcMove(String(name), JSON.stringify(opts)); return JSON.parse(r); };
+    game.getNpc = name => { const r = __npcInfo(String(name)); return r ? JSON.parse(r) : null; };
+    game.getNpcs = () => JSON.parse(__npcInfo('*'));
+    game.moveNpc = (name, pos, opts) => {
+      opts = opts || {};
+      const px = pos && (pos.x !== undefined ? pos.x : pos.X), pz = pos && (pos.z !== undefined ? pos.z : pos.Z);
+      if (!Number.isFinite(Number(px)) || !Number.isFinite(Number(pz)) || px === null || pz === null) throw new Error('moveNpc necesita un destino con x y z numéricos, por ejemplo {x:10, z:5}');
+      const info = __npcJson(name, { x: Number(px), z: Number(pz), speed: opts.speed, instant: opts.instant === true });
+      const tok = {}; __npcTok.set(info.id, tok);
+      let finish; const done = new Promise(resolve => { finish = resolve; });
+      const settle = ok => { if (tok.settled) return; tok.settled = true; if (__npcTok.get(info.id) === tok) __npcTok.delete(info.id); finish(ok); if (ok && typeof opts.onArrive === 'function') { try { __guard(opts.onArrive(info), 'moveNpc'); } catch (err) { error('moveNpc: ' + (err && err.message || err)); } } };
+      tok.cancel = () => settle(false);
+      if (info.eta <= 0) settle(true); else __waiters.push({ id: ++__timerId, left: info.eta, callback: () => { if (__npcTok.get(info.id) === tok) settle(true); else settle(false); } });
+      return { eta: info.eta, distance: info.distance, done: done, cancel: () => { try { game.stopNpc(name); } catch (_) {} } };
+    };
+    game.teleportNpc = (name, pos) => game.moveNpc(name, pos, { instant: true });
+    game.stopNpc = name => { const info = game.getNpc(name); if (!info) throw new Error('No existe el NPC «' + name + '»'); const old = __npcTok.get(info.id); const r = game.moveNpc(name, { x: info.x, z: info.z }, { instant: true }); if (old) old.cancel(); return r; };
+
     // ── Eventos remotos (LocalScript ↔ Script de servidor) ──
     const __remote = new Map();
     game.onClientEvent = (name, fn) => { if (typeof fn !== 'function') throw new TypeError('onClientEvent necesita una función'); const key = String(name); if (!__remote.has(key)) __remote.set(key, []); __remote.get(key).push(fn); };
@@ -545,7 +636,7 @@ const ISOLATE_EXTRAS = String.raw`
       const list = __remote.get(name); if (!list) return;
       const player = __getPlayers().find(p => p.userId === userId) || { userId };
       let data = null; try { data = JSON.parse(dataJson); } catch (_) {}
-      for (const fn of list.slice()) { try { fn(player, data); } catch (err) { error('Evento remoto ' + name + ': ' + (err && err.message || err)); } }
+      for (const fn of list.slice()) { try { __guard(fn(player, data), 'Evento remoto ' + name); } catch (err) { error('Evento remoto ' + name + ': ' + (err && err.message || err)); } }
     }
 `;
 
@@ -566,6 +657,9 @@ function bootstrapSource(modules) {
     const __avatarCmd = __crixAvatarCmd;
     const __soundCmd = __crixSoundCmd;
     const __getVelocity = __crixGetVelocity;
+    const __asyncStart = __crixAsyncStart;
+    const __npcInfo = __crixNpcInfo;
+    const __npcMove = __crixNpcMove;
     ${CRIXSCRIPT_PRELUDE}
     const __handlers = { touched:new Map(), touchEnded:new Map(), impact:new Map() };
     function __on(kind, key, fn, minSpeed) {
@@ -619,7 +713,7 @@ function bootstrapSource(modules) {
     const print = (...values) => __log('info', values.map(value => typeof value === 'string' ? value : JSON.stringify(value)).join(' '));
     const warn = (...values) => __log('warn', values.map(value => typeof value === 'string' ? value : JSON.stringify(value)).join(' '));
     const error = (...values) => __log('err', values.map(value => typeof value === 'string' ? value : JSON.stringify(value)).join(' '));
-    const env = { game, workspace, math, task, print, warn, error, Vector3, tonumber:value=>Number(value), tostring:value=>String(value) };
+    const env = { game, workspace, math, task, print, warn, error, fetch, Vector3, tonumber:value=>Number(value), tostring:value=>String(value) };
     function require(name) {
       const entry = __moduleSources.find(item => item.id === String(name) || item.name === String(name));
       if (!entry) throw new Error('No existe el ModuleScript: ' + name);
@@ -632,12 +726,13 @@ function bootstrapSource(modules) {
     }
     function __crixAdvance(dt) {
       __advanceTweens(dt);
+      __advanceAsync(dt);
       __advanceAnims(dt);
       for (let index=__waiters.length-1; index>=0; index--) {
         const waiter=__waiters[index]; if (!waiter) continue; waiter.left-=dt;
         if (waiter.left<=0) {
           if (waiter.every) waiter.left += waiter.every; else __waiters.splice(index,1);
-          try { waiter.callback(); } catch (err) { error(err && err.message || err); }
+          try { __guard(waiter.callback(), 'task'); } catch (err) { error(err && err.message || err); }
         }
       }
     }
@@ -645,7 +740,7 @@ function bootstrapSource(modules) {
       const list = __handlers[kind].get(key); if (!list) return;
       for (const handler of list.slice()) {
         if (kind === 'impact' && info.speed < handler.minSpeed) continue;
-        try { if (kind === 'impact') handler.fn(info); else handler.fn(player, info); }
+        try { __guard(kind === 'impact' ? handler.fn(info) : handler.fn(player, info), 'Evento ' + kind + ' (' + key + ')'); }
         catch (err) { error('Evento ' + kind + ' (' + key + '): ' + (err && err.message || err)); }
       }
     }
@@ -676,7 +771,7 @@ function bootstrapSource(modules) {
         error(script.name+': '+(err && err.message || err));
       }
     }
-    delete globalThis.__crixRaycast; delete globalThis.__crixPlayerCmd; delete globalThis.__crixRemoteOut; delete globalThis.__crixAvatarCmd; delete globalThis.__crixSoundCmd; delete globalThis.__crixGetVelocity;
+    delete globalThis.__crixRaycast; delete globalThis.__crixPlayerCmd; delete globalThis.__crixRemoteOut; delete globalThis.__crixAvatarCmd; delete globalThis.__crixSoundCmd; delete globalThis.__crixGetVelocity; delete globalThis.__crixAsyncStart; delete globalThis.__crixNpcInfo; delete globalThis.__crixNpcMove;
     delete globalThis.__crixEmit; delete globalThis.__crixGetPlayers; delete globalThis.__crixGetParts; delete globalThis.__crixLog; delete globalThis.__crixGetPart; delete globalThis.__crixWatch;
   `;
 }
@@ -698,7 +793,10 @@ function createRoom(message) {
     isolate, context, players:normalizePlayers(message.players), parts:new Map(), scripts,
     disabledScripts:new Set(), commandTimes:[], logs:[], nextPartId:0, busy:false, timer:null,
     cmdSeq:0, joints:new Map(), nextJointId:0, partSeq:new Map(), watchKeys:new Set(), velocity:new Map(), lastPos:new Map(), rays:0, remoteTimes:[],
+    npcs:new Map(), npcState:{}, dsTimes:[], fetchTimes:[], fetchActive:0,
   };
+  for (const npc of (Array.isArray(message.npcs) ? message.npcs : []).slice(0,2000)) if (npc && npc.id) room.npcs.set(String(npc.id), { id:String(npc.id), name:String(npc.name||'NPC'), x:finite(npc.x), y:finite(npc.y), z:finite(npc.z) });
+  for (const [nid, st] of Object.entries(message.npcStates && typeof message.npcStates === 'object' ? message.npcStates : {})) if (room.npcs.has(nid) && st && typeof st === 'object') room.npcState[nid] = { hold:st.hold, move:st.move };
   for (const part of (Array.isArray(message.parts) ? message.parts : []).slice(0,MAX_PARTS)) {
     if (!part || part.type === 'Spawn' || part.isNPC) continue;
     const id=String(part.id || 'map-part'); room.parts.set(id,normalizePart(id,part));
@@ -758,7 +856,43 @@ function createRoom(message) {
     if(room.commandTimes.length>=MAX_COMMANDS_PER_SECOND)throw new Error('Límite de cambios del mundo alcanzado');room.commandTimes.push(now);
     let cmd=null;try{cmd=JSON.parse(String(cmdJson));}catch(_){}
     if(!cmd||typeof cmd!=='object'||!CrixAvatar.sanitizeCommand(cmd))throw new Error('Orden de avatar inválida: '+String(cmd&&cmd.op));
+    const diff=CrixAvatar.sanitizeCommand(cmd),npc=findNpc(room,target);
+    if(npc&&(diff.hold!==undefined||diff.move!==undefined))CrixAvatar.mergeState(room.npcState[npc.id]||(room.npcState[npc.id]={}),{hold:diff.hold,move:diff.move});   // espejo del estado del NPC (para getNpc)
     send({type:'avatarCommand',roomId:room.id,target:String(target).slice(0,120),cmd});
+  },{sync:true}));
+  jail.setSync('__crixNpcInfo',new ivm.Callback(key=>{
+    const now=Date.now(),info=npc=>{const p=CrixAvatar.npcPosition(npc,room.npcState[npc.id],now);return{id:npc.id,name:npc.name,x:Math.round(p.x*1000)/1000,y:npc.y,z:Math.round(p.z*1000)/1000,moving:!!p.moving,eta:Math.round((p.eta||0)*1000)/1000};};
+    if(String(key)==='*')return JSON.stringify(Array.from(room.npcs.values()).map(info));
+    const npc=findNpc(room,key);return npc?JSON.stringify(info(npc)):null;
+  },{sync:true}));
+  jail.setSync('__crixNpcMove',new ivm.Callback((target,json)=>{
+    const npc=findNpc(room,target);if(!npc)throw new Error('No existe el NPC «'+String(target).slice(0,60)+'» (usá el nombre exacto que tiene en el editor)');
+    const now=Date.now();room.commandTimes=room.commandTimes.filter(time=>now-time<1000);
+    if(room.commandTimes.length>=MAX_COMMANDS_PER_SECOND)throw new Error('Límite de cambios del mundo alcanzado');room.commandTimes.push(now);
+    let o={};try{o=JSON.parse(String(json))||{};}catch(_){}
+    const cur=CrixAvatar.npcPosition(npc,room.npcState[npc.id],now),tx=finite(o.x,cur.x,-10000,10000),tz=finite(o.z,cur.z,-10000,10000);
+    const speed=o.instant===true?0:finite(o.speed,8,0.1,200);
+    const cmd={op:'move',fx:cur.x,fz:cur.z,tx,tz,speed,t0:now},diff=CrixAvatar.sanitizeCommand(cmd);
+    CrixAvatar.mergeState(room.npcState[npc.id]||(room.npcState[npc.id]={}),{hold:undefined,move:diff.move});
+    send({type:'avatarCommand',roomId:room.id,target:npc.id,cmd});
+    const p=CrixAvatar.npcMovePos(diff.move,now);
+    return JSON.stringify({id:npc.id,eta:Math.round(p.eta*1000)/1000,distance:Math.round(p.dist*1000)/1000});
+  },{sync:true}));
+  jail.setSync('__crixAsyncStart',new ivm.Callback((kind,id,json)=>{
+    kind=String(kind);id=Number(id);const now=Date.now();
+    if(String(json).length>150*1024)throw new Error('El pedido es demasiado grande');
+    let payload;try{payload=JSON.parse(String(json));}catch(_){throw new Error('Pedido inválido');}
+    if(kind==='ds'){
+      room.dsTimes=room.dsTimes.filter(time=>now-time<1000);
+      if(room.dsTimes.length>=60)throw new Error('Demasiados pedidos al DataStore (máx. 60 por segundo)');room.dsTimes.push(now);
+      send({type:'dsRequest',roomId:room.id,id,req:payload});
+    } else if(kind==='fetch'){
+      room.fetchTimes=room.fetchTimes.filter(time=>now-time<60000);
+      if(room.fetchTimes.length>=30)throw new Error('Demasiados fetch (máx. 30 por minuto)');
+      if(room.fetchActive>=5)throw new Error('Demasiados fetch a la vez (máx. 5)');
+      room.fetchTimes.push(now);room.fetchActive++;
+      scriptFetch.doFetch(payload).then(r=>resolveAsync(room,id,true,r),e=>resolveAsync(room,id,false,String(e&&e.message||e).slice(0,300))).finally(()=>{room.fetchActive--;});
+    } else throw new Error('Pedido asíncrono desconocido');
   },{sync:true}));
   jail.setSync('__crixSoundCmd',new ivm.Callback((target,cmdJson)=>{
     if(String(cmdJson).length>1e9)throw new Error('La orden de sonido supera 2 KB');
@@ -812,6 +946,21 @@ function noteCallFailure(room,index,error) {
   else if (count===1) output(room,name,error.message+' (se reintentará)','err');
 }
 function noteCallOk(room,index) { if (room.callFails) room.callFails.delete(index); }
+
+// NPC por nombre o id (el nombre exacto del editor; si hay varios con el mismo nombre se usa el primero).
+function findNpc(room,key) {
+  const k=String(key);
+  return room.npcs.get(k)||Array.from(room.npcs.values()).find(npc=>npc.name===k)||null;
+}
+
+// Entrega al aislamiento el resultado de un pedido asíncrono (DataStore o fetch) y deja que corra la continuación del await.
+function resolveAsync(room,id,ok,value) {
+  if (room.isolate.isDisposed || rooms.get(room.id)!==room) return;
+  room.currentScriptName='Servidor';
+  try { room.context.evalSync('globalThis.__crixAsyncResult('+Number(id)+','+(ok?'true':'false')+','+JSON.stringify(JSON.stringify(ok?value:String(value)))+');',{timeout:MAX_SCRIPT_CALL_MS}); }
+  catch (error) { output(room,'Servidor','Error al entregar una respuesta: '+error.message,'err'); }
+  finally { room.currentScriptName=''; }
+}
 
 function invoke(room,eventName,index,dt) {
   if (room.disabledScripts.has(index) || room.isolate.isDisposed) return;
@@ -901,6 +1050,9 @@ if (ivm) {
           for (const player of added) playerEvent(room,'added',player);
           for (const player of removed) playerEvent(room,'removed',player);
         }
+      } else if (message.type==='dsResponse') {
+        const room=rooms.get(String(message.roomId));
+        if (room) resolveAsync(room,message.id,message.ok===true,message.ok===true?message.result:(message.error||'Error del DataStore'));
       } else if (message.type==='remote') {
         const room=rooms.get(String(message.roomId));
         if (room&&!room.isolate.isDisposed&&/^[\w.:-]{1,40}$/.test(String(message.name||''))) {

@@ -4845,8 +4845,9 @@ function avatarChatCommand(text) {
   return true;
 }
 function _gameLoop() { requestAnimationFrame(_gameLoop); if (!gPlayer || !gRenderer) return; const _nowT = performance.now(); const _frameDt = Math.min(0.1, Math.max(0, (_nowT - (_gameLoop._last || _nowT)) / 1000)); _gameLoop._last = _nowT; gAnimT += _frameDt; gFpsCount++; const now = performance.now(); if (now - gFpsT > 1000) { gFps = gFpsCount; gFpsCount = 0; gFpsT = now; document.getElementById('g-stats').textContent = `FPS: ${gFps}`; } const mx = gRag ? 0 : (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = gRag ? 0 : (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx)>0.05 || Math.abs(mz)>0.05; gAcc += Math.min(100, _frameDt * 1000); let _steps = 0; while (gAcc >= PHYS_STEP_MS && _steps < 6) { gAcc -= PHYS_STEP_MS; _steps++; _stepPlayer(mx, mz, moving); } if (_steps === 6) gAcc = 0; let d = gTargetRY - gPlayer.rotation.y; while (d < -Math.PI) d += Math.PI*2; while (d > Math.PI) d -= Math.PI*2; gPlayer.rotation.y += d * Math.min(1, 12 * _frameDt); if (!gRag) _stepGameplay(); if (gPlayer.position.y < -60) { respawnPlayer('void'); } if (gRag) _ragUpdate(_frameDt); _bloodUpdate(_frameDt); { const _av = gPlayer.userData.avatar; if (_av) CrixAvatar.update(_av, _frameDt, { speed: Math.hypot(gVelX, gVelZ) * 60, onGround: gOnGround, vy: gVelY }); } gNPCs.forEach(npc => { const av = npc.mesh.userData.avatar; if (!av) return; if (npc.seed === undefined) npc.seed = String(npc.data.id || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
-    // Reloj de pared: todos los jugadores ven al NPC en el mismo lugar. Un Script puede detenerlo con game.setNpcWander(nombre, false).
-    const t = Date.now() / 2000 + npc.seed * 0.3, hold = !!av.hold, nx = npc.data.x + (hold ? 0 : Math.sin(t) * 5), nz = npc.data.z + (hold ? 0 : Math.cos(t * 0.7) * 5);
+    // Reloj compartido: todos los jugadores ven al NPC en el mismo lugar. Un Script puede detenerlo con game.setNpcWander(nombre, false) o moverlo con game.moveNpc(nombre, {x,z}).
+    // La posición es una función de la hora del servidor (CrixAvatar.npcPosition): pasea, se queda quieto (hold) o camina hacia donde lo mandó game.moveNpc.
+    const _np = CrixAvatar.npcPosition(npc.data, av, Date.now() + (window._crixClockOff || 0)), nx = _np.x, nz = _np.z;
     const dx = nx - npc.mesh.position.x, dz = nz - npc.mesh.position.z, spd = npc.px === undefined ? 0 : Math.hypot(dx, dz) / Math.max(0.001, _frameDt);
     npc.px = 1; npc.mesh.position.x = nx; npc.mesh.position.z = nz;
     if (spd > 0.4) { let dr = Math.atan2(dx, dz) - npc.mesh.rotation.y; while (dr < -Math.PI) dr += Math.PI * 2; while (dr > Math.PI) dr -= Math.PI * 2; npc.mesh.rotation.y += dr * Math.min(1, 8 * _frameDt); }
@@ -5039,7 +5040,8 @@ function netConnect() {
       sessionLost(t).then(()=>{ if(ME&&DB.get('token')===t&&socket&&!socket.connected) setTimeout(()=>{ try{ socket.auth={token:t}; socket.connect(); }catch(_){} },3000); });
     }
   });
-  socket.on('room_state',({players=[],avatars={},chat=[],runtimeParts=[],worldChanges=[],removedParts=[],collectedParts=[],scriptRuntime})=>{
+  socket.on('room_state',({players=[],avatars={},chat=[],runtimeParts=[],worldChanges=[],removedParts=[],collectedParts=[],scriptRuntime,serverNow})=>{
+    if(serverNow>0)window._crixClockOff=serverNow-Date.now();   // reloj del servidor (para mover NPC en sincronía)
     clearRemotePlayers();players.forEach(player=>spawnRemote(player));try{for(const key of Object.keys(avatars||{}))applyAvatarDiff(key,avatars[key]);}catch(_){}
     if(chat.length)chat.forEach(message=>addGMsg(`${message.username}: ${message.text}`,'chat'));
     applyNetworkWorldSnapshot({runtimeParts,worldChanges,removedParts,collectedParts});
@@ -5076,7 +5078,7 @@ function netConnect() {
   socket.on('player_joined',playerData=>{spawnRemote(playerData);addGMsg(`→ ${playerData.username} entró`,'sys');updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('player_moved',({socketId,x,y,z,ry,anim,moving,og,vx,vy,vz})=>{const rp=remotePlayers[socketId];if(!rp)return;rp.targetPos.set(x,y,z);rp.vel=rp.vel||new THREE.Vector3();rp.vel.set(vx||0,vy||0,vz||0);rp.netAt=performance.now();rp.targetRY=ry;rp.anim=anim;rp.moving=moving;rp.og=og!==false;});
   socket.on('sound_cmd',cmd=>{try{CrixAudio.command(cmd);}catch(_){}});
-  socket.on('avatar_cmd',({target,diff}={})=>{if(target&&diff)applyAvatarDiff(target,diff);});
+  socket.on('avatar_cmd',({target,diff,ts}={})=>{if(ts>0){const o=ts-Date.now();if(window._crixClockOff===undefined||o>window._crixClockOff)window._crixClockOff=o;}if(target&&diff)applyAvatarDiff(target,diff);});
   socket.on('player_died',({socketId}={})=>{if(socketId&&gSettings.blood===true)_remoteBlood(socketId);});
   socket.on('player_left',({socketId})=>{const rp=remotePlayers[socketId];if(rp){if(gScene)gScene.remove(rp.group);addGMsg(`← ${rp.data.username} salió`,'sys');delete remotePlayers[socketId];}updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});

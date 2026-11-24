@@ -357,7 +357,7 @@ const caja = game.getPart("Caja");                // estado actual, también por
 
 `info` trae `speed` (velocidad relativa en studs/s; en un aterrizaje es la velocidad exacta de caída), `normal` (de la otra pieza hacia esta), `velocity` (relativa), `part` y `other` (`{ kind: "player" | "part", name, x, y, z… }`). Los toques se calculan solo para las piezas que algún script registró por nombre o id, usan la caja barrida entre ticks (una bala rápida no atraviesa una pared fina; un salto de más de 16 studs en un tick se considera teletransporte) y no se disparan por solapamientos que ya existían al crear la pieza. Los jugadores que llegan a `onUpdate` incluyen `velocity`, `height`, `size` y `bounds` (el origen `x, y, z` está en los pies).
 
-**Límites actuales:** JavaScript es el lenguaje con soporte completo. CrixScript conserva una conversión básica de sintaxis tipo Lua; no es un intérprete completo. Los `Script` sí se ejecutan en el servidor y replican el mundo de su instancia; `LocalScript` es local, por lo que el estado que crean (GUI, monedas, piezas creadas por un LocalScript) es de cada jugador y no se comparte con los demás. Todavía no hay `RemoteEvent` reales entre cliente y servidor, almacenamiento persistente por jugador (DataStore), sonido ni animaciones personalizadas; los elementos *Sound*, *Bloom*, *Blur* y *SunRays* del Explorador son marcadores. `ServerScriptService` y `LocalScriptService` distinguen el tipo de ejecución, aunque la jerarquía de servicios todavía es básica. `isolated-vm` limita memoria y tiempo, pero ejecutar código público requiere mantener Node y el módulo nativo actualizados; para alojar scripts de personas desconocidas a gran escala conviene correr `script-runner.js` en un contenedor sin privilegios separado del servidor web. Esto todavía no incluye todas las capacidades de Roblox Studio o Unity, ni intérpretes para todos los lenguajes, binario o ensamblador.
+**Límites actuales:** JavaScript es el lenguaje con soporte completo. CrixScript conserva una conversión básica de sintaxis tipo Lua; no es un intérprete completo. Los `Script` sí se ejecutan en el servidor y replican el mundo de su instancia; `LocalScript` es local, por lo que el estado que crean (GUI, monedas, piezas creadas por un LocalScript) es de cada jugador y no se comparte con los demás. Todavía no hay `RemoteEvent` reales entre cliente y servidor, animaciones personalizadas guardables (el almacenamiento persistente existe como `game.getDataStore`, ver *DataStore, fetch y NPC en movimiento*); los elementos *Sound*, *Bloom*, *Blur* y *SunRays* del Explorador son marcadores. `ServerScriptService` y `LocalScriptService` distinguen el tipo de ejecución, aunque la jerarquía de servicios todavía es básica. `isolated-vm` limita memoria y tiempo, pero ejecutar código público requiere mantener Node y el módulo nativo actualizados; para alojar scripts de personas desconocidas a gran escala conviene correr `script-runner.js` en un contenedor sin privilegios separado del servidor web. Esto todavía no incluye todas las capacidades de Roblox Studio o Unity, ni intérpretes para todos los lenguajes, binario o ensamblador.
 
 Hay un solo tipo de NPC (🧍 Personaje) y es el mismo cuerpo que el del jugador; se construye como humanoide 3D con articulaciones básicas y animación procedural; todavía no hay editor visual de rigging, huesos ni animación (ver *Lo que todavía no existe en avatares y NPC*).
 
@@ -446,6 +446,62 @@ Todo lo que cambia en una partida online se ve igual para todos los jugadores de
 - Utilidades: `Vector3.new(x,y,z)` (add, sub, mul, dot, cross, lerp, distance, magnitude, unit), `math.lerp/clamp/dist/round/random(a,b)`.
 - Un error ya no apaga el script a la primera: se registra y solo se desactiva tras 10 errores seguidos. Límite de cambios al mundo: 300/s.
 
+### DataStore, fetch y NPC en movimiento (solo `Script` de servidor)
+
+Los tres son asíncronos o dependen del reloj del servidor, así que se usan con `async`/`await` en **JavaScript** (CrixScript no tiene `await`). Una función `async` que falla ya no se pierde: el error aparece en la consola del juego.
+
+**DataStore: guardado persistente por juego.** Los datos viven dentro de la base JSON (`DB.datastores[idDelJuego]`), se respaldan igual que el resto (S3/Supabase, copias diarias) y se sincronizan entre instancias (`db-sync.js` trata el DataStore de cada juego como un registro; si dos instancias escriben a la vez gana la escritura más reciente de ese juego). Al borrar un juego se borra su DataStore; al migrar su id se mueve con él.
+```js
+const puntos = game.getDataStore('Puntos');                 // un DataStore por nombre
+game.onPlayerAdded(async (jugador) => {
+  const datos = await puntos.get(String(jugador.userId));   // valor guardado o null
+  game.message(jugador, 'Monedas guardadas: ' + (datos ? datos.monedas : 0));
+});
+await puntos.set(clave, { monedas: 5, nivel: 2 });          // cualquier JSON (máx. 16 KB)
+await puntos.increment('partidas', 1);                      // atómico → el número nuevo
+await puntos.update(clave, v => ({ ...(v || {}), nivel: 3 })); // lee, aplica y guarda (undefined = no cambiar); misma clave en fila
+await puntos.remove(clave);
+await puntos.keys({ prefix: 'j_', limit: 50 });             // claves
+await puntos.top(10);                                       // [{key, value}] de mayor a menor entre los números (rankings)
+```
+Límites: nombre de DataStore de 1–50 caracteres (letras, números, espacio, `. : _ -`), clave de 1–100, valor de 16 KB, 20 DataStores por juego, 5000 claves por DataStore, 1 MB por juego y 60 pedidos por segundo por instancia. Los errores rechazan la promesa; usá `try/catch`. El DataStore **no** existe en `LocalScript`: el cliente pide con `game.fireServer` y el servidor responde con `fireClient`. Lógica pura y probable en `datastore.js`.
+
+**fetch: HTTP/HTTPS saliente.**
+```js
+const r = await fetch('https://api.ejemplo.com/dato', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { a: 1 } });
+if (r.ok) { const datos = await r.json(); print(datos); }   // también r.text(), r.status, r.headers.get('content-type'), r.truncated
+```
+`game.fetch` es lo mismo. Métodos `GET, HEAD, POST, PUT, PATCH, DELETE`; `body` puede ser texto u objeto (se manda como JSON). Como los scripts los escribe cualquiera que publique un juego, `script-fetch.js` es un cliente enjaulado: solo `http`/`https`, puertos 80/443/8080/8443, sin usuario:clave en la URL, **sin llegar a `localhost`, IPs privadas, link-local (incluido `169.254.169.254`, el metadato de la nube), CGNAT, multicast ni reservadas** (se valida la IP resuelta en la propia conexión, así que el DNS rebinding tampoco pasa, y se revalida cada redirección, máx. 3), 8 s por pedido, respuesta de 256 KB como máximo (se corta y `truncated` es `true`), pedido de 64 KB, 30 por minuto y 5 simultáneos por instancia y 20 en todo el servidor. No se envían cookies ni se devuelven `set-cookie`, y `Authorization` no se reenvía a otro dominio en una redirección. Variables de entorno (opcionales):
+
+| Variable | Efecto |
+| --- | --- |
+| `CRIX_FETCH=off` | Apaga `fetch` en todo el servidor |
+| `CRIX_FETCH_ALLOW` | Lista separada por comas de dominios permitidos (y sus subdominios); si está, solo se puede llegar a ellos |
+| `CRIX_FETCH_ALLOW_PRIVATE=1` | Permite IPs privadas y cualquier puerto (**solo para pruebas locales**, no lo uses en producción) |
+
+Nunca pongas claves secretas de API dentro de un script: cualquiera que pueda editar el juego las ve.
+
+**NPC en movimiento.** Se identifican por el nombre exacto del editor (o su id).
+```js
+const mov = game.moveNpc('Guardia', { x: 20, z: -5 }, { speed: 8 });  // camina en línea recta (studs/s; 8 por defecto)
+print(mov.eta, mov.distance);                                         // segundos y studs que le faltan
+if (await mov.done) game.playAnimation('Guardia', 'wave');            // true al llegar, false si otra orden lo interrumpe (también opts.onArrive)
+game.teleportNpc('Guardia', { x: 0, z: 0 });                          // instantáneo
+game.stopNpc('Guardia');                                              // se frena donde está
+game.getNpc('Guardia');                                               // { id, name, x, y, z, moving, eta } o null
+game.getNpcs();                                                       // todos
+game.setNpcWander('Guardia', true);                                   // vuelve a pasear alrededor de donde esté
+```
+Se mueve en `x`/`z` (la altura no cambia). Mover un NPC lo deja de hacer pasear (como `setNpcWander(nombre, false)`). Cómo funciona: la posición de un NPC es una función de la hora del servidor (`CrixAvatar.npcPosition` en `crix-avatar.js`, la usan igual el navegador, el servidor y el proceso de scripts); el script manda una orden `move` con el punto de partida, el destino, la velocidad y la hora de inicio, y los clientes interpolan solos con el reloj del servidor (`serverNow` en `room_state` y `ts` en `avatar_cmd`). Así todos lo ven en el mismo lugar, quien entra tarde lo ve donde corresponde y no hay tráfico por cuadro. Solo valen NPC: `move` se descarta si el destino es un jugador (para eso está `teleportPlayer`) y los clientes no pueden mandarlo. No hay búsqueda de caminos ni colisiones del NPC: atraviesa lo que encuentre, así que para recorridos con obstáculos encadená puntos. Un bucle de patrulla tiene que esperar de verdad en cada vuelta:
+```js
+async function onStart() {
+  while (true) {
+    await game.moveNpc('Guardia', { x: 20, z: 0 }).done; await task.wait(1);
+    await game.moveNpc('Guardia', { x: -20, z: 0 }).done; await task.wait(1);
+  }
+}
+```
+
 ### Avatares: huesos, cara y animaciones
 Todos los personajes (tu avatar, los demás jugadores y los NPC) usan el mismo esqueleto, definido en `crix-avatar.js` (se carga en el navegador y el servidor lo reutiliza para validar). Mide ~3.1 studs, igual que la caja de colisión.
 
@@ -469,7 +525,8 @@ game.setFace(jugador, 'angry', /*hablando*/ false);             // null = autom�
 game.setLook(jugador, { style:'stick', skin:'#ffd9b3', shirt:'#e0554f', hair:'spiky', hairColor:'#222222', scale:1.2 });
 game.addAccessory(jugador, 'espada', 'HandR', { shape:'box', size:[0.12,1.8,0.12], offset:[0,-0.5,0.25], rotation:[0,0,0], color:'#dddddd', opacity:1, emissive:'#000000' });
 game.removeAccessory(jugador, 'espada');                        // formas: box, sphere, cylinder, cone, capsule (hasta 24 por avatar)
-game.setNpcWander('Guardia', false);                            // el NPC deja de pasear y se queda donde está
+game.setNpcWander('Guardia', false);                            // el NPC deja de pasear y se queda donde está (true = vuelve a pasear)
+game.moveNpc('Guardia', { x:10, z:5 }, { speed:8 });            // camina hasta ahí (ver «DataStore, fetch y NPC en movimiento»)
 ```
 Constantes útiles: `game.BONES`, `game.ANIMATIONS`, `game.FACES`, `game.HAIRS`, `game.SHAPES`.
 
@@ -478,7 +535,7 @@ Constantes útiles: `game.BONES`, `game.ANIMATIONS`, `game.FACES`, `game.HAIRS`,
 **NPC**: ahora son personajes completos. Una parte NPC puede traer `look` (mismo formato que `setLook`); los NPC nuevos de la biblioteca ya traen uno. Los NPC pasean con un reloj compartido, así todos los jugadores los ven en el mismo lugar.
 
 **Lo que todavía no existe en avatares y NPC**:
-- **No se pueden mover NPC por script.** Un script puede animarlos (`playAnimation`, `setBone`, `setPose`), cambiarles el aspecto (`setLook`, accesorios) o detenerlos (`setNpcWander(nombre, false)`), pero no cambiarles la posición ni mandarlos a un punto: su paseo lo calcula el cliente con un reloj compartido.
+- **Los NPC sí se mueven por script** (`game.moveNpc`, ver *DataStore, fetch y NPC en movimiento*), pero en línea recta: no hay búsqueda de caminos ni colisiones del NPC con el mapa.
 - **No hay animaciones personalizadas guardables.** No se pueden crear, guardar ni reutilizar animaciones propias (ni como archivo ni dentro del juego). Hoy se arman combinando las animaciones existentes con `setBone` y `setPose`, y esa combinación hay que volver a pedirla desde el script cada vez.
 - **No hay un panel visual para editar huesos** dentro del editor de mapas. Los huesos se controlan solo por código (`setBone`, `setPose`) o, para el aspecto, desde **Perfil → 🧍 Avatar**.
 

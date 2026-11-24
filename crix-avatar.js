@@ -193,7 +193,7 @@
   const faceVal = (fa, ch, base) => { const e = fa && fa[ch]; return e ? base + (e[0] - base) * e[1] + e[2] + e[3] : base; };
   const accId = v => String(v || '').replace(/[^\w.-]/g, '').slice(0, 40);
   // Orden recibida (de un script o de un cliente) → diferencia validada, en el formato que entiende applyState.
-  //   cmd: { op, ... }.  ops: anim, stop, bone, pose, reset, resetBone, face, faceAnim, boneAnim, look, addAcc, removeAcc, hold
+  //   cmd: { op, ... }.  ops: anim, stop, bone, pose, reset, resetBone, face, faceAnim, boneAnim, look, addAcc, removeAcc, hold, move (solo NPC)
   function sanitizeCommand(cmd) {
     if (!cmd || typeof cmd !== 'object') return null; const op = String(cmd.op || '');
     switch (op) {
@@ -210,6 +210,8 @@
       case 'boneAnim': { if (cmd.values === null) return { boneAnim: null }; const v = sanitizeBoneAnim(cmd.values); return v ? { boneAnim: v } : null; }
       case 'faceAnim': { if (cmd.values === null) return { faceAnim: null }; const v = sanitizeFaceAnim(cmd.values); return v ? { faceAnim: v } : null; }
       case 'hold': return { hold: !!cmd.value };
+      // Mover un NPC (solo lo manda el servidor): de (fx,fz) a (tx,tz) a `speed` studs/s desde la hora del servidor t0. speed 0 = instantáneo.
+      case 'move': { const c = v => clamp(num(v, 0), -10000, 10000); return { move: { fx: c(cmd.fx), fz: c(cmd.fz), tx: c(cmd.tx), tz: c(cmd.tz), speed: clamp(num(cmd.speed, 0), 0, 200), t0: num(cmd.t0, 0) } }; }
       default: return null;
     }
   }
@@ -221,6 +223,7 @@
     if (diff.anim) full.anim = diff.anim;
     if (diff.face !== undefined) { if (diff.face === null) delete full.face; else full.face = diff.face; full.talk = !!diff.talk; }
     if (diff.hold !== undefined) full.hold = diff.hold;
+    if (diff.move !== undefined) { full.move = diff.move; full.hold = true; }   // mover a un NPC por script también lo deja de pasear
     if (diff.faceAnim !== undefined) { if (diff.faceAnim === null) delete full.faceAnim; else full.faceAnim = diff.faceAnim; }
     if (diff.boneAnim !== undefined) { if (diff.boneAnim === null) delete full.boneAnim; else full.boneAnim = diff.boneAnim; }
     if (diff.look) full.look = Object.assign(full.look || {}, diff.look);
@@ -228,7 +231,28 @@
     if (diff.acc) { full.acc = full.acc || {}; for (const k of Object.keys(diff.acc)) { if (diff.acc[k] === null) delete full.acc[k]; else if (Object.keys(full.acc).length < MAX_ACCESSORIES || full.acc[k]) full.acc[k] = diff.acc[k]; } }
     return full;
   }
-  const Shared = { PART_KEYS, PART_LABELS, CLAY_HEX, BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, MAX_EQUIPPED, MAX_ACC_PARTS, ACC_ID_RE, profileLook, sanitizeAccessoryDef, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, sanitizeFaceAnim, sanitizeBoneAnim, FACE_SUBS, mergeState };
+
+  // ── Posición de los NPC (la calculan igual el navegador, el servidor y el proceso de scripts: es una función del reloj) ──
+  //   data = { id, x, z } (donde lo puso el mapa) · st = estado del avatar { hold?, move? } · now = hora del servidor en ms.
+  //   Sin move ni hold pasea alrededor de su punto; con hold se queda quieto; con move (game.moveNpc) camina en línea recta hasta el
+  //   destino y ahí se queda (hold implícito); si después se activa setNpcWander(true), pasea alrededor del destino.
+  const npcSeed = id => String(id || '').split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  function npcMovePos(m, now) {
+    const dx = m.tx - m.fx, dz = m.tz - m.fz, dist = Math.hypot(dx, dz);
+    if (!(m.speed > 0) || dist < 1e-6) return { x: m.tx, z: m.tz, arrived: true, eta: 0, dist };
+    const total = dist / m.speed, el = Math.max(0, (now - m.t0) / 1000);
+    if (el >= total) return { x: m.tx, z: m.tz, arrived: true, eta: 0, dist };
+    const k = el / total;
+    return { x: m.fx + dx * k, z: m.fz + dz * k, arrived: false, eta: total - el, dist };
+  }
+  function npcPosition(data, st, now) {
+    st = st || {}; let bx = data.x || 0, bz = data.z || 0;
+    if (st.move) { const p = npcMovePos(st.move, now); if (!p.arrived) return { x: p.x, z: p.z, moving: true, eta: p.eta }; bx = p.x; bz = p.z; }
+    if (st.hold) return { x: bx, z: bz, moving: false, eta: 0 };
+    const t = now / 2000 + npcSeed(data.id) * 0.3;
+    return { x: bx + Math.sin(t) * 5, z: bz + Math.cos(t * 0.7) * 5, moving: false, eta: 0 };
+  }
+  const Shared = { npcSeed, npcMovePos, npcPosition, PART_KEYS, PART_LABELS, CLAY_HEX, BONES: BONE_NAMES, BONE_TREE: BONES, ANIMATIONS: ANIM_NAMES, FACES, HAIRS, SHAPES, DEFAULT_LOOK, MAX_ACCESSORIES, MAX_EQUIPPED, MAX_ACC_PARTS, ACC_ID_RE, profileLook, sanitizeAccessoryDef, resolveBone, resolveAnim, sanitizeLook, sanitizeBoneProps, sanitizeAccessory, sanitizeCommand, sanitizeFaceAnim, sanitizeBoneAnim, FACE_SUBS, mergeState };
   if (typeof module !== 'undefined' && module.exports) module.exports = Shared;
 
   // ══ PARTE GRÁFICA (solo navegador, necesita THREE r128) ══════════════════════════════════════════════════════
@@ -1141,6 +1165,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     if (!st || typeof st !== 'object') return;
     if (st.look) setLook(av, st.look);
     if (st.hold !== undefined) av.hold = !!st.hold;
+    if (st.move !== undefined) { av.move = st.move; av.hold = true; }
     if (st.faceAnim !== undefined) av.faceAnim = st.faceAnim || null;
     if (st.boneAnim !== undefined) av.boneAnim = st.boneAnim || null;
     if (st.reset) { av.faceAnim = null; av.boneAnim = null; stopAnimation(av); av.layers.face = null; av.layers.talk = false; av.hold = false; for (const id of Object.keys(av.accessories)) removeAccessory(av, id); resetBone(av); }

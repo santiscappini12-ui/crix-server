@@ -122,7 +122,7 @@ const DATA_FILE = persist.DATA_FILE;
 // Base de datos JSON. En producción, CRIX_DATA_FILE debe apuntar
 // a un disco persistente montado por el proveedor de alojamiento.
 // ══════════════════════════════════════════════
-let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, apiKeys: {}, accessories: {}, push: {}, _v: 0 };
+let DB = { users: {}, maps: {}, convs: {}, videos: [], posts: [], sessions: {}, apiKeys: {}, accessories: {}, datastores: {}, push: {}, _v: 0 };
 let dbSync = null;   // fusión entre instancias (db-sync.js); se crea justo después de loadDB()
 
 function loadDB() {
@@ -130,9 +130,9 @@ function loadDB() {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf8');
       const parsed = JSON.parse(raw);
-      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, apiKeys:{}, accessories:{}, push:{}, _v:0, ...parsed };
+      DB = { users:{}, maps:{}, convs:{}, videos:[], posts:[], sessions:{}, apiKeys:{}, accessories:{}, datastores:{}, push:{}, _v:0, ...parsed };
       DB.users = DB.users || {}; DB.maps = DB.maps || {}; DB.convs = DB.convs || {};
-      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {}; DB.apiKeys = DB.apiKeys || {}; DB.accessories = DB.accessories || {};
+      DB.videos = DB.videos || []; DB.posts = DB.posts || []; DB.sessions = DB.sessions || {}; DB.apiKeys = DB.apiKeys || {}; DB.accessories = DB.accessories || {}; DB.datastores = DB.datastores || {};
       // Los mensajes anteriores al cifrado E2EE no se pueden proteger retroactivamente.
       // Eliminarlos evita volver a servir o conservar conversaciones en texto plano.
       let legacyMessagesRemoved = 0;
@@ -247,6 +247,9 @@ dbSync = require('./db-sync')({ getDB: () => DB, onRemoteChange: broadcastRemote
 dbSync.init();
 persist.setSync({ merge(remote) { const changed = dbSync.merge(remote); if (changed) saveDB(); return changed; } });
 persist.startSync();
+
+// DataStore de los Script de servidor (game.getDataStore): datos persistentes por juego dentro de la misma base. Ver datastore.js.
+const scriptDataStore = require('./datastore')({ getDB: () => DB, saveDB });
 
 // Notificaciones push (mensajes, llamadas y solicitudes con la app cerrada)
 const push = require('./push')({ getDB: () => DB, saveDB });
@@ -410,7 +413,7 @@ function initializeRoomWorld(room, map) {
   room.physicsMode=(map&&(map.physicsMode==='classic'||(map.settings&&map.settings.physicsMode==='classic')))?'classic':'realistic';
   room.worldParts={}; room.basePartIds=new Set(); room.changedPartIds=new Set(); room.removedPartIds=new Set(); room.physicsVelocities={};
   for(const [index,source] of (Array.isArray(map?.parts)?map.parts:[]).entries()){
-    if(source&&source.isNPC){const nid=String(source.id||`map-part-${index}`);room.npcs[nid]={id:nid,name:String(source.name||'NPC').slice(0,80),look:source.look&&typeof source.look==='object'?CrixAvatar.sanitizeLook(source.look,{}):null};continue;}
+    if(source&&source.isNPC){const nid=String(source.id||`map-part-${index}`);room.npcs[nid]={id:nid,name:String(source.name||'NPC').slice(0,80),x:Number(source.x)||0,y:Number(source.y)||0,z:Number(source.z)||0,look:source.look&&typeof source.look==='object'?CrixAvatar.sanitizeLook(source.look,{}):null};continue;}
     if(!source)continue;
     const id=String(source.id||`map-part-${index}`),part=normalizeRoomPart(id,source);
     room.worldParts[id]=part;room.basePartIds.add(id);
@@ -453,7 +456,7 @@ function startRoomServerScripts(room,map) {
   if(!runner){room.scriptStatus='error';io.to(gameChannel(room.mapId,room.instanceId)).emit('script_runtime_status',{status:'error',message:scriptRunnerError||'No se pudo iniciar el entorno de scripts.'});return;}
   room.scriptStarted=true;room.scriptStatus='starting';
   room.watched=new Set();room.appliedSeq=0;
-  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Object.values(room.worldParts||{}),joints:(room.joints||[]).map(joint=>({id:joint.id,class:joint.class,name:joint.name})),models:room.models||[],animations:room.animations||[],players:playersForRunner(room)});
+  runner.send({type:'start',roomId:roomKey(room.mapId,room.instanceId),mapId:room.mapId,instanceId:room.instanceId,scripts,parts:Object.values(room.worldParts||{}),joints:(room.joints||[]).map(joint=>({id:joint.id,class:joint.class,name:joint.name})),models:room.models||[],animations:room.animations||[],npcs:Object.values(room.npcs||{}).map(n=>({id:n.id,name:n.name,x:n.x,y:n.y,z:n.z})),npcStates:Object.fromEntries(Object.entries(room.avatars||{}).filter(([k])=>k.startsWith('n:')).map(([k,v])=>[k.slice(2),v])),players:playersForRunner(room)});
 }
 
 function sendRoomPlayersToRunner(room) {
@@ -505,11 +508,19 @@ function handleScriptRunnerMessage(message) {
     }
     const channel=gameChannel(room.mapId,room.instanceId);
     for(const key of keys.slice(0,64)){
+      if(diff.move&&!(key[0]==='n'&&key[1]===':'))continue;   // mover solo vale para NPC (los jugadores se mueven con teleportPlayer)
       const state=room.avatars[key]||(room.avatars[key]={});CrixAvatar.mergeState(state,diff);
       if(JSON.stringify(state).length>24000){delete room.avatars[key];continue;}
       if(key[0]!=='n'||key[1]!==':'){const pl=room.players[key];if(pl&&state.look)pl.look=CrixAvatar.sanitizeLook(state.look,pl.look);}
-      io.to(channel).emit('avatar_cmd',{target:key,diff});
+      io.to(channel).emit('avatar_cmd',{target:key,diff,ts:Date.now()});
     }
+    return;
+  }
+  if(message.type==='dsRequest'){
+    const reply={type:'dsResponse',roomId:message.roomId,id:message.id};
+    try{reply.ok=true;reply.result=scriptDataStore.handle(room.mapId,message.req);}
+    catch(error){reply.ok=false;reply.error=error instanceof scriptDataStore.DataStoreError?error.message:'Error interno del DataStore';if(!(error instanceof scriptDataStore.DataStoreError))log('DATASTORE',error.message);}
+    if(scriptRunner?.connected)scriptRunner.send(reply);
     return;
   }
   if(message.type==='remoteOut'){
@@ -2159,7 +2170,7 @@ app.post('/api/maps/:id/migrate-id', requireAuth, (req, res) => {
   if (!MAP_ID_RE.test(newId) || newId === oldId || DB.maps[newId]) return res.status(400).json({ ok:false, err:'Id nuevo inválido o en uso' });
   DB.maps[newId] = { ...old, id:newId, assetsId: old.assetsId || oldId };   // texturas y sonidos se quedan donde están
   delete DB.maps[oldId];
-  for (const k of ['appData', 'appScores']) if (DB[k] && DB[k][oldId]) { DB[k][newId] = DB[k][oldId]; delete DB[k][oldId]; }
+  for (const k of ['appData', 'appScores', 'datastores']) if (DB[k] && DB[k][oldId]) { DB[k][newId] = DB[k][oldId]; delete DB[k][oldId]; }
   saveDB();
   io.emit('map_deleted', { mapId: oldId });
   io.emit('map_updated', { mapId: newId });
@@ -2178,6 +2189,7 @@ app.delete('/api/maps/:id', (req, res) => {
   delete DB.maps[req.params.id];
   if (DB.appData) delete DB.appData[req.params.id];
   if (DB.appScores) delete DB.appScores[req.params.id];
+  scriptDataStore.removeMap(req.params.id);
   if (MAP_ID_RE.test(aid)) { try { fs.rmSync(texDir(aid), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${aid}/`); try { fs.rmSync(soundDir(aid), { recursive:true, force:true }); } catch {} persist.delPrefix(`sounds/${aid}/`); }
   saveDB();
   io.emit('map_deleted', { mapId: req.params.id });
@@ -3074,7 +3086,7 @@ G('join_game', (socket, data) => {
     log('JOIN', `${username} → ${mapId} / ${instanceId}`);
     socket.emit('room_state', {
       players: roomPlayers(room).filter(p=>p.socketId!==socket.id),
-      avatars: room.avatars,
+      avatars: room.avatars, serverNow: Date.now(),
       chat: room.chat.slice(-30), mapId, instanceId,
       ...roomWorldSnapshot(room), scriptRuntime:room.scriptStatus,
     });
@@ -3107,7 +3119,7 @@ G('avatar_self', (socket, data) => {
     const cmds = Array.isArray(data?.cmds) ? data.cmds.slice(0, 12) : [];
     const state = room.avatars[socket.id] || (room.avatars[socket.id] = {});
     const diffs = [];
-    for (const cmd of cmds) { const diff = CrixAvatar.sanitizeCommand(cmd); if (diff) { CrixAvatar.mergeState(state, diff); diffs.push(diff); } }
+    for (const cmd of cmds) { const diff = CrixAvatar.sanitizeCommand(cmd); if (diff && !diff.move) { CrixAvatar.mergeState(state, diff); diffs.push(diff); } }
     if (JSON.stringify(state).length > 24000) { delete room.avatars[socket.id]; return; }   // tope de tamaño por avatar
     if (state.look) player.look = CrixAvatar.sanitizeLook(state.look, player.look);
     for (const diff of diffs) socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('avatar_cmd', { target:socket.id, diff });
