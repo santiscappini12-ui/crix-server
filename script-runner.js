@@ -29,7 +29,7 @@ const PLAYER_OPS = new Set(['teleport','launch','speed','jump','damage','heal','
 const MAX_TICK_BUDGET_MS = 35;
 const MAX_SCRIPT_CALL_MS = 25;
 const LOWRES = require('./low-resource');   // contenedor pequeño: menos memoria por sala y tick más lento
-const TICK_MS = LOWRES.low ? 100 : 50;
+const TICK_MS = LOWRES.low ? 100 : 16;   // ~60 Hz en servidores normales (antes 20 Hz)
 const PLAYER_HALF_W = 0.5;
 const PLAYER_HEIGHT = 3.05;
 
@@ -748,7 +748,7 @@ function createRoom(message) {
     name=String(name);if(!/^[\w.:-]{1,40}$/.test(name))throw new Error('Nombre de evento inválido');
     if(String(dataJson).length>1e9)throw new Error('Los datos del evento superan 4 KB');
     const now=Date.now();room.remoteTimes=(room.remoteTimes||[]).filter(time=>now-time<1000);
-    if(room.remoteTimes.length>=300)throw new Error('Límite de eventos remotos por segundo alcanzado');room.remoteTimes.push(now);
+    if(room.remoteTimes.length>=4000)throw new Error('Límite de eventos remotos por segundo alcanzado');room.remoteTimes.push(now);
     let data=null;try{data=JSON.parse(String(dataJson));}catch(_){}
     send({type:'remoteOut',roomId:room.id,userId:String(userId).slice(0,100),name,data});
   },{sync:true}));

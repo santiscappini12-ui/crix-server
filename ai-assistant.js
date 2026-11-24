@@ -69,7 +69,7 @@ speed/jump 20–400 (%), gravity 10–400 (%), maxHealth 1–10000, maxPlayers 1
 \`\`\`crix:set_gui
 {"screen":"HUD","replace":false,"elements":[{"type":"TextLabel","name":"Monedas","x":2,"y":2,"w":20,"h":6,"text":"Monedas: {coins}","fontSize":24,"color":"#ffffff"}]}
 \`\`\`
-Crea o actualiza una pantalla de interfaz (si "replace" es true vacía la pantalla antes). x, y, w, h son porcentajes de la pantalla (0–100). Tipos: Frame, TextLabel, TextButton, ProgressBar, TextBox. Campos: name, text, fontSize, color, bg, opacity 0–100, radius, align (left|center|right), value 0–1 (barras), bind "health" en una barra para enlazarla a la vida, action en botones: {"type":"none|toggleGui|showGui|hideGui|teleport|respawn|message|exit","target":"nombre"}. Los textos admiten {coins}, {health}, {maxHealth}, {deaths}, {time}. Un elemento con el mismo name se actualiza en vez de duplicarse.
+Crea o actualiza una pantalla de interfaz (si "replace" es true vacía la pantalla antes). x, y, w, h son porcentajes de la pantalla (0–100). Tipos: Frame, TextLabel, TextButton, ImageButton (botón con imagen que sube la persona; admite text opcional y action), ProgressBar, TextBox. Campos: name, text, fontSize, color, bg, opacity 0–100, radius, align (left|center|right), value 0–1 (barras), bind "health" en una barra para enlazarla a la vida, action en botones: {"type":"none|toggleGui|showGui|hideGui|teleport|respawn|message|exit","target":"nombre"}. Los textos admiten {coins}, {health}, {maxHealth}, {deaths}, {time}. Un elemento con el mismo name se actualiza en vez de duplicarse.
 
 \`\`\`crix:rename_project
 "Nuevo nombre"

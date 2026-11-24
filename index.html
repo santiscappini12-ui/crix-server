@@ -931,7 +931,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
     <div id="gui-left">
       <div style="padding:8px 10px;display:flex;flex-wrap:wrap;gap:4px">
         <button class="st-btn" onclick="guiEdAdd('Frame')">▭ Marco</button><button class="st-btn" onclick="guiEdAdd('TextLabel')">T Texto</button>
-        <button class="st-btn" onclick="guiEdAdd('TextButton')">🔘 Botón</button><button class="st-btn" onclick="guiEdAdd('ImageLabel')">🖼 Imagen</button>
+        <button class="st-btn" onclick="guiEdAdd('TextButton')">🔘 Botón</button><button class="st-btn" onclick="guiEdAdd('ImageLabel')">🖼 Imagen</button><button class="st-btn" onclick="guiEdAdd('ImageButton')">🖼🔘 Botón con imagen</button>
         <button class="st-btn" onclick="guiEdAdd('ProgressBar')">▰ Barra</button><button class="st-btn" onclick="guiEdAdd('TextBox')">⌨ Caja</button>
       </div>
       <div class="panel-hd">ELEMENTOS</div>
@@ -1903,7 +1903,16 @@ BC.addEventListener('message', e => {
   if (e.data.type === 'map_update') { if (document.getElementById('s-home').classList.contains('active')) renderHome(); }
 });
 let CLOUD_READY = false;
-async function apiRequest(url, options = {}) {
+const _apiInflight = new Map();   // GET idénticos simultáneos (varias pantallas pidiendo lo mismo a la vez) → una sola petición
+function apiRequest(url, options = {}) {
+  const method = options.method || 'GET';
+  if (method !== 'GET' || options.body !== undefined) return _apiRequest(url, options);
+  const key = url + '|' + (options.token !== undefined ? options.token : DB.get('token')) + '|' + JSON.stringify(options.headers || {});
+  let p = _apiInflight.get(key);
+  if (!p) { p = _apiRequest(url, options).finally(() => _apiInflight.delete(key)); _apiInflight.set(key, p); }
+  return p.then(data => data);
+}
+async function _apiRequest(url, options = {}) {
   const headers = { ...(options.headers || {}) };
   const token = options.token !== undefined ? options.token : DB.get('token');
   if (token) headers.Authorization = 'Bearer ' + token;
@@ -2695,8 +2704,14 @@ async function syncCloudData() {
     if (ME && DB.get('token')) { const wait = Math.min(30000, 4000 * ++_syncRetry); setTimeout(() => { if (!CLOUD_READY && ME && DB.get('token')) syncCloudData(); }, wait); }
   } finally { _syncBusy = false; }
 }
-async function refreshCloudContent() {
+let _cloudBusy = null, _cloudLast = 0;
+async function refreshCloudContent(force) {
   if (!CLOUD_READY || !ME) return;
+  // Si ya hay una actualización en curso (4 listados pesados) o acaba de terminar otra, no se pide de nuevo: cambiar de pestaña
+  // varias veces seguidas disparaba una tanda completa por cada cambio.
+  if (_cloudBusy) return force ? _cloudBusy.then(() => refreshCloudContent(true)) : undefined;   // un cambio hecho por la persona espera a la tanda en curso y vuelve a pedir
+  if (!force && Date.now() - _cloudLast < 1000) return;
+  let _done; _cloudBusy = new Promise(r => { _done = r; });
   try {
     const localVideos = getVideos();
     const [usersResult, mapsResult, videosResult, postsResult, sessionResult] = await Promise.all([
@@ -2712,6 +2727,7 @@ async function refreshCloudContent() {
     if (!_screenActive('s-game')) rerenderLiveScreens('maps');
     rerenderLiveScreens('videos'); rerenderLiveScreens('posts'); rerenderLiveScreens('users');
   } catch (err) { console.warn('[CLOUD] No se pudo actualizar el contenido:', err.message); }
+  finally { _cloudBusy = null; _cloudLast = Date.now(); _done(); }
 }
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
 function profileAvatarSrc(user) {
@@ -4407,7 +4423,7 @@ function runScript(scriptOverride, partsOverride) {
   run.worker.postMessage({type:'init',config:bundle.config});
   run.watchdog=setTimeout(()=>{if(run.active){appendOutput('[error] El script superó el límite de ejecución (3 s)','err');finish();}},3000);
 }
-const SCRIPT_TICK_MS=50, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=Infinity, SCRIPT_MAX_PARTS=Infinity;
+const SCRIPT_TICK_MS=16, SCRIPT_TIMEOUT_MS=2500, SCRIPT_MAX_COUNT=Infinity, SCRIPT_MAX_PARTS=Infinity;
 let runtimeScripts=new Map(), runtimeObjects=new Map(), runtimeWorkspaceBase=[], runtimeTickHandle=null, runtimePhysicsHandle=null, currentGameSession=0, netServerScriptsActive=false, networkRuntimePartIds=new Set();
 function normalizeGamePart(id,source={}) { const pos=source.position||{},size=source.size||{},num=(v,d,min=-10000,max=10000)=>{let n=Number(v);if(!Number.isFinite(n))n=d;return Math.max(min,Math.min(max,n));},type=['Block','Sphere','Cylinder','Wedge','TrussPart','ImportedMesh'].includes(source.type)?source.type:'Block',color=/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(source.color||''))?source.color:'#2f80ff',materials=Object.keys(MATERIAL_DEFS);
   return {id:String(id),name:String(source.name||'Part').slice(0,80),type,x:num(source.x??pos.x??pos.X,0),y:num(source.y??pos.y??pos.Y,0),z:num(source.z??pos.z??pos.Z,0),sx:num(source.sx??size.x??size.X,4,0.1,1000),sy:num(source.sy??size.y??size.Y,4,0.1,1000),sz:num(source.sz??size.z??size.Z,4,0.1,1000),rx:num(source.rx,0,-1000,1000),ry:num(source.ry,0,-1000,1000),rz:num(source.rz,0,-1000,1000),color,material:materials.includes(source.material)?source.material:'SmoothPlastic',anchored:source.anchored!==false,canCollide:source.canCollide!==false,transparent:num(source.transparent,0,0,1),behavior:['none','kill','bounce','checkpoint','speed','coin','heal','teleport','win'].includes(source.behavior)?source.behavior:'none',behaviorValue:num(source.behaviorValue,0,-1000,1000),target:String(source.target||'').slice(0,80),textureId:/^tx_[a-z0-9]{3,40}$/.test(String(source.textureId||''))?String(source.textureId):'',texScale:num(source.texScale,4,0.25,64),texTint:source.texTint===true,meshData:source.type==='ImportedMesh'?source.meshData:undefined,avatarMesh:(typeof source.avatarMesh==='string'&&/^[A-Za-z]{2,20}$/.test(source.avatarMesh))?source.avatarMesh:undefined,parent:source.parent?String(source.parent).slice(0,120):undefined,attributes:(source.attributes&&typeof source.attributes==='object'&&!Array.isArray(source.attributes))?source.attributes:undefined,reflectance:source.reflectance===undefined?undefined:num(source.reflectance,0,0,1),density:source.density===undefined?undefined:num(source.density,0.7,0.01,100),castShadow:source.castShadow===undefined?undefined:source.castShadow!==false,canTouch:source.canTouch===undefined?undefined:source.canTouch!==false,canQuery:source.canQuery===undefined?undefined:source.canQuery!==false,massless:source.massless===true?true:undefined,locked:source.locked===true?true:undefined,collisionGroup:source.collisionGroup?String(source.collisionGroup).slice(0,40):undefined};
@@ -4977,7 +4993,7 @@ async function crixShare(kind, key) {
 })();
 function exitGame() { try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;const backBtn=document.getElementById('g-back-btn');if(backBtn)backBtn.textContent='← Salir';goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
-const NET_RATE = 2;
+let NET_RATE = 1;   // 1 = posición en cada cuadro (hasta 60/s); con muchos jugadores se baja solo a 2 para no saturar
 let remotePlayers = {};
 function netConnect() {
   const serverUrl=window.location.origin;
@@ -5079,7 +5095,7 @@ netConnect = function() {
 };
 function netJoinGame(mapId, instanceId = netCurrentInstanceId) { netCurrentMapId = mapId; netCurrentInstanceId = instanceId; if (!socket || !netConnected || !ME || !instanceId) return; socket.emit('join_game', { mapId, instanceId, userId: ME.id, username: ME.username, color: ME.color || '#2f80ff', look: myLook() }); }
 function netLeaveGame() { if (socket && netConnected) socket.emit('leave_game'); clearRemotePlayers(); netCurrentMapId = null; netCurrentInstanceId = null; const pill = document.getElementById('g-net-pill'); if (pill) pill.style.display = 'none'; }
-function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving, onGround:gOnGround }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
+function netSendMove() { if (!socket || !netConnected || !gPlayer) return; netTick++; NET_RATE = Object.keys(remotePlayers).length > 16 ? 2 : 1; if (netTick % NET_RATE !== 0) return; const mx = (gKeys['KeyD']?1:0)-(gKeys['KeyA']?1:0)+joyPos.x; const mz = (gKeys['KeyS']?1:0)-(gKeys['KeyW']?1:0)+joyPos.y; const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05; socket.emit('player_move', { x: parseFloat(gPlayer.position.x.toFixed(3)), y: parseFloat(gPlayer.position.y.toFixed(3)), z: parseFloat(gPlayer.position.z.toFixed(3)), ry: parseFloat(gPlayer.rotation.y.toFixed(3)), anim: moving && gOnGround ? parseFloat((Math.sin(gAnimT * 9) * 0.55).toFixed(3)) : 0, moving, onGround:gOnGround }); if (netTick % 180 === 0) socket.emit('ping_req', Date.now()); }
 function netSendChat(text) { if (!socket || !netConnected) return false; socket.emit('game_chat', { text }); return true; }
 function updateNetPill(icon, info) { const pill = document.getElementById('g-net-pill'); if (!pill) return; pill.style.display = 'block'; pill.textContent = `${icon} ${info}`; }
 function spawnRemote(playerData) { if (!gScene) return; if (remotePlayers[playerData.socketId]) gScene.remove(remotePlayers[playerData.socketId].group); const built = _buildHumanoid(playerData.color || '#f97316', playerData.look); const group = built.group; group.position.set(playerData.x || 0, playerData.y || 3, playerData.z || 0); gScene.add(group); const nameTag = _makeNameTag(playerData.username); group.add(nameTag); remotePlayers[playerData.socketId] = { group, av: built.avatar, nameTag, data: playerData, targetPos: new THREE.Vector3(playerData.x || 0, playerData.y || 3, playerData.z || 0), targetRY: playerData.ry || 0, anim: 0, moving: false, og: true, spd: 0, vy: 0 }; flushAvatarPending(playerData.socketId); }
@@ -6232,14 +6248,14 @@ function sendFriendRequest(uid) {
     showToast('Ya enviaste una solicitud'); return;
   }
   apiRequest('/api/friend-request', { method:'POST', body:{ toId:uid } })
-    .then(() => { showToast('✅ Solicitud de amistad enviada a ' + target.username); refreshCloudContent(); })
+    .then(() => { showToast('✅ Solicitud de amistad enviada a ' + target.username); refreshCloudContent(true); })
     .catch(err => showToast(err.message));
 }
 async function acceptFriendRequest(fromId) {
   try {
     await apiRequest('/api/friend-accept', { method:'POST', body:{ fromId } });
     const from = getUsers()[fromId];
-    await refreshCloudContent();
+    await refreshCloudContent(true);
     showToast('✅ Ahora son amigos con ' + (from?.username || 'este usuario'));
     renderFriendRequests();
   } catch (err) { showToast(err.message); }
@@ -6247,7 +6263,7 @@ async function acceptFriendRequest(fromId) {
 async function rejectFriendRequest(fromId) {
   try {
     await apiRequest('/api/friend-reject', { method:'POST', body:{ fromId } });
-    await refreshCloudContent();
+    await refreshCloudContent(true);
     renderFriendRequests();
   } catch (err) { showToast(err.message); }
 }
@@ -6643,7 +6659,7 @@ function toggleMuteCall() {
 function initCallSocketEvents() {
   if (!socket || socket._callEv) return; socket._callEv = true;
   socket.on('friend_request', ({ from, fromName }) => {
-    refreshCloudContent().then(() => {
+    refreshCloudContent(true).then(() => {
       renderFriendRequests();
       showToast('👋 ' + fromName + ' quiere ser tu amigo'); playSfx('friend');
       sendBrowserNotif('Nueva solicitud de amistad', fromName + ' quiere ser tu amigo en Crix');
@@ -6651,7 +6667,7 @@ function initCallSocketEvents() {
     });
   });
   socket.on('friend_accepted', ({ from, fromName }) => {
-    refreshCloudContent();
+    refreshCloudContent(true);
     showToast('🎉 ' + fromName + ' aceptó tu solicitud de amistad'); playSfx('friend');
     sendBrowserNotif('Solicitud aceptada', fromName + ' ahora es tu amigo en Crix');
     renderProfile(ME.id);
@@ -6688,7 +6704,6 @@ function renderMsgBubble(msg, isMe) {
 netConnect();
 const _goTabCloud = goTab;
 goTab = function(tab, extra) { _goTabCloud(tab, extra); if (CLOUD_READY) refreshCloudContent(); };
-setInterval(() => { if (CLOUD_READY) refreshCloudContent(); }, 60000);
 const _goTabNotif = goTab;
 goTab = function(tab, extra) { _goTabNotif(tab, extra); if (tab === 'msg') notifStatusRender(); };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' }).catch(err => console.warn('[PWA] No se pudo instalar el caché:', err.message));
@@ -6752,7 +6767,7 @@ function stepEditorPhysics(){
 var _liveTimers = {}, _liveLast = {}, _livePending = {};
 setInterval(() => { if (_livePending.maps && !_screenActive('s-game') && !document.getElementById('code-overlay')?.classList.contains('open')) { _livePending.maps = false; refreshLive('maps'); } }, 2000);
 function _screenActive(id) { return !!document.getElementById(id)?.classList.contains('active'); }
-function liveRefresh(kind) { clearTimeout(_liveTimers[kind]); _liveTimers[kind] = setTimeout(() => refreshLive(kind), kind==='maps' ? 1500 : 350); }
+function liveRefresh(kind) { clearTimeout(_liveTimers[kind]); _liveTimers[kind] = setTimeout(() => refreshLive(kind), kind==='maps' ? 300 : 100); }
 async function refreshLive(kind) {
   if (!ME || !DB.get('token')) return;
   // Dentro de un juego o del editor de código no se toca el catálogo, pero el aviso NO se pierde: queda pendiente y se aplica al salir.
@@ -6874,7 +6889,7 @@ function _catalogNudge() {
   if (_screenActive('s-game')) { _livePending.maps = true; liveRefresh('videos'); liveRefresh('posts'); liveRefresh('users'); }
   else refreshCloudContent();
 }
-setInterval(_catalogNudge, 90000);
+setInterval(_catalogNudge, 10000);
 document.addEventListener('visibilitychange', _catalogNudge);
 window.addEventListener('online', _catalogNudge);
 function setupGlobalLiveEvents() {
@@ -6946,7 +6961,7 @@ function setupGlobalLiveEvents() {
     if (_screenActive('s-msg')) loadConvList();
   });
 }
-setInterval(() => { if (ME && CLOUD_READY && !document.hidden && !_screenActive('s-game')) refreshCloudContent(); }, 60000);
+setInterval(() => { if (ME && CLOUD_READY && !document.hidden && !_screenActive('s-game')) refreshCloudContent(); }, 5000);
 
 // ═══ Unirse al servidor de CUALQUIER persona (no solo amigos) ═══
 async function joinUserGame(userId) {
@@ -7328,12 +7343,13 @@ function openGameSettings() {
 
 // ═══ GUI: modelo, runtime y editor ═══
 var gGuiMap = {}, gGuiScreens = {};
-const GUI_TYPES = {Frame:'▭ Marco',TextLabel:'T Texto',TextButton:'🔘 Botón',ImageLabel:'🖼 Imagen',ProgressBar:'▰ Barra',TextBox:'⌨ Caja de texto'};
+const GUI_TYPES = {Frame:'▭ Marco',TextLabel:'T Texto',TextButton:'🔘 Botón',ImageLabel:'🖼 Imagen',ImageButton:'🖼🔘 Botón con imagen',ProgressBar:'▰ Barra',TextBox:'⌨ Caja de texto'};
 const GUI_DEFAULTS = {
   Frame:{w:30,h:20,bg:'#1a1d29',opacity:90,radius:12,border:1,borderColor:'#3a3f55'},
   TextLabel:{w:24,h:8,text:'Texto',fontSize:24,color:'#ffffff',bg:'#000000',opacity:0,radius:8,align:'center'},
   TextButton:{w:18,h:9,text:'Botón',fontSize:24,color:'#ffffff',bg:'#2f80ff',opacity:100,radius:12,align:'center',action:{type:'none',target:''}},
   ImageLabel:{w:18,h:30,image:'',bg:'#000000',opacity:0,radius:8},
+  ImageButton:{w:14,h:22,image:'',text:'',fontSize:22,color:'#ffffff',bg:'#000000',opacity:0,radius:12,align:'center',action:{type:'none',target:''}},
   ProgressBar:{w:28,h:4.5,bg:'#222222',color:'#22c55e',value:0.7,opacity:85,radius:10,bind:'none',text:'',border:1,borderColor:'#000000'},
   TextBox:{w:28,h:8,text:'',placeholder:'Escribí acá…',fontSize:22,color:'#ffffff',bg:'#1a1d29',opacity:100,radius:10,border:1,borderColor:'#3a3f55'}
 };
@@ -7360,7 +7376,8 @@ function guiApplyStyle(el, d, edit) {
   s.borderRadius = guiNum(d.radius,0,0,200)+'px'; s.border = guiNum(d.border,0,0,20)+'px solid '+guiColor(d.borderColor,'#3a3f55');
   s.fontSize = 'calc('+guiNum(d.fontSize,18,6,120)+'px * var(--gui-scale,1))'; s.fontFamily = 'inherit'; s.fontWeight = '700';
   s.textAlign = d.align || 'center'; s.lineHeight = '1.15'; s.userSelect = 'none';
-  s.pointerEvents = edit ? 'auto' : ((d.type === 'TextButton' || d.type === 'TextBox') ? 'auto' : 'none');
+  s.pointerEvents = edit ? 'auto' : ((d.type === 'TextButton' || d.type === 'ImageButton' || d.type === 'TextBox') ? 'auto' : 'none');
+  s.cursor = (d.type === 'TextButton' || d.type === 'ImageButton') && !edit ? 'pointer' : '';
   if (d.type === 'ProgressBar') s.padding = '0';
 }
 function guiUpdateExtras(el, d) {
@@ -7369,19 +7386,33 @@ function guiUpdateExtras(el, d) {
     const fill = el.querySelector('.gx-fill'), label = el.querySelector('.gx-ptext');
     if (fill) fill.style.cssText = 'position:absolute;left:0;top:0;bottom:0;width:'+(v*100)+'%;background:'+guiColor(d.color,'#22c55e')+';border-radius:inherit;transition:width .15s';
     if (label) { label.textContent = guiTemplate(d.text); label.style.cssText = 'position:relative;color:#fff;text-shadow:0 1px 2px #000'; }
-  } else if (d.type === 'ImageLabel') {
+  } else if (d.type === 'ImageLabel' || d.type === 'ImageButton') {
     const img = el.querySelector('img'), src = String(d.image || '');
     if (img) { if (/^data:image\/(png|jpeg|webp|gif);base64,/.test(src)) { if (img.getAttribute('src') !== src) img.src = src; } else img.removeAttribute('src'); }
   }
 }
 function guiMakeElement(e, edit) {
   let el;
-  if (!edit && e.type === 'TextButton') el = document.createElement('button');
+  if (!edit && (e.type === 'TextButton' || e.type === 'ImageButton')) el = document.createElement('button');
   else if (!edit && e.type === 'TextBox') { el = document.createElement('input'); el.type = 'text'; el.maxLength = 200; el.placeholder = String(e.placeholder||''); el.value = String(e.text||''); }
   else el = document.createElement('div');
   el.className = 'gx gx-' + e.type; el.dataset.name = e.name;
   if (e.type === 'ProgressBar') { const fill = document.createElement('div'); fill.className = 'gx-fill'; const label = document.createElement('span'); label.className = 'gx-ptext'; el.appendChild(fill); el.appendChild(label); }
   else if (e.type === 'ImageLabel') { const img = document.createElement('img'); img.draggable = false; img.style.cssText = 'width:100%;height:100%;object-fit:contain;pointer-events:none'; el.appendChild(img); }
+  else if (e.type === 'ImageButton') {
+    // Imagen a todo el botón + texto opcional encima. En el juego se hunde al presionarlo y se aclara al pasar el mouse.
+    const img = document.createElement('img'); img.draggable = false; img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none';
+    const cap = document.createElement('span'); cap.className = 'gx-cap'; cap.style.cssText = 'position:relative;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.8)';
+    cap.textContent = edit ? String(e.text||'') : guiTemplate(e.text); el.appendChild(img); el.appendChild(cap);
+    if (!edit) {
+      el.style.transition = 'transform .08s, filter .12s'; el.style.padding = '0';
+      el.addEventListener('pointerenter', () => { el.style.filter = 'brightness(1.12)'; });
+      el.addEventListener('pointerleave', () => { el.style.filter = ''; el.style.transform = ''; });
+      el.addEventListener('pointerdown', () => { el.style.transform = 'scale(.93)'; });
+      el.addEventListener('pointerup', () => { el.style.transform = ''; });
+      el.addEventListener('pointercancel', () => { el.style.transform = ''; });
+    }
+  }
   else if (e.type === 'TextBox') { if (edit) { el.textContent = e.placeholder || 'Caja de texto'; el.style.opacity = '.85'; } }
   else if (e.type !== 'Frame') el.textContent = edit ? String(e.text||'') : guiTemplate(e.text);
   guiApplyStyle(el, e, edit); guiUpdateExtras(el, e);
@@ -7402,7 +7433,7 @@ function buildGameGui(m) {
     box.style.cssText = 'position:absolute;inset:0;pointer-events:none;display:' + (g.visible === false ? 'none' : 'block');
     (g.elements || []).forEach(e => {
       const data = {...e}, el = guiMakeElement(data, false);
-      if (e.type === 'TextButton') el.addEventListener('click', () => guiClick(e.name));
+      if (e.type === 'TextButton' || e.type === 'ImageButton') el.addEventListener('click', () => guiClick(e.name));
       if (e.type === 'TextBox') el.addEventListener('keydown', ev => { if (ev.key === 'Enter') { dispatchScriptEvent('gui:'+e.name+':submit', [el.value]); } ev.stopPropagation(); });
       box.appendChild(el); gGuiMap[e.name] = {el, data, gui:g.name};
     });
@@ -7434,7 +7465,7 @@ function guiSet(name, prop, value) {
   else if (prop === 'value') d.value = Number(value) || 0;
   else if (['text','placeholder','image'].includes(prop)) d[prop] = String(value == null ? '' : value).slice(0, prop === 'image' ? 400000 : 300);
   else return;
-  if (prop === 'text') { if (d.type === 'TextBox') item.el.value = d.text; else if (d.type === 'TextLabel' || d.type === 'TextButton') item.el.textContent = guiTemplate(d.text); }
+  if (prop === 'text') { if (d.type === 'TextBox') item.el.value = d.text; else if (d.type === 'TextLabel' || d.type === 'TextButton') item.el.textContent = guiTemplate(d.text); else if (d.type === 'ImageButton') { const cap = item.el.querySelector('.gx-cap'); if (cap) cap.textContent = guiTemplate(d.text); } }
   if (prop === 'placeholder' && d.type === 'TextBox') item.el.placeholder = d.placeholder;
   guiApplyStyle(item.el, d, false); guiUpdateExtras(item.el, d);
 }
@@ -7443,6 +7474,7 @@ function guiRefreshBindings() {
     const d = item.data;
     if (d.type === 'ProgressBar') { if (d.bind === 'health') d.value = gState.maxHealth ? gState.health / gState.maxHealth : 0; guiUpdateExtras(item.el, d); }
     else if ((d.type === 'TextLabel' || d.type === 'TextButton') && String(d.text||'').includes('{')) item.el.textContent = guiTemplate(d.text);
+    else if (d.type === 'ImageButton' && String(d.text||'').includes('{')) { const cap = item.el.querySelector('.gx-cap'); if (cap) cap.textContent = guiTemplate(d.text); }
   }
 }
 setInterval(() => { if (_screenActive('s-game')) guiRefreshBindings(); }, 1000);
@@ -7565,15 +7597,16 @@ function guiEdRenderProps() {
   let h = '<div class="panel-hd">'+(GUI_TYPES[e.type]||e.type).toUpperCase()+'</div>';
   h += row('Nombre (para scripts)', txt('name', e.name));
   if (['TextLabel','TextButton'].includes(e.type)) h += row('Texto', txt('text', e.text));
+  if (e.type === 'ImageButton') h += row('Texto encima (opcional)', txt('text', e.text));
   if (e.type === 'TextBox') h += row('Texto de ayuda', txt('placeholder', e.placeholder));
   if (e.type === 'ProgressBar') h += row('Texto (opcional)', txt('text', e.text, 'Ej: Vida {health}')) + row('Valor inicial (0 a 1)', numI('value', e.value, 0.05, 0, 1)) + row('Enlace', '<select class="prop-inp" onchange="guiEdSet(\'bind\',this.value)"><option value="none" '+(e.bind!=='health'?'selected':'')+'>Ninguno (lo controla un script)</option><option value="health" '+(e.bind==='health'?'selected':'')+'>❤ Vida del jugador</option></select>');
   h += row('Posición X / Y (%)', '<div style="display:flex;gap:4px">'+numI('x',e.x,0.5)+numI('y',e.y,0.5)+'</div>');
   h += row('Tamaño ancho / alto (%)', '<div style="display:flex;gap:4px">'+numI('w',e.w,0.5,0.5)+numI('h',e.h,0.5,0.5)+'</div>');
-  if (['TextLabel','TextButton','TextBox'].includes(e.type)) h += row('Tamaño de letra', numI('fontSize', e.fontSize, 1, 6, 120)) + row('Alineación', '<select class="prop-inp" onchange="guiEdSet(\'align\',this.value)">'+['left','center','right'].map(a => '<option value="'+a+'" '+((e.align||'center')===a?'selected':'')+'>'+({left:'Izquierda',center:'Centro',right:'Derecha'})[a]+'</option>').join('')+'</select>');
+  if (['TextLabel','TextButton','ImageButton','TextBox'].includes(e.type)) h += row('Tamaño de letra', numI('fontSize', e.fontSize, 1, 6, 120)) + row('Alineación', '<select class="prop-inp" onchange="guiEdSet(\'align\',this.value)">'+['left','center','right'].map(a => '<option value="'+a+'" '+((e.align||'center')===a?'selected':'')+'>'+({left:'Izquierda',center:'Centro',right:'Derecha'})[a]+'</option>').join('')+'</select>');
   if (e.type !== 'ImageLabel') h += row(e.type==='ProgressBar'?'Color de la barra':'Color del texto', col('color', e.color));
   h += row(e.type==='ProgressBar'?'Fondo de la barra':'Fondo', col('bg', e.bg)) + row('Opacidad del fondo (%)', numI('opacity', e.opacity, 5, 0, 100)) + row('Bordes redondeados (px)', numI('radius', e.radius, 1, 0, 200)) + row('Borde (px) / color', '<div style="display:flex;gap:4px">'+numI('border',e.border||0,1,0,20)+col('borderColor',e.borderColor||'#3a3f55')+'</div>');
-  if (e.type === 'ImageLabel') h += row('Imagen', '<button class="st-btn" style="width:100%" onclick="document.getElementById(\'gui-img-file\').click()">'+(e.image?'Cambiar imagen':'Elegir imagen')+'</button>');
-  if (e.type === 'TextButton') {
+  if (e.type === 'ImageLabel' || e.type === 'ImageButton') h += row('Imagen', '<button class="st-btn" style="width:100%" onclick="document.getElementById(\'gui-img-file\').click()">'+(e.image?'Cambiar imagen':'Elegir imagen')+'</button>');
+  if (e.type === 'TextButton' || e.type === 'ImageButton') {
     const a = e.action || {type:'none',target:''}, opts = [['none','Nada (solo script)'],['toggleGui','Mostrar/ocultar pantalla'],['showGui','Mostrar pantalla'],['hideGui','Ocultar pantalla'],['teleport','Teletransportar a pieza'],['respawn','Reaparecer'],['message','Mostrar mensaje'],['exit','Salir del juego']];
     h += row('Al tocar', '<select class="prop-inp" onchange="guiEdSet(\'action.type\',this.value)">'+opts.map(o => '<option value="'+o[0]+'" '+(a.type===o[0]?'selected':'')+'>'+o[1]+'</option>').join('')+'</select>');
     if (['toggleGui','showGui','hideGui','teleport','message'].includes(a.type)) h += row({toggleGui:'Nombre de la pantalla',showGui:'Nombre de la pantalla',hideGui:'Nombre de la pantalla',teleport:'Nombre de la pieza',message:'Mensaje'}[a.type], txt('action.target', a.target));
@@ -9490,7 +9523,7 @@ function aiGuiFields(e, s) {
   if (['left', 'center', 'right'].includes(s.align)) e.align = s.align;
   if (['none', 'health'].includes(s.bind)) e.bind = s.bind;
   if (typeof s.visible === 'boolean') e.visible = s.visible;
-  if (s.action && typeof s.action === 'object' && e.type === 'TextButton') e.action = { type: AI_GUI_ACTIONS.includes(s.action.type) ? s.action.type : 'none', target: String(s.action.target || '').slice(0, 80) };
+  if (s.action && typeof s.action === 'object' && (e.type === 'TextButton' || e.type === 'ImageButton')) e.action = { type: AI_GUI_ACTIONS.includes(s.action.type) ? s.action.type : 'none', target: String(s.action.target || '').slice(0, 80) };
 }
 function aiSetGui(o) {
   if (!o || typeof o !== 'object') throw new Error('JSON inválido');
