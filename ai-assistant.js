@@ -14,7 +14,7 @@
 //   CRIX_AI_THINKING    1 = deja que Qwen "piense" antes de responder (más lento). Por defecto apagado.
 //   CRIX_AI_MAX_TOKENS  tope de tokens de respuesta (por defecto 3500)
 //   CRIX_AI_TIMEOUT_MS  tiempo máximo por pedido (por defecto 180000)
-//   CRIX_AI_RPM         pedidos por minuto y persona (por defecto 12)
+//   Sin límite de pedidos por minuto: cada persona puede usarlo cuanto quiera.
 //   El asistente está disponible para TODAS las cuentas con sesión iniciada (ya no hay modo solo-admin).
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -111,17 +111,9 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
     thinking: /^(1|true|yes|si)$/i.test(String(process.env.CRIX_AI_THINKING || '')),
     maxTokens: Math.max(256, Math.min(16000, Number(process.env.CRIX_AI_MAX_TOKENS) || 3500)),
     timeout: Math.max(10000, Math.min(600000, Number(process.env.CRIX_AI_TIMEOUT_MS) || 180000)),
-    rpm: Math.max(1, Math.min(600, Number(process.env.CRIX_AI_RPM) || 12)),
   });
 
-  const hits = new Map();      // userId -> [timestamps]
-  const busy = new Set();      // userId con un pedido en curso
-  function rateOk(userId, rpm) {
-    const now = Date.now(), list = (hits.get(userId) || []).filter(t => now - t < 60000);
-    if (list.length >= rpm) { hits.set(userId, list); return false; }
-    list.push(now); hits.set(userId, list); return true;
-  }
-  setInterval(() => { const now = Date.now(); for (const [k, v] of hits) { const l = v.filter(t => now - t < 60000); if (l.length) hits.set(k, l); else hits.delete(k); } }, 120000).unref();
+  const busy = new Set();      // userId con un pedido en curso (evita enviar dos a la vez)
 
   function allowed() { return true; }   // disponible para todas las cuentas
 
@@ -149,7 +141,6 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
     const context = typeof body.context === 'string' ? body.context.slice(0, 60000) : '';
 
     if (busy.has(user.id)) return res.status(429).json({ ok: false, err: 'Todavía estoy respondiendo tu mensaje anterior.' });
-    if (!rateOk(user.id, cfg.rpm)) return res.status(429).json({ ok: false, err: 'Demasiados pedidos seguidos. Esperá un minuto.' });
     busy.add(user.id);
 
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), cfg.timeout);
