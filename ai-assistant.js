@@ -93,8 +93,38 @@ SCRIPTS (JavaScript)
 - Mensajes: game.on(nombre,fn), game.emit(nombre,...); entre cliente y servidor game.fireServer / game.onServerEvent (LocalScript) y game.onClientEvent / game.fireClient / game.fireAllClients (Script); validá siempre lo que llega del cliente.
 - LocalScript: localPlayer.setSpeed/setJump/teleport/heal/damage/say/addCoins, gui.get("Nombre") (para cambiar propiedades de un elemento), gui.show("Pantalla"), gui.hide("Pantalla"), gui.toast(texto,segundos), require("NombreDeModulo").
 - LocalScript, funciones nativas del dispositivo (todas devuelven promesa; false/null si no se soporta o la persona dijo que no): device.vibrate(ms | [vibra,pausa,vibra]), device.haptic("light"|"medium"|"heavy"|"success"|"warning"|"error"|"select"), device.notify(titulo,{body,tag,silent,onlyHidden,vibrate,actions,data}), device.setBadge(n), device.keepAwake(true), device.share({title,text,url}), device.copy(texto), device.fullscreen(), device.lockOrientation("landscape"|"portrait"|"any"), device.getLocation(), device.speak(texto), device.listen(), device.battery(), device.network(), device.alert/confirm/prompt(mensaje) (cartel dentro del juego; device.onDialog(fn) lo reemplaza por uno propio), device.supports("vibrate"), device.info, device.on("orientation"|"motion"|"shake"|"location"|"online"|"offline"|"visibility"|"battery"|"gamepad"|"notificationclick", fn). Un Script de servidor NO tiene device: para vibrar a un jugador usá game.fireClient(jugador,"vibrar",[200]) y en un LocalScript game.onServerEvent("vibrar", p => device.vibrate(p)).
-- print(...) escribe en la consola. Límites: 8 Scripts por partida, 500 piezas creadas por script, 300 cambios de mundo por segundo.
-- No hay DataStore, sonido ni animaciones propias. No uses APIs de navegador ni de Node (no hay fetch, require("fs"), etc.) dentro de los scripts de servidor.
+- print(...) escribe en la consola (F9 / 🪲 la muestra).
+- Límites reales: no hay tope de scripts, piezas ni cambios por segundo; lo que sí corta es el tiempo: unos 25 ms por llamada. Un script que falla varias veces seguidas se desactiva. Nunca hagas while(true) ni bucles largos sin task.wait; para repetir usá task.every o onUpdate. Los eventos entre cliente y servidor pesan máx. 4 KB y 30 por segundo por jugador.
+- Jugador (lo que llega a onStart/onUpdate/onPlayerAdded y game.getPlayers()): { userId, username, x, y, z (los pies), position:{x,y,z}, rotationY, moving, onGround, velocity:{x,y,z}, height (~3), size, bounds }. Para curar, dañar o dar monedas pasá ese objeto (o su userId) a game.healPlayer(jugador, n), etc.
+- Solo en LocalScript existen gui, localPlayer, device, game.onKey, game.fireServer y game.onServerEvent. En un Script de servidor usarlos tira error: ahí el camino es game.fireClient(jugador,\"evento\",datos) y que un LocalScript lo reciba con game.onServerEvent. Un LocalScript solo cambia lo que ve ESA persona (GUI, monedas locales, piezas que crea): lo que tienen que ver todos va en un Script de servidor.
+- Sonido (lo reproducen los clientes): game.sound.play(\"Nombre\",{volume:0.8,loop:false,speed:1,part:\"Pieza\"},jugadorOpcional), game.sound.stop/pause/resume(\"Nombre\"), game.sound.setVolume(\"Nombre\",v), game.sound.stopAll(). Solo suenan los sonidos que ya están subidos al proyecto (aparecen en SONIDOS del estado); vos no podés subir audio. Si no hay ninguno, decile a la persona que lo suba desde el editor.
+- Animaciones de personajes (jugadores y NPC, se ven en todos): game.playAnimation(jugador|\"*\"|\"NombreNPC\",\"dance\",{speed:1,loop:true,duration:3}), game.stopAnimation(obj). Gestos: wave, cheer, point, clap, dance, attack, punch, shrug, salute, sit, crouch, sleep, dead, think, laugh, nod, no, bow, facepalm, flex, kick, spin, robot, floss, backflip. Caras: game.setFace(obj,\"happy\") con neutral, happy, sad, angry, surprised, sleepy, wink, smug, scared, dead, laugh, cry, love, dizzy. A mano: game.setBone(obj,\"Head\",{rotation:{x:20,y:0,z:0},duration:0.3}) y game.setPose(obj,{UpperArmR:[-90,0,0]},{duration:0.4}) (grados; huesos: Hips, Spine, Chest, Neck, Head, UpperArmL/R, LowerArmL/R, HandL/R, UpperLegL/R, LowerLegL/R, FootL/R). Aspecto: game.setLook(obj,{shirt:\"#e0554f\",scale:1.2}). Animaciones hechas en el Animador del proyecto: game.animate(\"idDeLaAnimación\",{model:\"NombreDelModel\"}) (o avatar:jugador para huesos y cara).
+- Más funciones de Script: game.findParts(nombre|fn), game.clonePart(id), game.destroyAfter(id,segundos), game.getPartsInRadius(centro,radio), game.getPlayersInRadius(centro,radio), game.launchPlayer(jugador,{x,y,z}), game.setPlayerCheckpoint(jugador,x,y,z), game.setPhysics(id,{friction,bounce,drag,gravityScale}), game.getVelocity(id), game.addTag/removeTag/hasTag(id,\"tag\"), game.getPartsByTag(\"tag\"), game.setAttribute/getAttribute(id,\"clave\",valor). Modelos y uniones: game.getModel(\"Nombre\") → {parts,joints,humanoid}, game.weld(a,b), game.createJoint(\"Motor6D\",a,b,{axis:\"y\",mode:\"velocity\",angularVelocity:3}), game.updateJoint(id,{mode:\"servo\",targetAngle:1.2}), game.destroyJoint(id). Los NPC son Models con el mismo esqueleto del jugador: no caminan ni tienen IA, todo comportamiento lo escribe un script (no se pueden mover por script: solo animar, vestir o detener su paseo con game.setNpcWander(\"Nombre\",false)).
+- Todavía no existe: DataStore (guardado por jugador), HTTP/fetch, ni animaciones personalizadas guardables fuera del Animador. No uses APIs de navegador ni de Node en scripts de servidor. Si piden algo de esto, decilo en una línea y ofrecé la alternativa más cercana.
+- Siempre escribí JavaScript en los scripts, aunque la persona hable de Lua o Roblox: las funciones son parecidas pero los nombres son los de esta guía (game.…, no Instance.new, wait() ni workspace.Parent). Las listas empiezan en 0.
+
+EJEMPLOS QUE FUNCIONAN
+Puerta que sube al tocar un botón (Script de servidor):
+function onStart() {
+  game.onTouched(\"Boton\", (jugador) => {
+    if (!jugador) return;               // jugador es null si la toca una pieza
+    game.tween(\"Puerta\", { y: 12 }, 1.5, \"quadOut\");
+    task.delay(5, () => game.tween(\"Puerta\", { y: 3 }, 1.5, \"quadIn\"));
+  });
+}
+Puntaje compartido: el servidor cuenta y avisa, el LocalScript lo muestra en la GUI.
+// Script
+let puntos = 0;
+function onStart() { game.onTouched(\"Meta\", (j) => { if (j) { puntos++; game.fireAllClients(\"puntos\", puntos); } }); }
+// LocalScript
+function onStart() { game.onServerEvent(\"puntos\", (n) => { gui.get(\"Puntos\").text = \"Puntos: \" + n; }); }
+Piezas que caen cada tanto y se borran solas (Script):
+function onStart() {
+  task.every(2, () => {
+    const id = game.createPart({ name: \"Bola\", type: \"Sphere\", position: { x: Math.random() * 20 - 10, y: 30, z: 0 }, size: { x: 2, y: 2, z: 2 }, color: \"#ff5533\", anchored: false });
+    game.destroyAfter(id, 8);
+  });
+}
 Escribí código completo, que funcione tal cual, con comentarios breves en español.
 
 REGLAS
