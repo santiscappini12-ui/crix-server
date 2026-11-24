@@ -1028,7 +1028,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
+const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
@@ -1292,7 +1292,7 @@ const ACC_ID_PARAM = /^ac_[a-z0-9]{6,24}$/;
 const ACC_PER_USER = 40, ACC_MODELS_PER_USER = 5;
 const ACC_MODEL_MAX = Math.round((Number(process.env.CRIX_MAX_ACC_MODEL_MB) || 1.5) * 1048576);
 const accModelPath = id => path.join(persist.ACC_DIR, id + '.glb');
-const accView = a => ({ id:a.id, name:a.name, authorId:a.authorId, authorName:a.authorName, scope:a.scope, parts:a.parts, hasModel:!!a.hasModel, createdAt:a.createdAt, updatedAt:a.updatedAt });
+const accView = a => ({ id:a.id, name:a.name, authorId:a.authorId, authorName:a.authorName, scope:a.scope, parts:a.parts, hasModel:!!a.hasModel, allowDownload:a.allowDownload === true, createdAt:a.createdAt, updatedAt:a.updatedAt });
 // Un .glb válido y autocontenido: sin enlaces externos (evita rastreo/filtrado de IP) ni extensiones que el visor no soporta (Draco, KTX…).
 function validateGlb(buf) {
   if (!buf || buf.length < 24) return 'El archivo del modelo está vacío';
@@ -1325,6 +1325,13 @@ app.get('/api/accessories/:id/model', async (req, res) => {
   res.set({ 'Content-Type':'model/gltf-binary', 'X-Content-Type-Options':'nosniff', 'Cache-Control':'no-cache' });
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
+app.get('/api/accessories/:id/offline-pack', (req, res) => {
+  const a = ACC_ID_PARAM.test(req.params.id) && DB.accessories && DB.accessories[req.params.id], viewer = readSession(req) || userFromToken(req.query.t);
+  if (!a) return res.status(404).json({ ok:false, err:'Accesorio no encontrado' });
+  if (!(a.scope === 'public' || (viewer && (viewer.id === a.authorId || viewer.isAdmin)))) return res.status(404).json({ ok:false, err:'Accesorio no encontrado' });
+  if (!mayDownload(a, viewer)) return res.status(403).json({ ok:false, code:'DOWNLOAD_NOT_ALLOWED', err:'Su creador no permitió descargar esta creación' });
+  res.json({ ok:true, accessory:accView(a), modelUrl:a.hasModel ? `/api/accessories/${encodeURIComponent(a.id)}/model` : null });
+});
 app.post('/api/accessories', requireAuth, async (req, res) => {
   try {
     const b = req.body || {}, def = CrixAvatar.sanitizeAccessoryDef(b);
@@ -1352,7 +1359,7 @@ app.post('/api/accessories', requireAuth, async (req, res) => {
       await settleUpload(persist.putFile(`accessories/${id}.glb`, accModelPath(id)));
     } else if (!keepsModel && rec && rec.hasModel) { try { fs.rmSync(accModelPath(id), { force:true }); } catch {} persist.delKey(`accessories/${id}.glb`); }
     const next = { id, name:def.name, authorId:rec ? rec.authorId : req.user.id, authorName:rec ? rec.authorName : req.user.username, scope:b.scope === 'public' ? 'public' : 'private',
-      parts:def.parts, hasModel:keepsModel && (!!buf || !!(rec && rec.hasModel)), createdAt:rec ? rec.createdAt : now, updatedAt:now };
+      parts:def.parts, hasModel:keepsModel && (!!buf || !!(rec && rec.hasModel)), allowDownload:b.allowDownload === undefined ? !!(rec && rec.allowDownload) : b.allowDownload === true, createdAt:rec ? rec.createdAt : now, updatedAt:now };
     DB.accessories[id] = next; saveDB();
     if (rec) io.emit('accessory_updated', { id });
     res.json({ ok:true, accessory:accView(next) });
@@ -1949,6 +1956,33 @@ app.get('/api/maps/:id', (req, res) => {
   if (!canEnterAdult(m, viewer)) return ageRequired(res);
   res.json({ ok:true, map: publicMapRecord(m) });
 });
+// ── Descarga para usar sin conexión (PWA) ──
+// Solo se entrega si el creador la permitió (allowDownload). El creador, su equipo y los admins siempre pueden bajar el suyo.
+// Devuelve el juego completo y la lista de archivos (texturas y sonidos) para que el cliente los guarde en el dispositivo.
+function mayDownload(item, user) {
+  if (!item) return false;
+  if (user && (user.isAdmin || item.authorId === user.id || (Array.isArray(item.collaborators) && item.collaborators.includes(user.id)))) return true;
+  return item.allowDownload === true;
+}
+// El cliente pregunta por lo que tiene descargado: 'ok' (sigue permitido), 'revoked' (el creador retiró el permiso) o 'gone' (se borró o dejó de ser visible).
+// Así una copia se elimina del dispositivo cuando su creador lo decide, sin depender del catálogo local.
+app.get('/api/offline/check', requireAuth, (req, res) => {
+  const list = key => String(req.query[key] || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 100), status = {}, user = req.user;
+  for (const id of list('maps')) { const m = DB.maps[id]; status['map:' + id] = (!m || !canReadMap(m, user)) ? 'gone' : (!mayDownload(m, user) ? 'revoked' : 'ok'); }
+  for (const id of list('videos')) { const v = (DB.videos || []).find(x => x.id === id); status['video:' + id] = (!v || !canReadVideo(v, user)) ? 'gone' : (!mayDownload(v, user) ? 'revoked' : 'ok'); }
+  for (const id of list('accessories')) { const a = ACC_ID_PARAM.test(id) && DB.accessories && DB.accessories[id]; status['accessory:' + id] = (!a || !(a.scope === 'public' || a.authorId === user.id || user.isAdmin)) ? 'gone' : (!mayDownload(a, user) ? 'revoked' : 'ok'); }
+  res.json({ ok:true, status });
+});
+app.get('/api/maps/:id/offline-pack', (req, res) => {
+  const m = DB.maps[req.params.id], viewer = readSession(req) || userFromToken(req.query.t);
+  if (!m || !canReadMap(m, viewer)) return res.status(404).json({ ok:false, err:'Juego no encontrado' });
+  if (!canEnterAdult(m, viewer)) return ageRequired(res);
+  if (!mayDownload(m, viewer)) return res.status(403).json({ ok:false, code:'DOWNLOAD_NOT_ALLOWED', err:'Su creador no permitió descargar esta creación' });
+  const id = encodeURIComponent(m.id);
+  const textures = (m.textureIds || []).filter(t => TEX_ID_RE.test(t)).map(t => ({ id:t, url:`/api/maps/${id}/textures/${encodeURIComponent(t)}` }));
+  const sounds = Object.entries(m.sounds || {}).filter(([sid]) => SND_ID_RE.test(sid)).map(([sid, meta]) => ({ id:sid, size:Number(meta && meta.size) || 0, url:`/api/maps/${id}/sounds/${encodeURIComponent(sid)}` }));
+  res.json({ ok:true, map:publicMapRecord(m), textures, sounds });
+});
 // Miniatura como imagen real (solo juegos públicos): así el catálogo no lleva cientos de KB en base64 por juego.
 app.get('/api/maps/:id/thumb', (req, res) => {
   const m = DB.maps[req.params.id];
@@ -2137,6 +2171,7 @@ app.post('/api/maps', (req, res) => {
     const next = { ...body, assetsId: old?.assetsId, likedBy:old?.likedBy || m.likedBy || [], plays:old?.plays ?? m.plays ?? 0, likes:old?.likes ?? m.likes ?? 0, authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, textureIds: old?.textureIds || [], sounds: old?.sounds || {}, collaborators: old?.collaborators || [], comments: old?.comments || [] };
     // En una sesión de equipo activa, las partes/scripts/luces ya llegan por cambios en vivo: un guardado completo no las pisa.
     if (old && teamInSession(m.id, user.id)) for (const k of TEAM_PROTECTED) if (old[k] !== undefined) next[k] = old[k];
+    next.allowDownload = isOwner && m.allowDownload !== undefined ? m.allowDownload === true : old?.allowDownload === true;   // permiso de descarga sin conexión: solo lo decide el dueño
     if (okIconData(m.icon)) next.icon = m.icon; else if (okIconData(old?.icon)) next.icon = old.icon; else delete next.icon;
     delete next.hasIcon;
     delete next.unrated; delete next.classification;
@@ -2469,6 +2504,14 @@ app.get('/api/videos/:id/stream', async (req, res) => {
   res.sendFile(file, { acceptRanges: true, dotfiles: 'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 
+// Permiso de descarga de un video para verlo sin conexión (el archivo se baja luego por /stream).
+app.get('/api/videos/:id/offline-pack', async (req, res) => {
+  const v = await findVideoReady(req.params.id), viewer = readSession(req) || userFromToken(req.query.t);
+  if (!v || !canReadVideo(v, viewer)) return res.status(404).json({ ok:false, err:'Video no encontrado' });
+  if (!canEnterAdult(v, viewer)) return ageRequired(res);
+  if (!mayDownload(v, viewer)) return res.status(403).json({ ok:false, code:'DOWNLOAD_NOT_ALLOWED', err:'Su creador no permitió descargar esta creación' });
+  res.json({ ok:true, video:publicVideo(v), url:`/api/videos/${encodeURIComponent(v.id)}/stream`, size:Number(v.size) || 0 });
+});
 // Un admin corrige el nivel de la miniatura de un juego.
 app.post('/api/admin/maps/:id/thumb-level', requireAuth, requireAdmin, (req, res) => {
   const m = DB.maps[req.params.id];
@@ -2519,7 +2562,7 @@ app.post('/api/videos', async (req, res) => {
       return res.status(422).json({ ok:false, code:'THUMB_CONFLICT', err:`Una miniatura con ese contenido solo puede acompañar a videos clasificados ${THUMB_MIN_AGE[thumbLevel]}+. Cambiá la miniatura o la clasificación del video.` });
     const saved = {
       ...(old || {}), thumbLevel, id:String(v.id), title:String(v.title).slice(0,120), desc:String(v.desc || '').slice(0,2000), cat:String(v.cat || 'otros').slice(0,30),
-      authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb, ...(cls ? { classification: cls } : {}),
+      authorId: old?.authorId || user.id, authorName: old?.authorName || user.username, privacy, thumb, allowDownload: v.allowDownload === undefined ? old?.allowDownload === true : v.allowDownload === true, ...(cls ? { classification: cls } : {}),
       views: old?.views || 0, likes: old?.likes || [], comments: old?.comments || [], created: old?.created || v.created || new Date().toISOString()
     };
     const wasReady = !!old?.ready;

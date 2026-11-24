@@ -783,6 +783,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
   <div class="field-grp"><label class="field-lbl">Descripción</label><textarea class="inp" id="uv-desc" style="height:60px;resize:none" placeholder="De qué trata..."></textarea></div>
   <div class="field-grp"><label class="field-lbl">Categoría</label><select class="inp" id="uv-cat"><option value="gaming">🎮 Gaming</option><option value="tutorial">📚 Tutorial</option><option value="music">🎵 Música</option><option value="art">🎨 Arte</option><option value="other">🌐 Otro</option></select></div>
   <div class="field-grp"><label class="field-lbl">Visibilidad</label><select class="inp" id="uv-privacy"><option value="public">🌍 Público: visible para todos</option><option value="private">🔒 Privado: solo yo</option></select></div>
+  <div class="field-grp"><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:13px"><input type="checkbox" id="uv-allow-dl" style="margin-top:3px"><span>📥 Permitir que otras personas lo descarguen para usarlo sin conexión<br><span class="set-note" style="margin:0">Se guarda en su dispositivo y se abre sin internet. Podés quitar el permiso cuando quieras: las copias se borran solas cuando vuelvan a tener conexión.</span></span></label></div>
   <div class="field-grp"><label class="field-lbl">Archivo de video</label><label class="upload-zone" style="padding:12px">📹 Seleccioná un video<input type="file" id="uv-file" accept="video/*" style="display:none" onchange="previewVideoUpload(event)"></label><video id="uv-preview" style="display:none;width:100%;border-radius:8px;margin-top:8px;max-height:180px" controls></video></div>
   <div class="field-grp"><label class="field-lbl">Miniatura (opcional)</label><label class="upload-zone" style="padding:12px">🖼️ Subir una miniatura propia (puede ser cualquier imagen)<input type="file" id="uv-thumb-file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="previewVideoThumb(event)"></label><img id="uv-thumb-preview" style="display:none;width:100%;border-radius:8px;margin-top:8px;max-height:140px;object-fit:cover"><button type="button" class="btn btn-g" id="uv-thumb-clear" style="display:none;font-size:11px;margin-top:6px" onclick="clearVideoThumb()">Quitar miniatura propia</button></div>
   <div class="field-grp"><label class="field-lbl">¿Qué muestra la miniatura?</label><select class="inp" id="uv-thumb-level"><option value="0">Nada sensible</option><option value="1">Desnudez parcial (requiere video 16+)</option><option value="2">Humor tabú en caricatura: parte íntima suelta, o personaje/objeto con esa forma, p. ej. una cabeza (requiere video 16+)</option><option value="3">Genitales descubiertos en un cuerpo o personaje (requiere video 18+)</option></select><div style="font-size:11px;color:var(--text3);margin-top:4px">La miniatura se ve en el catálogo aunque nadie entre al video, por eso se declara aparte. Si solo es un personaje u objeto con esa forma (p. ej. la cabeza de un personaje), en caricatura, sigue siendo humor tabú: no es +18 explícito y no se difumina. Si muestra genitales descubiertos en un cuerpo o personaje, se difumina por defecto y quien no tenga +18 verificado no la ve (quien sí lo tenga puede desactivar el difuminado). Declarar de menos puede llevar a que un admin la oculte o la quite.</div></div>
@@ -1111,6 +1112,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
     <label class="field-lbl">Jugadores asignados (separados por coma)</label>
     <input class="inp" id="pub-assigned" placeholder="usuario1, usuario2...">
   </div>
+  <div class="field-grp"><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:13px"><input type="checkbox" id="pub-allow-dl" style="margin-top:3px"><span>📥 Permitir que otras personas lo descarguen para usarlo sin conexión<br><span class="set-note" style="margin:0">Se guarda en su dispositivo y se abre sin internet. Podés quitar el permiso cuando quieras: las copias se borran solas cuando vuelvan a tener conexión.</span></span></label></div>
   <div class="field-grp">
     <label class="field-lbl">Miniatura (opcional)</label>
     <div style="display:flex;align-items:center;gap:8px">
@@ -2638,6 +2640,7 @@ async function restoreSession() {
     // Servidor reiniciando o sin conexión: NO se cierra la sesión; se entra con los datos locales y se reintenta solo.
     if (!ME) { showAuthScreen(); return; }
     showToast('No se pudo conectar con el servidor. Reintentando…', 4000);
+    try { if (window.CrixOffline) await CrixOffline.mergeIntoCatalog(); } catch (_) {}
     bootApp(); syncCloudData();
     return;
   }
@@ -2717,10 +2720,12 @@ async function syncCloudData() {
     DB.set('users', users); DB.set('maps', maps); DB.set('crix_videos', videos); DB.set('crix_posts', posts);
     ME = users[ownProfile.id];
     CLOUD_READY = true; _syncRetry = 0;
+    try { if (window.CrixOffline) CrixOffline.reconcile(); } catch (_) {}   // si un creador retiró el permiso de descarga, la copia se borra
     checkNotifs();
     if (document.getElementById('s-home')?.classList.contains('active')) renderHome();
   } catch (err) {
     console.warn('[CLOUD] No se pudieron sincronizar los datos:', err.message);
+    try { if (window.CrixOffline) CrixOffline.mergeIntoCatalog().then(n => { if (n && document.getElementById('s-home')?.classList.contains('active')) renderHome(); }); } catch (_) {}
     // Antes quedaba trabado para siempre con el catálogo viejo: ahora se reintenta solo.
     if (ME && DB.get('token')) { const wait = Math.min(30000, 4000 * ++_syncRetry); setTimeout(() => { if (!CLOUD_READY && ME && DB.get('token')) syncCloudData(); }, wait); }
   } finally { _syncBusy = false; }
@@ -3199,7 +3204,11 @@ async function accLoadList() {
       try { extra.push((await apiRequest('/api/accessories/' + id)).accessory); } catch (_) { extra.push({ id, name: 'Ya no está disponible', gone: true, scope: 'private', authorName: '' }); }
     }));
     avEd.accs = { mine: r.mine, pub: r.pub, extra, loading: false };
-  } catch (e) { avEd.accs = { mine: [], pub: [], extra: [], loading: false, err: e.message }; }
+  } catch (e) {
+    // Sin conexión: se ofrecen los accesorios que se descargaron.
+    let saved = []; try { saved = window.CrixOffline ? await CrixOffline.cachedAccessories() : []; } catch (_) {}
+    avEd.accs = { mine: [], pub: saved, extra: [], loading: false, err: saved.length ? '' : e.message };
+  }
   if (avEd.view !== 'creator') avatarEditorUI();
 }
 function accListHTML() {
@@ -3213,6 +3222,7 @@ function accListHTML() {
       <div style="flex:1;min-width:0"><div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name)}</div>
       <div class="set-note" style="margin:0">${a.gone ? '' : (a.scope === 'public' ? '🌍 Para todos' : '🔒 Solo yo') + (a.hasModel ? ' · 3D' : '') + (mine ? '' : ' · ' + esc(a.authorName || ''))}</div></div>
       ${a.gone && !on ? '' : `<button class="btn ${on ? 'btn-p' : 'btn-g'}" style="${accBtn}" onclick="accToggle('${a.id}')">${on ? (a.gone ? 'Quitar' : 'Puesto ✓') : 'Poner'}</button>`}
+      ${!a.gone && window.CrixOffline ? CrixOffline.button('accessory', a, accBtn).replace(/>[^<]*<\/button>$/, '>' + (CrixOffline.has('accessory', a.id) ? '✅' : '📥') + '</button>') : ''}
       ${mine && !a.gone ? `<button class="btn btn-g" style="${accBtn}" title="Editar" onclick="accEdit('${a.id}')">✏️</button>` : ''}
       ${canDel ? `<button class="btn btn-g" style="${accBtn}" title="Borrar" onclick="accDelete('${a.id}')">🗑</button>` : ''}</div>`;
   };
@@ -3244,12 +3254,12 @@ function accCam(mode) {
 }
 function accCreate() {
   avEd.view = 'creator'; avEd.mode = 'idle'; CrixAvatar.stopAnimation(avEd.av);
-  avEd.draft = { id: null, name: '', scope: 'private', parts: [], sel: -1, lock: false, modelObj: null, modelB64: null, modelName: '', busy: false };
+  avEd.draft = { id: null, name: '', scope: 'private', allowDownload: false, parts: [], sel: -1, lock: false, modelObj: null, modelB64: null, modelName: '', busy: false };
   accAddShape('box');
 }
 async function accEdit(id) {
   const a = (avEd.accs.mine || []).find(x => x.id === id); if (!a) return;
-  const d = { id, name: a.name, scope: a.scope, parts: JSON.parse(JSON.stringify(a.parts)), sel: 0, lock: false, modelObj: null, modelB64: null, modelName: a.hasModel ? 'modelo guardado' : '', busy: false };
+  const d = { id, name: a.name, scope: a.scope, allowDownload: a.allowDownload === true, parts: JSON.parse(JSON.stringify(a.parts)), sel: 0, lock: false, modelObj: null, modelB64: null, modelName: a.hasModel ? 'modelo guardado' : '', busy: false };
   avEd.view = 'creator'; avEd.mode = 'idle'; CrixAvatar.stopAnimation(avEd.av); avEd.draft = d; avatarEditorUI(); accPreview();
   if (a.hasModel) {
     try { const r = await fetch('/api/accessories/' + id + '/model'); if (r.ok) { d.modelObj = await CrixAvatar.parseGlb(await r.arrayBuffer()); if (avEd.draft === d) accPreview(); } } catch (_) {}
@@ -3326,6 +3336,7 @@ function accCreatorHTML() {
     + `<label style="display:flex;gap:6px;cursor:pointer"><input type="radio" name="acc-scope" ${d.scope === 'private' ? 'checked' : ''} onchange="avEd.draft.scope='private'"> 🔒 Solo para mí</label>`
     + `<label style="display:flex;gap:6px;cursor:pointer"><input type="radio" name="acc-scope" ${d.scope === 'public' ? 'checked' : ''} onchange="avEd.draft.scope='public'"> 🌍 Para todos (aparece en el catálogo)</label>`
     + '<div class="set-note" style="margin:0">Los demás siempre ven tu accesorio puesto en tu avatar; «solo para mí» significa que no pueden elegirlo para ellos.</div>'
+    + (window.CrixOffline ? CrixOffline.allowCheckboxHtml('acc-allow-dl', d.allowDownload).replace('<input type="checkbox"', '<input type="checkbox" onchange="avEd.draft.allowDownload=this.checked"') : '')
     + `<button class="btn btn-p" ${d.busy ? 'disabled' : ''} onclick="accSave()">${d.busy ? 'Subiendo…' : (d.id ? '💾 Guardar cambios' : '⬆️ Subir accesorio')}</button>`;
   return h;
 }
@@ -3336,7 +3347,7 @@ async function accSave() {
   if (def.parts.some(p => p.shape === 'model') && !d.modelObj && !d.id) { showToast('Falta importar el modelo'); return; }
   d.busy = true; avatarEditorUI();
   try {
-    const body = { name, scope: d.scope, parts: def.parts }; if (d.id) body.id = d.id; if (d.modelB64) body.model = d.modelB64;
+    const body = { name, scope: d.scope, allowDownload: !!d.allowDownload, parts: def.parts }; if (d.id) body.id = d.id; if (d.modelB64) body.model = d.modelB64;
     const a = (await apiRequest('/api/accessories', { method: 'POST', body })).accessory;
     if (d.id) CrixAvatar.refreshAccessory(a.id);
     else { const eq = (avEd.look.equip || []).slice(); if (eq.length < CrixAvatar.MAX_EQUIPPED) eq.push(a.id); avEd.look.equip = eq; }   // el recién creado queda puesto
@@ -3915,7 +3926,7 @@ function previewIcon(e) {
   };
   r.readAsDataURL(f);
 }
-function openPublish(mapId) { pubMapId = mapId || stMapId; if (!mapId && !(getMaps()[pubMapId] || {}).isHtmlGame) stuSave(); const m = getMaps()[pubMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; const pg = document.getElementById('pub-genre'); if (pg && m.genre) pg.value = m.genre; const pp = document.getElementById('pub-privacy'); if (pp) { pp.value = m.privacy || 'public'; const w = document.getElementById('pub-assigned-wrap'); if (w) w.style.display = pp.value === 'assigned' ? '' : 'none'; const pa = document.getElementById('pub-assigned'); if (pa) pa.value = (m.assignedPlayers || []).join(', '); } } pubThumbData = null; pubIconData = null; { const tl = document.getElementById('pub-thumb-level'); if (tl) tl.value = String((m && Number(m.thumbLevel)) || 0); } pubClass = (m && m.classification) || null; pubClsRefresh(); document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; const hasIc = !!(m && (m.icon || m.hasIcon)); document.getElementById('pub-icon-name').textContent = hasIc ? 'Ícono actual (elegí otro para cambiarlo)' : 'Se usa la miniatura'; const ipv = document.getElementById('pub-icon-preview'); if (hasIc) { ipv.src = m.icon || ('/juego/' + encodeURIComponent(m.id) + '/icon.png?t=' + Date.now()); ipv.style.display = 'block'; } else ipv.style.display = 'none'; openModal('mo-publish'); }
+function openPublish(mapId) { pubMapId = mapId || stMapId; if (!mapId && !(getMaps()[pubMapId] || {}).isHtmlGame) stuSave(); const m = getMaps()[pubMapId]; if (m) { document.getElementById('pub-name').value = m.name; document.getElementById('pub-desc').value = m.desc||''; const pg = document.getElementById('pub-genre'); if (pg && m.genre) pg.value = m.genre; const pp = document.getElementById('pub-privacy'); if (pp) { pp.value = m.privacy || 'public'; const w = document.getElementById('pub-assigned-wrap'); if (w) w.style.display = pp.value === 'assigned' ? '' : 'none'; const pa = document.getElementById('pub-assigned'); if (pa) pa.value = (m.assignedPlayers || []).join(', '); } } { const ad = document.getElementById('pub-allow-dl'); if (ad) ad.checked = !!(m && m.allowDownload === true); } pubThumbData = null; pubIconData = null; { const tl = document.getElementById('pub-thumb-level'); if (tl) tl.value = String((m && Number(m.thumbLevel)) || 0); } pubClass = (m && m.classification) || null; pubClsRefresh(); document.getElementById('pub-thumb-name').textContent = 'Ninguna'; document.getElementById('pub-thumb-preview').style.display = 'none'; const hasIc = !!(m && (m.icon || m.hasIcon)); document.getElementById('pub-icon-name').textContent = hasIc ? 'Ícono actual (elegí otro para cambiarlo)' : 'Se usa la miniatura'; const ipv = document.getElementById('pub-icon-preview'); if (hasIc) { ipv.src = m.icon || ('/juego/' + encodeURIComponent(m.id) + '/icon.png?t=' + Date.now()); ipv.style.display = 'block'; } else ipv.style.display = 'none'; openModal('mo-publish'); }
 function previewThumb(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { pubThumbData = ev.target.result; document.getElementById('pub-thumb-name').textContent = f.name; const canvas = document.getElementById('pub-thumb-preview'); const img = new Image(); img.onload = () => { canvas.style.display='block'; canvas.getContext('2d').drawImage(img,0,0,canvas.width=canvas.clientWidth,canvas.height=canvas.clientWidth*9/16); }; img.src = pubThumbData; }; r.readAsDataURL(f); }
 async function confirmPublish() {
   const name = document.getElementById('pub-name').value.trim();
@@ -3929,6 +3940,7 @@ async function confirmPublish() {
   m.classification = pubClass;
   m.name = name; m.desc = desc; m.genre = genre;
   m.privacy = privacy;
+  m.allowDownload = !!(document.getElementById('pub-allow-dl') || {}).checked;
   m.assignedPlayers = privacy === 'assigned' ? assignedRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
   m.authorId = ME.id; m.authorName = ME.username;
   if (pubThumbData) m.thumb = pubThumbData;
@@ -5703,6 +5715,7 @@ async function openVideoPlayer(vid) {
     authAv(v.authorId, v.authorName, 38) +
     '<div style="flex:1"><div style="font-weight:700">' + esc(v.authorName) + '</div></div>' +
     (ME && v.authorId === ME.id ? '<button class="btn btn-g" onclick="openEditVideo(\'' + v.id + '\')">✏️ Editar datos</button>' : '') +
+    (window.CrixOffline ? CrixOffline.button('video', v) : '') +
     '<button class="btn btn-g" onclick="crixShare(\'video\',\'' + v.id + '\')">🔗 Compartir</button>' +
     '<button class="btn ' + (liked?'btn-red':'btn-g') + '" id="vp-like-btn" onclick="toggleVideoLike(\'' + v.id + '\')" >❤️ ' + (v.likes||[]).length + '</button>' +
     '</div>' +
@@ -5800,6 +5813,7 @@ function openEditVideo(id) {
   document.getElementById('uv-desc').value = v.desc || '';
   const cat = document.getElementById('uv-cat'); if (cat) cat.value = [...cat.options].some(o => o.value === v.cat) ? v.cat : 'other';
   document.getElementById('uv-privacy').value = v.privacy === 'private' ? 'private' : 'public';
+  document.getElementById('uv-allow-dl').checked = v.allowDownload === true;
   document.getElementById('uv-thumb-level').value = String(Number(v.thumbLevel) || 0);
   const pv = document.getElementById('uv-preview'); if (pv) pv.style.display = 'none';
   openModal('mo-upload-video');
@@ -5812,14 +5826,14 @@ async function confirmEditVideo() {
   if (!cls) { cls = await classifyMedia('video', null); if (!cls) { showToast(clsT('needBefore')); return; } }
   const thumbLevel = (_uvThumbCustom || v.thumb) ? (parseInt(document.getElementById('uv-thumb-level').value, 10) || 0) : 0;
   if (Number(cls.age || 0) < THUMB_MIN_AGE[thumbLevel]) { showToast('Esa miniatura solo puede acompañar a videos ' + THUMB_MIN_AGE[thumbLevel] + '+. Cambiá la miniatura o la clasificación.'); return; }
-  const body = { id, title, desc: document.getElementById('uv-desc').value.trim(), cat: document.getElementById('uv-cat').value, privacy: document.getElementById('uv-privacy').value, thumbLevel };
+  const body = { id, title, desc: document.getElementById('uv-desc').value.trim(), cat: document.getElementById('uv-cat').value, privacy: document.getElementById('uv-privacy').value, thumbLevel, allowDownload: document.getElementById('uv-allow-dl').checked };
   if (_uvThumbCustom) body.thumb = _uvThumbCustom;
   if (!v.classification) body.classification = cls;
   const btn = document.getElementById('uv-submit'); btn.disabled = true;
   try { await apiRequest('/api/videos', { method:'POST', body }); }
   catch (err) { btn.disabled = false; showToast('No se pudo guardar: ' + ((err && err.message) || 'sin conexión'), 4000); return; }
   const fresh = getVideos(), f = fresh.find(x => x.id === id);
-  if (f) { Object.assign(f, { title:body.title, desc:body.desc, cat:body.cat, privacy:body.privacy, thumbLevel }); if (body.thumb) f.thumb = body.thumb; if (body.classification) { f.classification = cls; delete f.unrated; } saveVideos(fresh); }
+  if (f) { Object.assign(f, { title:body.title, desc:body.desc, cat:body.cat, privacy:body.privacy, thumbLevel, allowDownload:body.allowDownload }); if (body.thumb) f.thumb = body.thumb; if (body.classification) { f.classification = cls; delete f.unrated; } saveVideos(fresh); }
   closeModal('mo-upload-video'); uvSetMode(false); renderVideos(); showToast('✅ Datos del video guardados');
   if (document.getElementById('vp-views')) openVideoPlayer(id);
 }
@@ -5829,6 +5843,7 @@ function openUploadVideo() {
   document.getElementById('uv-title').value = '';
   document.getElementById('uv-desc').value = '';
   document.getElementById('uv-privacy').value = 'public';
+  document.getElementById('uv-allow-dl').checked = false;
   document.getElementById('uv-preview').style.display = 'none';
   openModal('mo-upload-video');
 }
@@ -5881,7 +5896,7 @@ async function confirmUploadVideo() {
     id: 'v' + Date.now() + Math.random().toString(36).slice(2, 6), title,
     desc: document.getElementById('uv-desc').value.trim(),
     cat: document.getElementById('uv-cat').value,
-    privacy: document.getElementById('uv-privacy').value,
+    privacy: document.getElementById('uv-privacy').value, allowDownload: document.getElementById('uv-allow-dl').checked,
     thumb: _uvThumbCustom || _uvThumb || null, thumbLevel, created: new Date().toISOString(), classification: cls
   };
   try {
@@ -6245,6 +6260,7 @@ async function openGamePage(mapId) {
     ((m.privacy||'public')==='public' ? '<button class="btn btn-g" onclick="addGameShortcut(\''+mapId+'\')">📌 Acceso directo</button>' : '')+
     '<button class="btn btn-g" id="gp-like-btn" onclick="toggleLike(\''+mapId+'\',this)">'+
     (liked?'❤️':'🤍')+' '+(m.likes||0)+'</button>'+
+    (window.CrixOffline && canPlay ? CrixOffline.button(m.kind === 'app' || m.isHtmlGame ? 'app' : 'map', m) : '')+
     (isOwner ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editUploadData(\''+mapId+'\')">⚙️ Datos de subida</button>' : '')+
     ((isOwner || isCollab) ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editMap(\''+mapId+'\')">✏️ Editar'+(isCollab?' (equipo)':'')+'</button>' : '')+
     (isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');deleteMap(\''+mapId+'\')">🗑️ Borrar</button>' : '')+
@@ -9966,6 +9982,7 @@ function stuAddSound(folderId) {
     </div>
     <div class="set-note" id="set-thumb-note" style="margin-top:6px"></div>
   </div>
+  <div class="field-grp"><label class="field-lbl">Sin conexión</label><div class="set-note" style="margin-bottom:8px">Juegos, apps, videos y accesorios que descargaste para usar sin internet.</div><button class="btn btn-g" onclick="closeModal('mo-settings');CrixOffline.openManager()">📥 Mis descargas</button></div>
   <div class="field-grp"><label class="field-lbl">Cuenta</label><div id="set-account"></div></div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-settings')">Cerrar</button></div>
 </div>
@@ -10373,6 +10390,7 @@ initGoogle();
 })();
 
 </script>
+<script src="/crix-offline.js"></script>
 <script src="/crix-fx.js"></script>
 <script src="/crix-ext.js"></script>
 <script src="/crix-animator.js"></script>

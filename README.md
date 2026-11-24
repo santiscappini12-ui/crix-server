@@ -13,6 +13,19 @@ npm start
 
 Abrí `http://localhost:3000`.
 
+## Creaciones sin conexión (PWA)
+
+Cualquier creación (juego 3D, app/juego HTML, video o accesorio) se puede descargar para usarla **sin internet** desde Crix instalada como PWA, siempre que **su creador lo permita**.
+
+- **Permiso del creador:** casilla «📥 Permitir que otras personas lo descarguen para usarlo sin conexión» al publicar un juego/app, subir o editar un video, o crear un accesorio. Se guarda como `allowDownload` (por defecto, apagado). Solo el dueño la cambia; el creador, su equipo y los admins siempre pueden bajar lo suyo.
+- **Descargar:** botón «📥 Descargar para usar sin conexión» en la página del juego/app, del video o en la lista de accesorios (solo aparece si está permitido). **Configuración → 📥 Mis descargas** lista, abre, actualiza (🔄) y quita lo descargado.
+- **Dónde se guarda:** en el dispositivo, en Cache Storage `crix-offline-v1` (juego, texturas, sonidos, video, modelo `.glb`) más un índice en `localStorage` (`crix_offline_index`). El service worker responde con las mismas URLs, así que el juego funciona igual. Ese caché sobrevive a las actualizaciones del service worker.
+- **Abrir Crix sin conexión:** el service worker guarda la app (HTML, scripts, three.js, Socket.IO) con estrategia «red primero»; también abre `/juego/<id>` sin servidor. La sesión se restaura con los datos locales.
+- **Retirar el permiso:** si el creador apaga la casilla o borra la creación, `GET /api/offline/check` responde `revoked`/`gone` y el cliente borra la copia la próxima vez que haya conexión.
+- **API:** `GET /api/maps/:id/offline-pack`, `GET /api/videos/:id/offline-pack`, `GET /api/accessories/:id/offline-pack` (devuelven `403 DOWNLOAD_NOT_ALLOWED` si no está permitido) y `GET /api/offline/check?maps=…&videos=…&accessories=…`.
+
+Límites a tener en cuenta: sin conexión no hay multijugador, rankings, guardado en la nube ni `Crix.state` (las apps HTML siguen abriendo; esas llamadas del SDK simplemente no responden), y los Script que normalmente corren en el servidor se ejecutan en el navegador. Las apps HTML que cargan archivos de otros sitios (CDN, fuentes, imágenes) no los tendrán sin internet salvo que lo traigan incrustado. El permiso controla la función de descarga de Crix; no impide que alguien con herramientas de red copie lo que ya puede ver.
+
 ## Gráficos realistas
 
 `crix-gfx.js` activa un render PBR: salida sRGB con tone mapping ACES, materiales Standard/Physical (rugosidad, metal, barniz y relieve), iluminación por entorno generada desde el cielo (reflejos reales en metal, vidrio, hielo y mármol) y un cielo procedural con sol y nubes. La calidad se elige sola (celular = `low`, PC = `high`) y se puede forzar con `localStorage.setItem('crix_gfx', 'low' | 'high' | 'ultra')` y recargando.
