@@ -4611,14 +4611,14 @@ function _loadMap(m) {
   const toRemove=[]; gScene.traverse(object=>{if(object!==gScene)toRemove.push(object);});toRemove.forEach(object=>gScene.remove(object));
   gColliders=[];gNPCs=[];runtimeObjects.clear();_localRoom=null;_localPrev=null;networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];_ragAbort();gPlayer=null;
   disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:((window.CrixGFX&&CrixGFX.Q.quality==='ultra')?4096:2048)});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
-  const parts=m.parts||[];runtimeWorkspaceBase=scriptPartsSnapshot(parts).filter(part=>part.type==='Spawn'||part.isNPC);let spawn={x:0,y:3,z:0};
+  const parts=m.parts||[];runtimeWorkspaceBase=scriptPartsSnapshot(parts).filter(part=>part.type==='Spawn'||part.isNPC);let spawn={x:0,y:3,z:0,yaw:0};
   parts.forEach((part,index)=>{
-    if(part.type==='Spawn'){spawn={x:part.x||0,y:(part.y||0)+(part.sy||0.4)/2,z:part.z||0};return;}
+    if(part.type==='Spawn'){spawn={x:part.x||0,y:(part.y||0)+(part.sy||0.4)/2,z:part.z||0,yaw:spawnYawOf(part)};return;}
     if(part.isNPC){const model=makeHumanoidRig(part);gScene.add(model);gNPCs.push({mesh:model,data:part});if(part.canCollide!==false)gColliders.push({mesh:model,box:new THREE.Box3().setFromObject(model)});return;}
     const id=String(part.id||'map-part-'+index),data=normalizeGamePart(id,part),mesh=makeMesh(data);gScene.add(mesh);const object={id,data,mesh,collider:null,velocity:new THREE.Vector3()};runtimeObjects.set(id,object);_syncRuntimeCollider(object);
   });
   try{if(window.CrixExt)CrixExt.gameLoad(m);}catch(err){appendOutput('[Objetos] '+err.message,'err');}
-  _spawnPlayer(spawn);gSpawnPos={x:spawn.x,y:spawn.y,z:spawn.z};resetGameState(m);if(typeof buildGameGui==='function')buildGameGui(m);gCamTheta=0;gCamPhi=0.45;gChatMsgs=[];document.getElementById('g-chat-msgs').innerHTML='';addGMsg(`Bienvenido a ${m.name}`,'sys');
+  _spawnPlayer(spawn);gSpawnPos={x:spawn.x,y:spawn.y,z:spawn.z,yaw:spawn.yaw||0};resetGameState(m);if(typeof buildGameGui==='function')buildGameGui(m);gCamTheta=(spawn.yaw||0)+Math.PI;gCamPhi=0.45;gChatMsgs=[];document.getElementById('g-chat-msgs').innerHTML='';addGMsg(`Bienvenido a ${m.name}`,'sys');
 }
 // Sin servidor (prueba desde el Studio) las esferas sueltas usan el mismo motor que el servidor: ruedan y se pueden empujar.
 // Las demás piezas entran al motor como obstáculos fijos, así que su comportamiento no cambia.
@@ -4774,7 +4774,15 @@ function _buildHumanoid(color, look) {
   return { group: g, avatar: av };
 }
 function myLook() { return CrixAvatar.profileLook((ME && ME.look) || {}); }
-function _spawnPlayer(pos) { const built = _buildHumanoid(ME.color||'#2f80ff', myLook()); const g = built.group; g.position.set(pos.x, pos.y, pos.z); gScene.add(g); gPlayer = g; gPlayerParts = {}; gVelY = 0; gOnGround = false; gTargetRY = 0; }
+// Dirección hacia la que "mira" el SpawnLocation (su eje +Z local, igual que el personaje con rotación 0), como ángulo de giro en Y.
+function spawnYawOf(part) {
+  try {
+    const f = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(part.rx || 0, part.ry || 0, part.rz || 0));
+    if (Math.hypot(f.x, f.z) > 1e-3) return Math.atan2(f.x, f.z);
+  } catch (_) {}
+  return part.ry || 0;
+}
+function _spawnPlayer(pos) { const built = _buildHumanoid(ME.color||'#2f80ff', myLook()); const g = built.group; g.position.set(pos.x, pos.y, pos.z); g.rotation.y = pos.yaw || 0; gScene.add(g); gPlayer = g; gPlayerParts = {}; gVelY = 0; gOnGround = false; gTargetRY = pos.yaw || 0; }
 // Aplica un estado/diferencia de avatar a quien corresponda: yo (socket.id), otro jugador (socketId) o un NPC ("n:id").
 function _avatarFor(key) {
   if (typeof key !== 'string') return null;
@@ -7021,6 +7029,7 @@ function _respawnNow(source) {
   gState.deaths++; gState.health = gState.maxHealth;
   const c = gState.checkpoint || gSpawnPos;
   teleportPlayer(c.x, c.y + 0.3, c.z);
+  if (c === gSpawnPos && gPlayer) { const yaw = c.yaw || 0; gPlayer.rotation.y = yaw; gTargetRY = yaw; gCamTheta = yaw + Math.PI; }
   // Sin mensaje automático en el chat: si el creador quiere avisar que moriste, lo programa con game.on('died', () => gui.chat('...')).
   _damageFlash(); updateGameHud(); dispatchScriptEvent('died', []);
 }
