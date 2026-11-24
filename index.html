@@ -188,6 +188,36 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 #ai-send:disabled{opacity:.45;cursor:default;}
 #ai-btn.active{border-color:var(--acc);color:var(--text);}
 @media (max-width:640px){#ai-win{left:6px!important;right:6px!important;top:auto!important;bottom:6px!important;width:auto!important;height:62vh!important;max-width:none;resize:none;}#ai-win.min{height:auto!important;}#ai-head{cursor:default;}}
+/* ═══ Celular: barra del estudio y asistente de IA con botones siempre visibles ═══ */
+@media (max-width:820px){
+  /* Los atajos de teclado no sirven en el celular y empujaban los botones fuera de la pantalla. */
+  .hub-hint{display:none;}
+  #hub-menubar{flex-wrap:wrap;gap:6px 8px;padding:6px 8px;}
+  .hub-brand{display:none;}
+  .hub-project-name{flex:1 1 120px;min-width:0;max-width:none;}
+  /* Botones principales (Asistente, Equipo, Guardar, Probar…) en su propia fila, deslizable si no entran. */
+  .hub-actions{flex:1 1 100%;margin-left:0;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;scrollbar-width:none;}
+  .hub-actions::-webkit-scrollbar{display:none;}
+  .hub-actions .st-btn,.hub-actions .hub-history-btn{flex:0 0 auto;}
+  #ai-btn{order:-1;}
+}
+@media (pointer:coarse){
+  .hub-actions .st-btn,.tb-row .st-btn{height:34px;padding:4px 11px;font-size:12px;}
+  .hub-history-btn{height:34px;min-width:38px;}
+  .tb-row{gap:5px;padding:5px 8px;-webkit-overflow-scrolling:touch;}
+}
+@media (max-width:640px){
+  #ai-win{height:min(70vh,calc(100dvh - 12px))!important;max-height:calc(100dvh - 12px);padding-bottom:env(safe-area-inset-bottom);}
+  #ai-head{padding:8px 10px;}
+  .ai-ib{width:38px;height:34px;font-size:15px;}
+  #ai-chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  #ai-chips::-webkit-scrollbar{display:none;}
+  #ai-chips button{flex:0 0 auto;font-size:12px;padding:7px 12px;min-height:34px;}
+  #ai-input{font-size:16px;min-height:42px;}   /* 16 px evita que el iPhone haga zoom al escribir */
+  #ai-send{height:42px;min-width:50px;font-size:17px;}
+  .ai-m{font-size:13px;max-width:96%;}
+  .ai-undo{font-size:12px;padding:8px 12px;min-height:34px;}
+}
 #stu-toolbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
 .tb-row{display:flex;flex-wrap:nowrap;overflow-x:auto;align-items:center;gap:2px;padding:3px 6px;}
 .tb-row::-webkit-scrollbar{height:2px;}
