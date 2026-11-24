@@ -132,7 +132,7 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
 
   app.post('/api/ai/chat', requireAuth, async (req, res) => {
     const cfg = env(), user = req.user;
-    if (!cfg.base) return res.status(503).json({ ok: false, err: 'El asistente todavía no está configurado en este servidor (falta CRIX_AI_BASE_URL).' });
+    if (!cfg.base) return res.status(200).json({ ok: false, err: 'El asistente todavía no está configurado en este servidor (falta CRIX_AI_BASE_URL).' });
     if (!allowed(cfg, user)) return res.status(403).json({ ok: false, err: 'El asistente está limitado a cuentas administradoras.' });
 
     const body = req.body || {};
@@ -170,18 +170,18 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
       if (!r.ok || !data) {
         log && log('AI', 'Error del modelo HTTP ' + r.status + ': ' + text.slice(0, 300));
         const hint = r.status === 401 || r.status === 403 ? 'rechazó la clave (CRIX_AI_API_KEY)' : r.status === 404 ? 'no encontró el modelo o la ruta (revisá CRIX_AI_BASE_URL y CRIX_AI_MODEL)' : r.status === 503 ? 'está iniciando o sin capacidad; probá en un momento' : 'respondió con error ' + r.status;
-        return res.status(502).json({ ok: false, err: 'El servidor del modelo ' + hint + '. [HTTP ' + r.status + '] ' + text.replace(/\s+/g, ' ').slice(0, 200) });
+        return res.status(200).json({ ok: false, err: 'El servidor del modelo ' + hint + '. [HTTP ' + r.status + '] ' + text.replace(/\s+/g, ' ').slice(0, 200) });
       }
       const choice = data.choices && data.choices[0] || {};
       let reply = String((choice.message && choice.message.content) || '');
       reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*?<\/think>/i, '').trim();
-      if (!reply) return res.status(502).json({ ok: false, err: 'El modelo devolvió una respuesta vacía. Probá de nuevo.' });
+      if (!reply) return res.status(200).json({ ok: false, err: 'El modelo devolvió una respuesta vacía. Probá de nuevo.' });
       res.json({ ok: true, reply, truncated: choice.finish_reason === 'length', model: data.model || cfg.model });
     } catch (err) {
       if (res.writableEnded) return;
-      if (err && err.name === 'AbortError') return res.status(504).json({ ok: false, err: 'El modelo tardó demasiado en responder.' });
+      if (err && err.name === 'AbortError') return res.status(200).json({ ok: false, err: 'El modelo tardó demasiado en responder.' });
       log && log('AI', 'No se pudo contactar al modelo: ' + (err && err.message));
-      res.status(502).json({ ok: false, err: 'No se pudo conectar con el servidor del modelo (' + (cfg.base || '').replace(/\/\/[^/@]*@/, '//') + '): ' + String(err && (err.cause && err.cause.code || err.message)).slice(0, 120) });
+      res.status(200).json({ ok: false, err: 'No se pudo conectar con el servidor del modelo (' + (cfg.base || '').replace(/\/\/[^/@]*@/, '//') + '): ' + String(err && (err.cause && err.cause.code || err.message)).slice(0, 120) });
     } finally { clearTimeout(timer); busy.delete(user.id); }
   });
 };
