@@ -9456,6 +9456,10 @@ function aiContext() {
     L.push('INTERFAZ (GUI):');
     stGuis.forEach(g => L.push('Pantalla «' + g.name + '»' + (g.visible === false ? ' (oculta)' : '') + ': ' + g.elements.slice(0, 40).map(e => e.type + ' «' + e.name + '» [' + [e.x, e.y, e.w, e.h].map(r2).join(',') + ']' + (e.text ? ' "' + String(e.text).slice(0, 40) + '"' : '')).join('; ')));
   }
+  try {   // sonidos ya subidos al proyecto: el asistente solo puede reproducir estos por nombre (no puede subir audio)
+    const names = [...new Set([...Object.values(m.sounds || {}).map(x => x && x.name), ...(m.scripts || []).filter(x => x.type === 'Sound').map(x => x.name)].filter(Boolean).map(String))].slice(0, 60);
+    L.push('SONIDOS (' + names.length + '): ' + (names.length ? names.join(', ') : 'ninguno subido todavía'));
+  } catch {}
   let out = L.join('\n'); if (out.length > 45000) out = out.slice(0, 45000) + '\n(…estado recortado)';
   return out;
 }
