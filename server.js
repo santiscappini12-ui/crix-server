@@ -98,33 +98,17 @@ app.use('/api', async (req, res, next) => {
 app.get('/api/instance', (req, res) => res.json({ ok:true, build:CRIX_BUILD, instance:INSTANCE_TAG, uptime:Math.round(process.uptime()), maps:Object.keys(DB.maps).length, users:Object.keys(DB.users).length, persist:persist.enabled }));
 // Compresión gzip (asíncrona) de las respuestas JSON grandes: el catálogo de mapas pesa muchos MB sin comprimir.
 const zlib = require('zlib');
-const apiGzCache = new Map();   // etag → gzip (últimos 12 listados)
 app.use('/api', (req, res, next) => {
   const orig = res.json.bind(res);
   res.json = obj => {
     if (res.headersSent || !/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return orig(obj);
     let raw; try { raw = Buffer.from(JSON.stringify(obj), 'utf8'); } catch (e) { return orig(obj); }
     if (raw.length < 4096) return orig(obj);
-    // Listados pesados (catálogo, videos, foros, usuarios): ETag del contenido. Si el cliente ya lo tiene, responde 304 sin
-    // comprimir ni enviar nada, y el gzip de un contenido ya visto se reutiliza. El resto de la API sigue en no-store.
-    let etag = null;
-    if (req.method === 'GET' && res.statusCode < 300 && /^\/(maps|videos|posts|users)\/?$/.test(req.path)) {
-      etag = '"' + crypto.createHash('sha1').update(raw).digest('base64url') + '"';
-      res.set({ 'ETag': etag, 'Cache-Control': 'private, no-cache', 'Vary': 'Accept-Encoding, Authorization' });
-      if (req.headers['if-none-match'] === etag) return res.status(304).end();
-    }
-    const cached = etag && apiGzCache.get(etag);
-    const send = gz => {
-      if (res.headersSent) return;
-      res.set({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' + (etag ? ', Authorization' : '') });
-      res.end(gz);
-    };
-    if (cached) { send(cached); return res; }
     zlib.gzip(raw, { level: 5 }, (err, gz) => {
       if (res.headersSent) return;
       if (err) return orig(obj);
-      if (etag) { apiGzCache.set(etag, gz); if (apiGzCache.size > 12) apiGzCache.delete(apiGzCache.keys().next().value); }
-      send(gz);
+      res.set({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' });
+      res.end(gz);
     });
     return res;
   };
@@ -1036,36 +1020,7 @@ app.use((req, res, next) => {
 const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
-// Archivos del cliente (index.html pesa ~880 KB; los JS, ~1 MB más): se comprimen una sola vez (brotli/gzip, en memoria) y se
-// sirven con ETag, así que una visita repetida es un 304 de pocos bytes en vez de más de 1 MB. Se recomprimen solos si el archivo cambia.
-const STATIC_PACK = /\.(html|js|svg|webmanifest|json|glb)$/i, staticPacks = new Map();
-function staticPack(file) {
-  const st = fs.statSync(file); let e = staticPacks.get(file);
-  if (e && e.mtime === st.mtimeMs && e.size === st.size) return e;
-  const buf = fs.readFileSync(file);
-  e = { mtime: st.mtimeMs, size: st.size, buf, etag: '"' + crypto.createHash('sha1').update(buf).digest('base64url') + '"', br: null, gz: null, pending: null };
-  staticPacks.set(file, e); return e;
-}
-function sendStatic(req, res, file, cache) {
-  let e; try { e = staticPack(file); } catch { return res.sendStatus(404); }
-  const ae = String(req.headers['accept-encoding'] || '');
-  res.set({ 'ETag': e.etag, 'Cache-Control': cache || 'no-cache', 'Vary': 'Accept-Encoding' });
-  res.type(path.extname(file) || '.html');
-  if (req.headers['if-none-match'] === e.etag) return res.status(304).end();
-  const enc = /\bbr\b/.test(ae) ? 'br' : /\bgzip\b/.test(ae) ? 'gzip' : null;
-  if (!enc || e.buf.length < 1024) return res.send(e.buf);
-  const key = enc === 'br' ? 'br' : 'gz';
-  const out = () => { if (!res.headersSent) { res.set('Content-Encoding', enc); res.send(e[key]); } };
-  if (e[key]) return out();
-  if (!e.pending) e.pending = {};
-  if (!e.pending[key]) e.pending[key] = new Promise(ok => {
-    const done = (err, data) => { if (!err) e[key] = data; ok(); };
-    if (key === 'br') zlib.brotliCompress(e.buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 8, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: e.buf.length } }, done);
-    else zlib.gzip(e.buf, { level: 9 }, done);
-  });
-  e.pending[key].then(() => { if (e[key]) out(); else if (!res.headersSent) res.send(e.buf); });
-}
-app.get('/', (req, res) => sendStatic(req, res, path.join(__dirname, 'index.html'), 'no-cache'));   // no-cache = revalida siempre (ETag), así un deploy nuevo se ve enseguida
+app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
 // Página para probar la API de clasificación desde el navegador (misma dirección que Crix, sin problemas de CORS): /probar-api
 app.get('/probar-api', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'probar-api.html')); });   // sin caché: así un deploy nuevo se ve enseguida
 
@@ -1168,8 +1123,7 @@ app.get(PUBLIC_FILES, (req, res) => {
   // El service worker y el manifiesto no deben quedar en caché para que las actualizaciones lleguen rápido.
   if (req.path === '/service-worker.js' || req.path === '/manifest.webmanifest') res.set('Cache-Control', 'no-cache');
   if (req.path === '/service-worker.js') res.set('Service-Worker-Allowed', '/');
-  if (STATIC_PACK.test(req.path) && req.path !== '/service-worker.js') return sendStatic(req, res, path.join(__dirname, req.path), 'no-cache');
-  res.sendFile(path.join(__dirname, req.path), { maxAge: /\.(png|mp3)$/i.test(req.path) ? '1d' : 0 });
+  res.sendFile(path.join(__dirname, req.path));
 });
 
 // ── Límite de intentos de acceso por IP ──

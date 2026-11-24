@@ -1903,16 +1903,7 @@ BC.addEventListener('message', e => {
   if (e.data.type === 'map_update') { if (document.getElementById('s-home').classList.contains('active')) renderHome(); }
 });
 let CLOUD_READY = false;
-const _apiInflight = new Map();   // GET idénticos simultáneos (varias pantallas pidiendo lo mismo a la vez) → una sola petición
-function apiRequest(url, options = {}) {
-  const method = options.method || 'GET';
-  if (method !== 'GET' || options.body !== undefined) return _apiRequest(url, options);
-  const key = url + '|' + (options.token !== undefined ? options.token : DB.get('token')) + '|' + JSON.stringify(options.headers || {});
-  let p = _apiInflight.get(key);
-  if (!p) { p = _apiRequest(url, options).finally(() => _apiInflight.delete(key)); _apiInflight.set(key, p); }
-  return p.then(data => data);
-}
-async function _apiRequest(url, options = {}) {
+async function apiRequest(url, options = {}) {
   const headers = { ...(options.headers || {}) };
   const token = options.token !== undefined ? options.token : DB.get('token');
   if (token) headers.Authorization = 'Bearer ' + token;
@@ -2704,14 +2695,8 @@ async function syncCloudData() {
     if (ME && DB.get('token')) { const wait = Math.min(30000, 4000 * ++_syncRetry); setTimeout(() => { if (!CLOUD_READY && ME && DB.get('token')) syncCloudData(); }, wait); }
   } finally { _syncBusy = false; }
 }
-let _cloudBusy = null, _cloudLast = 0;
-async function refreshCloudContent(force) {
+async function refreshCloudContent() {
   if (!CLOUD_READY || !ME) return;
-  // Si ya hay una actualización en curso (4 listados pesados) o acaba de terminar otra, no se pide de nuevo: cambiar de pestaña
-  // varias veces seguidas disparaba una tanda completa por cada cambio.
-  if (_cloudBusy) return force ? _cloudBusy.then(() => refreshCloudContent(true)) : undefined;   // un cambio hecho por la persona espera a la tanda en curso y vuelve a pedir
-  if (!force && Date.now() - _cloudLast < 8000) return;
-  let _done; _cloudBusy = new Promise(r => { _done = r; });
   try {
     const localVideos = getVideos();
     const [usersResult, mapsResult, videosResult, postsResult, sessionResult] = await Promise.all([
@@ -2727,7 +2712,6 @@ async function refreshCloudContent(force) {
     if (!_screenActive('s-game')) rerenderLiveScreens('maps');
     rerenderLiveScreens('videos'); rerenderLiveScreens('posts'); rerenderLiveScreens('users');
   } catch (err) { console.warn('[CLOUD] No se pudo actualizar el contenido:', err.message); }
-  finally { _cloudBusy = null; _cloudLast = Date.now(); _done(); }
 }
 function saveMe() { const users = getUsers(); users[ME.id] = ME; setUsers(users); }
 function profileAvatarSrc(user) {
@@ -6248,14 +6232,14 @@ function sendFriendRequest(uid) {
     showToast('Ya enviaste una solicitud'); return;
   }
   apiRequest('/api/friend-request', { method:'POST', body:{ toId:uid } })
-    .then(() => { showToast('✅ Solicitud de amistad enviada a ' + target.username); refreshCloudContent(true); })
+    .then(() => { showToast('✅ Solicitud de amistad enviada a ' + target.username); refreshCloudContent(); })
     .catch(err => showToast(err.message));
 }
 async function acceptFriendRequest(fromId) {
   try {
     await apiRequest('/api/friend-accept', { method:'POST', body:{ fromId } });
     const from = getUsers()[fromId];
-    await refreshCloudContent(true);
+    await refreshCloudContent();
     showToast('✅ Ahora son amigos con ' + (from?.username || 'este usuario'));
     renderFriendRequests();
   } catch (err) { showToast(err.message); }
@@ -6263,7 +6247,7 @@ async function acceptFriendRequest(fromId) {
 async function rejectFriendRequest(fromId) {
   try {
     await apiRequest('/api/friend-reject', { method:'POST', body:{ fromId } });
-    await refreshCloudContent(true);
+    await refreshCloudContent();
     renderFriendRequests();
   } catch (err) { showToast(err.message); }
 }
@@ -6659,7 +6643,7 @@ function toggleMuteCall() {
 function initCallSocketEvents() {
   if (!socket || socket._callEv) return; socket._callEv = true;
   socket.on('friend_request', ({ from, fromName }) => {
-    refreshCloudContent(true).then(() => {
+    refreshCloudContent().then(() => {
       renderFriendRequests();
       showToast('👋 ' + fromName + ' quiere ser tu amigo'); playSfx('friend');
       sendBrowserNotif('Nueva solicitud de amistad', fromName + ' quiere ser tu amigo en Crix');
@@ -6667,7 +6651,7 @@ function initCallSocketEvents() {
     });
   });
   socket.on('friend_accepted', ({ from, fromName }) => {
-    refreshCloudContent(true);
+    refreshCloudContent();
     showToast('🎉 ' + fromName + ' aceptó tu solicitud de amistad'); playSfx('friend');
     sendBrowserNotif('Solicitud aceptada', fromName + ' ahora es tu amigo en Crix');
     renderProfile(ME.id);
@@ -6704,6 +6688,7 @@ function renderMsgBubble(msg, isMe) {
 netConnect();
 const _goTabCloud = goTab;
 goTab = function(tab, extra) { _goTabCloud(tab, extra); if (CLOUD_READY) refreshCloudContent(); };
+setInterval(() => { if (CLOUD_READY) refreshCloudContent(); }, 60000);
 const _goTabNotif = goTab;
 goTab = function(tab, extra) { _goTabNotif(tab, extra); if (tab === 'msg') notifStatusRender(); };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' }).catch(err => console.warn('[PWA] No se pudo instalar el caché:', err.message));
