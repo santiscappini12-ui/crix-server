@@ -563,7 +563,7 @@ function applyServerScriptCommand(room,command,payload) {
     if(room.basePartIds.has(id))room.changedPartIds.add(id);
     if(part.anchored||part.y!==current.y)worldPhysics.resetBody(room,id);
     scriptRunner?.send({type:'worldPart',roomId:roomKey(room.mapId,room.instanceId),part,appliedSeq:room.appliedSeq||0});
-    io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'upsertPart',payload:{part}});
+    io.to(gameChannel(room.mapId,room.instanceId)).emit('runtime_scene',{command:'upsertPart',payload:{part},t:Date.now()});   // `t`: hora del servidor, el cliente predice el movimiento con ella (crix-predict.js)
     return;
   }
   if(command==='destroyPart'){
@@ -1017,7 +1017,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
+const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });

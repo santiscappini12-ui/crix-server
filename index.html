@@ -1147,6 +1147,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <script src="/crix-anim.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/crix-rigid.js"></script>
+<script src="/crix-predict.js"></script>
 <script>
 // Copia de world-physics.js (el mismo motor que usa el servidor). Se usa cuando el juego corre sin servidor (prueba desde el Studio).
 window.CrixWorldPhysics=(function(){const module={exports:{}};
@@ -4462,7 +4463,10 @@ function appendOutput(line, cls = '') {
     if (!(cls === 'sys' && /^--/.test(text))) window.CrixConsole && CrixConsole.add(lvl, source, text);
   } catch (_) { /* la consola nunca debe romper el juego */ }
   const out = document.getElementById('code-output'); if (!out) return; const span = document.createElement('span'); span.className = cls === 'err' ? 'code-out-err' : cls === 'warn' ? 'code-out-warn' : cls === 'sys' ? 'code-out-sys' : ''; span.textContent = line + '\n'; out.appendChild(span); out.scrollTop = out.scrollHeight; }
-function applyNetworkPartUpsert(part,snap) {
+// Predicción de lo que mueven los scripts (crix-predict.js): usa la hora `t` del servidor de cada paquete, no la de llegada.
+const _netPred=window.CrixPredict?CrixPredict.create({lead:0}):null,_netS={};
+let _netStepT=0;
+function applyNetworkPartUpsert(part,snap,ts) {
   if(!gScene||!part||part.type==='Spawn'||part.isNPC)return;
   const id=String(part.id||'');if(!id)return;
   const existing=runtimeObjects.get(id);
@@ -4471,10 +4475,15 @@ function applyNetworkPartUpsert(part,snap) {
   const visualChanged=['type','sx','sy','sz','color','material','transparent',...rotKeys].some(key=>part[key]!==undefined&&part[key]!==existing.data[key]);
   if(visualChanged){existing.netTarget=null;_updateGameScriptPart(id,part);return;}
   const prevD=existing.data,prevAt=existing.netAt||0,nowT=performance.now();
+  if(snap&&_netPred)_netPred.reset(id);
+  // Solo los paquetes que traen posición/rotación son muestras de movimiento; los viejos o desordenados se descartan.
+  const moveKeys=['x','y','z','rx','ry','rz'].some(key=>part[key]!==undefined),usePred=!!(_netPred&&ts&&!snap&&moveKeys);
+  if(usePred&&!_netPred.push(id,ts,{...existing.data,...part},nowT))return;
   existing.data=normalizeGamePart(id,{...existing.data,...part});
   if(existing.data.anchored)existing.velocity.set(0,0,0);
-  existing.netVel=null;existing.netAng=null;
-  if(prevAt&&nowT-prevAt<250&&nowT-prevAt>5){
+  existing.netVel=null;existing.netAng=null;existing.netPredOn=usePred;
+  if(usePred){existing.netVel=_netPred.vel(id);existing.netAng=_netPred.ang(id);existing.netInt=_netPred.interval(id);}
+  else if(prevAt&&nowT-prevAt<250&&nowT-prevAt>5){
     const dtp=(nowT-prevAt)/1000,nd=existing.data;existing.netInt=existing.netInt?existing.netInt*0.7+dtp*0.3:dtp;   // intervalo medio entre paquetes de esta pieza
     const wrapA=a=>{a%=Math.PI*2;if(a>Math.PI)a-=Math.PI*2;else if(a<-Math.PI)a+=Math.PI*2;return a;};
     const v={x:(nd.x-prevD.x)/dtp,y:(nd.y-prevD.y)/dtp,z:(nd.z-prevD.z)/dtp};
@@ -4511,8 +4520,19 @@ function _reconcilePredicted(o,d){
 // Acerca suavemente cada pieza sincronizada a la última posición que mandó el servidor.
 const _netQ=new THREE.Quaternion(),_netE=new THREE.Euler();
 function _stepNetInterp() {
+  const nowS=performance.now(),dtS=_netStepT?Math.min(0.1,Math.max(0.001,(nowS-_netStepT)/1000)):0.016;_netStepT=nowS;
+  const kPred=1-Math.exp(-dtS*50);   // seguimiento independiente de los FPS; el objetivo ya viene predicho, así que casi no agrega retraso
   for(const object of runtimeObjects.values()){
     const t=object.netTarget,m=object.mesh;if(!t||!m)continue;
+    if(object.netPredOn&&_netPred){
+      const sm=_netPred.sample(object.id,nowS,_netS);
+      if(sm){
+        const p=m.position;p.x+=(sm.x-p.x)*kPred;p.y+=(sm.y-p.y)*kPred;p.z+=(sm.z-p.z)*kPred;
+        _netQ.setFromEuler(_netE.set(sm.rx,sm.ry,sm.rz,'XYZ'));m.quaternion.slerp(_netQ,kPred);
+        if(!sm.moving&&Math.abs(sm.x-p.x)<0.002&&Math.abs(sm.y-p.y)<0.002&&Math.abs(sm.z-p.z)<0.002&&Math.abs(m.quaternion.dot(_netQ))>0.99999){p.set(sm.x,sm.y,sm.z);m.quaternion.copy(_netQ);object.netTarget=null;}
+        continue;
+      }
+    }
     const k=0.4,p=m.position,v=object.netVel,el=(v||object.netAng)&&object.netAt?(performance.now()-object.netAt)/1000:0,H=object.netInt?Math.min(0.3,Math.max(0.08,object.netInt*1.6)):0.08,age=el<H?el:Math.max(0,2*H-el);   // predice el movimiento de scripts del servidor ~1,6 intervalos de paquete
     const tx=t.x+(v?v.x*age:0),ty=t.y+(v?v.y*age:0),tz=t.z+(v?v.z*age:0);
     p.x+=(tx-p.x)*k;p.y+=(ty-p.y)*k;p.z+=(tz-p.z)*k;
@@ -4543,7 +4563,7 @@ function applyNetworkWorldSnapshot(snapshot={}) {
 }
 function applyNetworkSceneEvent(message={}) {
   const payload=message.payload||{};
-  if(message.command==='upsertPart'){if(String(payload.part?.id||'').startsWith('server-'))networkRuntimePartIds.add(String(payload.part.id));applyNetworkPartUpsert(payload.part);}
+  if(message.command==='upsertPart'){if(String(payload.part?.id||'').startsWith('server-'))networkRuntimePartIds.add(String(payload.part.id));applyNetworkPartUpsert(payload.part,false,message.t);}
   else if(message.command==='destroyPart'){networkRuntimePartIds.delete(String(payload.id||''));_destroyGameScriptPart(String(payload.id||''));}
   _syncScriptWorkspaces();
 }
@@ -4998,10 +5018,10 @@ function netConnect() {
   socket.on('runtime_scene',applyNetworkSceneEvent);
   // Lote de posiciones de piezas con física (un paquete por tick del servidor).
   socket.on('joint_poses',d=>{try{if(window.CrixExt)CrixExt.netPoses(d);}catch(err){}});
-  socket.on('world_delta',({parts=[]}={})=>{for(const part of parts)applyNetworkPartUpsert(part);});
+  socket.on('world_delta',({t,parts=[]}={})=>{for(const part of parts)applyNetworkPartUpsert(part,false,t);});
   socket.on('part_collected',({id}={})=>_remoteCollect(id));
   // Resync periódico del servidor: solo corrige la posición de piezas que ya existen aquí. Nunca crea piezas.
-  socket.on('world_sync',({parts=[]}={})=>{for(const part of parts){if(runtimeObjects.has(String(part.id)))applyNetworkPartUpsert(part);}});
+  socket.on('world_sync',({t,parts=[]}={})=>{for(const part of parts){if(runtimeObjects.has(String(part.id)))applyNetworkPartUpsert(part,false,t);}});
   socket.on('script_remote',({name,data}={})=>{if(name)dispatchScriptEvent('remote:'+String(name),[data]);});
   socket.on('server_player_cmd',command=>{if(gPlayer&&command&&typeof command==='object')_playerCommand(command);});
   socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
@@ -5013,7 +5033,7 @@ function netConnect() {
   socket.on('player_died',({socketId}={})=>{if(socketId&&gSettings.blood===true)_remoteBlood(socketId);});
   socket.on('player_left',({socketId})=>{const rp=remotePlayers[socketId];if(rp){if(gScene)gScene.remove(rp.group);addGMsg(`← ${rp.data.username} salió`,'sys');delete remotePlayers[socketId];}updateNetPill('🟢',`${Object.keys(remotePlayers).length+1} jugadores`);});
   socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});
-  socket.on('pong_res',ts=>{const ping=Date.now()-ts,pill=document.getElementById('g-net-pill');if(pill)pill.textContent=`🟢 ${Object.keys(remotePlayers).length+1}p · ${ping}ms`;});
+  socket.on('pong_res',ts=>{const ping=Date.now()-ts;if(_netPred)_netPred.setLead(Math.min(0.05,ping/4000));const pill=document.getElementById('g-net-pill');if(pill)pill.textContent=`🟢 ${Object.keys(remotePlayers).length+1}p · ${ping}ms`;});
   crixAppBindSocket(); teamBindSocket();
   socket.on('new_private_msg', function({ convId, msg }) {
     if(!msg?.e2ee||msg.e2ee.v!==1)return;

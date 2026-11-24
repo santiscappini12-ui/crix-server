@@ -431,11 +431,12 @@
     if (G.fx) G.fx.update(dt);
     // suavizado de las poses que manda el servidor (joint_poses llega a 20 Hz)
     if (G.targets.size) {
-      const k = Math.min(1, dt * 16);
-      for (const [id, t] of G.targets) {
+      const k = Math.min(1, dt * 40), usePred = typeof _netPred !== 'undefined' && _netPred;   // el objetivo ya viene predicho (crix-predict.js)
+      for (const [id, t0] of G.targets) {
         const o = runtimeObjects.get(id); if (!o || !o.mesh) { G.targets.delete(id); continue; }
+        const t = (usePred && _netPred.sample('j:' + id, now, G._ps || (G._ps = {}))) || t0;
         const d = o.data, near = Math.abs(t.x - d.x) + Math.abs(t.y - d.y) + Math.abs(t.z - d.z) + Math.abs(t.rx - (d.rx || 0)) + Math.abs(t.ry - (d.ry || 0)) + Math.abs(t.rz - (d.rz || 0)) < 1e-3;
-        if (near) { Object.assign(d, t); G.targets.delete(id); } else { d.x += (t.x - d.x) * k; d.y += (t.y - d.y) * k; d.z += (t.z - d.z) * k; d.rx = (d.rx || 0) + (t.rx - (d.rx || 0)) * k; d.ry = (d.ry || 0) + (t.ry - (d.ry || 0)) * k; d.rz = (d.rz || 0) + (t.rz - (d.rz || 0)) * k; }
+        if (near) { d.x = t.x; d.y = t.y; d.z = t.z; d.rx = t.rx; d.ry = t.ry; d.rz = t.rz; G.targets.delete(id); } else { d.x += (t.x - d.x) * k; d.y += (t.y - d.y) * k; d.z += (t.z - d.z) * k; d.rx = (d.rx || 0) + (t.rx - (d.rx || 0)) * k; d.ry = (d.ry || 0) + (t.ry - (d.ry || 0)) * k; d.rz = (d.rz || 0) + (t.rz - (d.rz || 0)) * k; }
         applyGamePose(id);
       }
     }
@@ -450,7 +451,7 @@
   }
   function netPoses(msg) {
     if (!msg || !Array.isArray(msg.parts)) return;
-    for (const p of msg.parts) { if (!Array.isArray(p) || p.length < 7) continue; const jo = runtimeObjects.get(String(p[0])); if (jo) { jo.jointLinked = true; if (jo.mesh && ((jo.predAt && performance.now() - jo.predAt < 300) || (jo.predOn && performance.now() - jo.predOn < 200)) && Math.hypot(p[1] - jo.mesh.position.x, p[2] - jo.mesh.position.y, p[3] - jo.mesh.position.z) <= 12) continue; G.targets.set(String(p[0]), { x: p[1], y: p[2], z: p[3], rx: p[4], ry: p[5], rz: p[6] }); } }
+    for (const p of msg.parts) { if (!Array.isArray(p) || p.length < 7) continue; const jo = runtimeObjects.get(String(p[0])); if (jo) { jo.jointLinked = true; if (jo.mesh && ((jo.predAt && performance.now() - jo.predAt < 300) || (jo.predOn && performance.now() - jo.predOn < 200)) && Math.hypot(p[1] - jo.mesh.position.x, p[2] - jo.mesh.position.y, p[3] - jo.mesh.position.z) <= 12) continue; G.targets.set(String(p[0]), { x: p[1], y: p[2], z: p[3], rx: p[4], ry: p[5], rz: p[6] }); if (typeof _netPred !== 'undefined' && _netPred && msg.t) _netPred.push('j:' + p[0], msg.t, { x: p[1], y: p[2], z: p[3], rx: p[4], ry: p[5], rz: p[6] }, performance.now()); } }
   }
   function gameCommand(message) {
     const c = message.command, p = message.payload || {};
