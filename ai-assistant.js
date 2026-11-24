@@ -15,7 +15,7 @@
 //   CRIX_AI_MAX_TOKENS  tope de tokens de respuesta (por defecto 3500)
 //   CRIX_AI_TIMEOUT_MS  tiempo máximo por pedido (por defecto 180000)
 //   CRIX_AI_RPM         pedidos por minuto y persona (por defecto 12)
-//   CRIX_AI_ADMIN_ONLY  1 = solo cuentas administradoras pueden usarlo
+//   El asistente está disponible para TODAS las cuentas con sesión iniciada (ya no hay modo solo-admin).
 // ═══════════════════════════════════════════════════════════════════════════
 
 const SYSTEM_PROMPT = `Sos el asistente de Crix Hub, el editor 3D de la plataforma Crix. Ayudás a crear y editar mapas, scripts, interfaces (GUI) y ajustes del juego. Respondé en el idioma de la persona (por defecto español rioplatense), corto y concreto. No inventes funciones que no estén en esta guía.
@@ -112,7 +112,6 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
     maxTokens: Math.max(256, Math.min(16000, Number(process.env.CRIX_AI_MAX_TOKENS) || 3500)),
     timeout: Math.max(10000, Math.min(600000, Number(process.env.CRIX_AI_TIMEOUT_MS) || 180000)),
     rpm: Math.max(1, Math.min(600, Number(process.env.CRIX_AI_RPM) || 12)),
-    adminOnly: /^(1|true|yes|si)$/i.test(String(process.env.CRIX_AI_ADMIN_ONLY || '')),
   });
 
   const hits = new Map();      // userId -> [timestamps]
@@ -124,17 +123,16 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
   }
   setInterval(() => { const now = Date.now(); for (const [k, v] of hits) { const l = v.filter(t => now - t < 60000); if (l.length) hits.set(k, l); else hits.delete(k); } }, 120000).unref();
 
-  function allowed(cfg, user) { return !cfg.adminOnly || !!user.isAdmin; }
+  function allowed() { return true; }   // disponible para todas las cuentas
 
   app.get('/api/ai/status', requireAuth, (req, res) => {
     const cfg = env();
-    res.json({ ok: true, configured: !!cfg.base, allowed: allowed(cfg, req.user), model: cfg.model, adminOnly: cfg.adminOnly });
+    res.json({ ok: true, configured: !!cfg.base, allowed: true, model: cfg.model, adminOnly: false });
   });
 
   app.post('/api/ai/chat', requireAuth, async (req, res) => {
     const cfg = env(), user = req.user;
     if (!cfg.base) return res.status(200).json({ ok: false, err: 'El asistente todavía no está configurado en este servidor (falta CRIX_AI_BASE_URL).' });
-    if (!allowed(cfg, user)) return res.status(403).json({ ok: false, err: 'El asistente está limitado a cuentas administradoras.' });
 
     const body = req.body || {};
     const incoming = Array.isArray(body.messages) ? body.messages.slice(-16) : [];

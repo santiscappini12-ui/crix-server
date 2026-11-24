@@ -5021,8 +5021,17 @@ function netConnect() {
   const serverUrl=window.location.origin;
   try{socket=io(serverUrl,{auth:{token:DB.get('token')},transports:['websocket','polling'],reconnection:true,reconnectionDelay:1500,reconnectionDelayMax:8000,reconnectionAttempts:Infinity,timeout:20000});}
   catch(error){console.warn('[NET] Socket.IO no disponible — modo offline');return;}
-  socket.on('connect',()=>{netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
-  socket.on('disconnect',()=>{netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();window.CrixConsole&&CrixConsole.warn('Red','Desconectado del servidor');});
+  socket.on('connect',()=>{clearTimeout(window._crixNetDown);if(window._crixNetWarned){window._crixNetWarned=false;window.CrixConsole&&CrixConsole.info('Red','Reconectado al servidor');}netConnected=true;updateNetPill('🟢',socket.id?.substring(0,6));if(ME){socket.emit('user_online',{userId:ME.id});reportVisibility();}if(netCurrentMapId)netJoinGame(netCurrentMapId);});
+  socket.on('disconnect',(reason)=>{
+    netConnected=false;updateNetPill('🔴','Offline');clearRemotePlayers();
+    // Cerrar/iniciar sesión desconecta a propósito: eso no es un error.
+    if(reason==='io client disconnect')return;
+    // Si el servidor corta la conexión, Socket.IO NO reconecta solo: se reintenta a mano.
+    if(reason==='io server disconnect')setTimeout(()=>{try{if(socket&&!socket.connected)socket.connect();}catch(_){}},1500);
+    // Un microcorte (cambio de red, proxy, pestaña dormida) suele volver solo en segundos: solo se avisa si sigue caído.
+    clearTimeout(window._crixNetDown);
+    window._crixNetDown=setTimeout(()=>{if(socket&&!socket.connected){window._crixNetWarned=true;window.CrixConsole&&CrixConsole.warn('Red','Sin conexión con el servidor ('+reason+'). Reintentando…');}},6000);
+  });
   socket.on('connect_error',(err)=>{
     netConnected=false;updateNetPill('🟡','Sin servidor');
     if(err&&err.message==='Sesión inválida'&&ME&&!ME.guest){
@@ -5073,6 +5082,11 @@ function netConnect() {
   socket.on('game_chat',({socketId,username,text})=>{if(socketId!==socket.id){addGMsg(`${username}: ${text}`,'chat');playSfx('chat');}});
   socket.on('pong_res',ts=>{const ping=Date.now()-ts;if(_netPred)_netPred.setLead(Math.min(0.05,ping/4000));const pill=document.getElementById('g-net-pill');if(pill)pill.textContent=`🟢 ${Object.keys(remotePlayers).length+1}p · ${ping}ms`;});
   crixAppBindSocket(); teamBindSocket();
+  if(!window._crixNetWake){window._crixNetWake=true;
+    const wake=()=>{try{if(socket&&ME&&!socket.connected&&!socket.active)socket.connect();}catch(_){}};
+    window.addEventListener('online',wake);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)wake();});
+  }
   socket.on('new_private_msg', function({ convId, msg }) {
     if(!msg?.e2ee||msg.e2ee.v!==1)return;
     const convs = getConvs();

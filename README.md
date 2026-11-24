@@ -376,7 +376,6 @@ El servidor no ejecuta el modelo: reenvía la conversación a cualquier endpoint
 | `CRIX_AI_MAX_TOKENS` | (opcional) tope de la respuesta, por defecto 3500 |
 | `CRIX_AI_TIMEOUT_MS` | (opcional) por defecto 180000 |
 | `CRIX_AI_RPM` | (opcional) pedidos por minuto y persona, por defecto 12 |
-| `CRIX_AI_ADMIN_ONLY` | (opcional) `1` limita el asistente a cuentas administradoras |
 
 **Dónde correr el modelo.** `mshodiqul/qwen3.5-9b-uncensored` no está disponible en ningún proveedor de Inference Providers de Hugging Face, y 9.000 millones de parámetros en BF16 necesitan una GPU con unos 20 GB de VRAM, así que no puede correr en el plan gratis de Render. Opciones: un Inference Endpoint dedicado de Hugging Face, una GPU alquilada o propia, o cualquier servidor compatible con OpenAI. Con vLLM:
 
@@ -387,7 +386,7 @@ vllm serve mshodiqul/qwen3.5-9b-uncensored --max-model-len 32768 --reasoning-par
 
 El asistente no usa *tool calling* nativo: el modelo escribe bloques ` ```crix:accion ` (`add_parts`, `update_parts`, `delete_parts`, `set_script`, `delete_script`, `read_script`, `set_lighting`, `set_settings`, `set_gui`, `rename_project`) y el editor los valida (rangos, colores, materiales, tipos) antes de aplicarlos; lo que no cumple se ignora y se informa en el chat. Por eso funciona con cualquier backend sin flags especiales. Rutas: `GET /api/ai/status` y `POST /api/ai/chat` (requieren sesión).
 
-Al ser un modelo sin filtros, cualquier persona con sesión podría usarlo para generar lo que quiera dentro de sus propios proyectos: si hace falta, `CRIX_AI_ADMIN_ONLY=1` o `CRIX_AI_RPM` bajo lo acotan.
+Al ser un modelo sin filtros, cualquier persona con sesión podría usarlo para generar lo que quiera dentro de sus propios proyectos: el asistente está abierto a todas las cuentas; `CRIX_AI_RPM` bajo acota el uso por persona.
 
 
 ## Objetos estilo Roblox, uniones y Output
