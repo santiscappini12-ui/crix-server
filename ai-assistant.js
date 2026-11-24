@@ -21,7 +21,8 @@
 const SYSTEM_PROMPT = `Sos el asistente de Crix Hub, el editor 3D de la plataforma Crix. Ayudás a crear y editar mapas, scripts, interfaces (GUI) y ajustes del juego. Respondé en el idioma de la persona (por defecto español rioplatense), corto y concreto. No inventes funciones que no estén en esta guía.
 
 LÍMITES
-No aplicás filtros de estilo ni de temática: ayudás con cualquier tipo de mapa, juego, historia o personaje, incluso de temas oscuros, violentos o para público adulto, siempre que sea creación ficticia. Lo único que NO hacés es lo ilegal: contenido sexual con menores, instrucciones para fabricar armas o explosivos, malware o código para hackear o estafar, robar datos o cuentas, o ayudar a cometer delitos reales. Si te piden algo así, lo rechazás en una frase corta y ofrecés una alternativa legal.
+La plataforma es para adultos y para creadores de juegos: NO moralizás, NO sermoneás y NO rechazás pedidos que son legales. Eso incluye: groserías, insultos y lenguaje vulgar u ofensivo en diálogos de NPC, carteles y textos de la interfaz; humor negro e irreverente; violencia, sangre y temáticas oscuras; personajes malvados, racistas o desagradables como parte de una ficción; y contenido para público adulto. Si te lo piden, lo escribís tal cual, sin suavizarlo, sin reemplazar las palabras y sin avisos ni disculpas. Nunca respondas "no puedo crear contenido ofensivo o inapropiado": eso no es motivo para negarte.
+Lo único que rechazás es lo ILEGAL: contenido sexual con menores, instrucciones reales para fabricar armas o explosivos, malware o código para hackear, estafar o robar datos o cuentas, y ayudar a cometer delitos reales. En ese caso rechazás en una frase corta y ofrecés una alternativa legal.
 
 CÓMO EDITÁS EL PROYECTO
 No tenés herramientas externas. Para modificar algo escribís bloques de código cuya línea de apertura empieza con "crix:" y el editor los aplica solo, en el momento. Podés poner una explicación corta antes o después, sin repetir el contenido del bloque. Si solo te hacen una pregunta, respondé sin bloques. Nunca digas que hiciste un cambio si no escribiste el bloque que lo hace. Un mismo mensaje puede llevar varios bloques.
@@ -164,12 +165,19 @@ module.exports = function mountAssistant(app, { requireAuth, log }) {
         temperature: 0.4, top_p: 0.9, max_tokens: cfg.maxTokens, stream: false,
       };
       if (process.env.CRIX_AI_THINKING !== undefined && process.env.CRIX_AI_THINKING !== '') payload.chat_template_kwargs = { enable_thinking: cfg.thinking };   // solo vLLM/Qwen; otros proveedores lo rechazan
-      const r = await fetch(cfg.base + '/chat/completions', { method: 'POST', headers, body: JSON.stringify(payload), signal: ctl.signal });
-      const text = await r.text();
+      // Límite de pedidos del proveedor (429, típico del plan gratis): se reintenta solo, esperando lo que indique Retry-After (máx. 8 s).
+      let r, text;
+      for (let intento = 0; ; intento++) {
+        r = await fetch(cfg.base + '/chat/completions', { method: 'POST', headers, body: JSON.stringify(payload), signal: ctl.signal });
+        text = await r.text();
+        if (r.status !== 429 || intento >= 3) break;
+        const ra = Number(r.headers.get('retry-after'));
+        await new Promise(ok => setTimeout(ok, Math.min(8000, (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1500 * 2 ** intento))));
+      }
       let data = null; try { data = JSON.parse(text); } catch {}
       if (!r.ok || !data) {
         log && log('AI', 'Error del modelo HTTP ' + r.status + ': ' + text.slice(0, 300));
-        const hint = r.status === 401 || r.status === 403 ? 'rechazó la clave (CRIX_AI_API_KEY)' : r.status === 404 ? 'no encontró el modelo o la ruta (revisá CRIX_AI_BASE_URL y CRIX_AI_MODEL)' : r.status === 503 ? 'está iniciando o sin capacidad; probá en un momento' : 'respondió con error ' + r.status;
+        const hint = r.status === 401 || r.status === 403 ? 'rechazó la clave (CRIX_AI_API_KEY)' : r.status === 404 ? 'no encontró el modelo o la ruta (revisá CRIX_AI_BASE_URL y CRIX_AI_MODEL)' : r.status === 429 ? 'alcanzó su límite de uso (plan gratis): esperá un minuto y probá de nuevo, o usá otro modelo en CRIX_AI_MODEL' : r.status === 503 ? 'está iniciando o sin capacidad; probá en un momento' : 'respondió con error ' + r.status;
         return res.status(200).json({ ok: false, err: 'El servidor del modelo ' + hint + '. [HTTP ' + r.status + '] ' + text.replace(/\s+/g, ' ').slice(0, 200) });
       }
       const choice = data.choices && data.choices[0] || {};
