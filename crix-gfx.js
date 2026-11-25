@@ -4,20 +4,19 @@
 //  • Materiales PBR (MeshStandard / MeshPhysical): rugosidad, metalicidad, barniz, relieve (bump) y reflejos del entorno.
 //  • Iluminación basada en imagen: el cielo se convierte en un mapa de entorno (PMREM) que ilumina y se refleja en todo.
 //  • Cielo procedural con gradiente, sol, halo y nubes que se mueven despacio.
-//  • Calidad automática (celular / PC) y ajustable: localStorage.crix_gfx = 'low' | 'high' | 'ultra'.
+//  • Misma calidad en celular y PC (sin modo de baja resolución). Ajustable: localStorage.crix_gfx = 'high' | 'ultra'.
 (function () {
   const T = window.THREE;
   if (!T) return;
-  const mobile = /Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || Math.min(innerWidth, innerHeight) < 600;
   let pref = ''; try { pref = String(localStorage.getItem('crix_gfx') || ''); } catch (e) {}
   if (pref === 'off') return;   // sin CrixGFX el juego usa sus materiales y luces de siempre
-  const QUALITY = (pref === 'low' || pref === 'high' || pref === 'ultra') ? pref : (mobile ? 'low' : 'high');
+  const QUALITY = pref === 'ultra' ? 'ultra' : 'high';   // 'low' ya no existe: cualquier valor guardado distinto de 'ultra' usa 'high'
   // Flujo de color correcto: salida sRGB (sin tone mapping, para respetar los colores), con todos los colores de entrada convertidos a lineal.
   // Los materiales "viejos" (Basic/Phong/Lambert/Points/Sprite, p. ej. los del avatar) se parchean más abajo para convertir
   // solos lo que se les asigna: sus archivos no se tocan y sus colores se ven igual que se eligieron.
   // Para volver al aspecto anterior: localStorage.setItem('crix_gfx','off') y recargar.
   const SRGB = true;
-  const Q = { srgb: SRGB, quality: QUALITY, clouds: true, bump: QUALITY !== 'low', physical: QUALITY !== 'low', env: true, anisotropy: QUALITY === 'ultra' ? 16 : QUALITY === 'high' ? 8 : 2 };
+  const Q = { srgb: SRGB, quality: QUALITY, clouds: true, bump: true, physical: true, env: true, anisotropy: QUALITY === 'ultra' ? 16 : QUALITY === 'high' ? 8 : 2 };
 
   // ── Color ────────────────────────────────────────────────────────────────────────────────────
   // Los colores del juego están escritos en sRGB (#rrggbb). Con salida sRGB, los materiales necesitan color lineal.
@@ -118,11 +117,11 @@
         uExposure: { value: 1 }, uSunBoost: { value: 30 }, uTime: { value: 0 }, uCloudAmt: { value: 0.5 } },
       vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, side: T.BackSide, depthWrite: false, depthTest: false, fog: false, toneMapped: false
     });
-    if (clouds) m.defines = { CLOUDS: 1, CLOUD_OCT: Q.quality === 'low' ? 3 : 5 };
+    if (clouds) m.defines = { CLOUDS: 1, CLOUD_OCT: 5 };
     return m;
   }
   const SKY_GEO = new T.SphereGeometry(1, clampSeg(32), clampSeg(18));
-  function clampSeg(n) { return Q.quality === 'low' ? Math.round(n * 0.6) : n; }
+  function clampSeg(n) { return n; }
   function sky(clouds) { const m = new T.Mesh(SKY_GEO, skyMaterial(clouds)); m.frustumCulled = false; m.renderOrder = -1000; m.matrixAutoUpdate = true; return m; }
 
   function skyParams(L) {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v25';
+const CACHE_NAME = 'crix-shell-v26';
 // Archivos que la persona descargó para usar sin conexión (juegos, apps, videos, accesorios). Este caché NO se borra al
 // actualizar el service worker: solo se vacía cuando la persona quita la descarga (o borra los datos del sitio).
 const OFFLINE_CACHE = 'crix-offline-v1';
