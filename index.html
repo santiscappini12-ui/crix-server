@@ -9104,6 +9104,33 @@ function proceduralBump(kind) {
   if (_procBump[kind]) return _procBump[kind];
   const t = new THREE.CanvasTexture(patternCanvas(kind)); t.wrapS = t.wrapT = THREE.RepeatWrapping; if (window.CrixGFX) CrixGFX.tex(t, false); _procBump[kind] = t; return t;
 }
+// Relieve como mapa de normales precalculado (Sobel sobre la luminosidad): no depende de derivadas de pantalla como bumpMap,
+// que en varias GPU de celular sale casi plano. Sirve para los dibujos integrados y también para las texturas propias.
+function heightToNormalTexture(src, size, strength) {
+  try {
+    const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height; if (!sw || !sh) return null;
+    const S = size, c = document.createElement('canvas'); c.width = c.height = S;
+    const x = c.getContext('2d', { willReadFrequently:true }); x.drawImage(src, 0, 0, S, S);
+    const im = x.getImageData(0, 0, S, S), d = im.data, H = new Float32Array(S * S);
+    for (let i = 0; i < S * S; i++) H[i] = (0.299 * d[i*4] + 0.587 * d[i*4+1] + 0.114 * d[i*4+2]) / 255;
+    const at = (xx, yy) => H[((yy + S) % S) * S + ((xx + S) % S)];   // con envoltura: la textura se repite sin costuras
+    for (let yy = 0; yy < S; yy++) for (let xx = 0; xx < S; xx++) {
+      const dx = (at(xx+1,yy-1) + 2*at(xx+1,yy) + at(xx+1,yy+1)) - (at(xx-1,yy-1) + 2*at(xx-1,yy) + at(xx-1,yy+1));
+      const dy = (at(xx-1,yy+1) + 2*at(xx,yy+1) + at(xx+1,yy+1)) - (at(xx-1,yy-1) + 2*at(xx,yy-1) + at(xx+1,yy-1));
+      let nx = -dx * strength, ny = dy * strength, nz = 1; const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
+      const o = (yy * S + xx) * 4; d[o] = (nx * 0.5 + 0.5) * 255; d[o+1] = (ny * 0.5 + 0.5) * 255; d[o+2] = (nz * 0.5 + 0.5) * 255; d[o+3] = 255;
+    }
+    x.putImageData(im, 0, 0);
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    if (window.CrixGFX) CrixGFX.tex(t, false); else t.needsUpdate = true;   // datos lineales, no color
+    return t;
+  } catch (e) { return null; }   // imagen contaminada o sin memoria: se queda sin relieve, no falla
+}
+var _procNormal = {};
+function proceduralNormal(kind) {
+  if (_procNormal[kind] !== undefined) return _procNormal[kind];
+  return (_procNormal[kind] = heightToNormalTexture(patternCanvas(kind), 256, 2.2));
+}
 function applyPartUVs(geo, d, sx, sy, sz) {
   const T = Math.max(0.25, Math.min(64, Number(d.textureId ? d.texScale : 4) || 4)), uv = geo.attributes && geo.attributes.uv;
   if (!uv || d.type === 'Wedge' || d.type === 'ImportedMesh') {
@@ -9146,9 +9173,18 @@ function buildPartMaterial(d) {
   if (custom) {
     const t = new THREE.Texture(custom.img); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; if (G) G.tex(t); else t.needsUpdate = true;
     mat.map = t; mat.userData.customTex = t; if (!d.texTint) mat.color = new THREE.Color('#ffffff');
+    // Relieve para texturas propias: se calcula una vez por imagen (512 px) y se comparte entre todas las partes que la usan.
+    if (G && G.Q.bump && mat.isMeshStandardMaterial) {
+      if (custom.normal === undefined) custom.normal = heightToNormalTexture(custom.img, 512, 1.6);
+      if (custom.normal) { mat.normalMap = custom.normal; mat.normalScale = new THREE.Vector2(1, 1); }
+    }
   } else if (def.pattern) {
     mat.map = proceduralTexture(def.pattern);
-    if (G && G.Q.bump && def.bump && mat.isMeshStandardMaterial) { mat.bumpMap = proceduralBump(def.pattern); mat.bumpScale = def.bump; }
+    if (G && G.Q.bump && def.bump && mat.isMeshStandardMaterial) {
+      const nm = proceduralNormal(def.pattern);
+      if (nm) { const k = Math.max(0.5, Math.min(2.5, def.bump)); mat.normalMap = nm; mat.normalScale = new THREE.Vector2(k, k); }
+      else { mat.bumpMap = proceduralBump(def.pattern); mat.bumpScale = def.bump; }   // respaldo si no se pudo generar
+    }
   }
   return mat;
 }
