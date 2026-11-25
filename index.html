@@ -9487,9 +9487,12 @@ function aiContext() {
   let out = L.join('\n'); if (out.length > 45000) out = out.slice(0, 45000) + '\n(…estado recortado)';
   return out;
 }
+function aiClaimsEdit(t) { return /\b(agregu[ée]|agreg[oó]|cre[éeó]|creamos|hice|hizo|hecho|puse|pus[eo]|cambi[ée]|cambi[oó]|modifiqu[ée]|actualic[ée]|borr[ée]|elimin[ée]|apliqu[ée]|reescrib[íi]|ajust[ée]|a[ñn]ad[íi]|listo|ya est[aá])\b|\b(added|created|updated|changed|removed|done)\b/i.test(t); }
 function aiApiMessages() {
+  // Se conservan los bloques crix: completos en el historial. Antes los viejos se cambiaban por "(bloque ... ya aplicado)",
+  // y el modelo terminaba imitando eso: contaba lo que hacía pero sin escribir el bloque, y el editor no cambiaba nada.
   const arr = crixAi.msgs.filter(m => !m.local).slice(-14);
-  return arr.map((m, i) => ({ role: m.role, content: m.role === 'assistant' && i < arr.length - 3 ? m.content.replace(/```crix:([a-z_]+)[^\n]*\n[\s\S]*?```/g, '(bloque crix:$1 ya aplicado)') : m.content }));
+  return arr.map(m => ({ role: m.role, content: m.content }));
 }
 
 // ── Lectura de las respuestas del modelo ──
@@ -9499,9 +9502,11 @@ function aiJson(body) {
   t = t.replace(/^\s*\/\/.*$/gm, '').replace(/,\s*([\]}])/g, '$1'); return JSON.parse(t);
 }
 function aiParse(reply) {
-  const actions = [], problems = [], re = /```crix:([a-z_]+)([^\n]*)\n([\s\S]*?)```/g; let m;
-  while ((m = re.exec(reply))) actions.push({ name: m[1], attrs: aiAttrs(m[2]), body: m[3] });
-  if (/```crix:[a-z_]+[^\n]*\n/.test(reply.replace(re, ''))) problems.push('El último bloque quedó cortado y no se aplicó. Pedile que continúe.');
+  // Tolerante con cómo el modelo escribe la valla: ``` o ~~~ (o más), espacios antes de "crix:", mayúsculas, CRLF.
+  const actions = [], problems = [], re = /(`{3,}|~{3,})[ \t]*crix[:：][ \t]*([A-Za-z_]+)([^\n]*)\r?\n([\s\S]*?)\1/g; let m;
+  reply = String(reply || '');
+  while ((m = re.exec(reply))) actions.push({ name: m[2].toLowerCase(), attrs: aiAttrs(m[3]), body: m[4] });
+  if (/(`{3,}|~{3,})[ \t]*crix[:：][ \t]*[A-Za-z_]+[^\n]*\n/.test(reply.replace(re, ''))) problems.push('El último bloque quedó cortado y no se aplicó. Pedile que continúe.');
   return { actions, problems };
 }
 
@@ -9722,7 +9727,7 @@ async function aiSend() {
   crixAi.timer = setInterval(() => { const t = aiEl('ai-typing'); if (t) t.textContent = 'Trabajando · ' + Math.round((Date.now() - crixAi.t0) / 1000) + ' s'; }, 1000);
   aiRender();
   const pre = { settings: JSON.stringify(stSettings || {}), guis: JSON.stringify(stGuis || []) }, total = { hist: false, settings: false, guis: false };
-  let changedMsg = null, rounds = 0;
+  let changedMsg = null, rounds = 0, retries = 0;
   try {
     for (;;) {
       const ctl = new AbortController(); crixAi.ctl = ctl;
@@ -9730,6 +9735,13 @@ async function aiSend() {
       let data = {}; try { data = await resp.json(); } catch {}
       if (!resp.ok || data.ok === false) throw new Error(data.err || ('Error ' + resp.status));
       const parsed = aiParse(String(data.reply || '')), out = aiApply(parsed.actions);
+      // El modelo a veces cuenta lo que "hizo" sin escribir el bloque crix: → no se aplicó nada. Se le avisa una vez y reintenta.
+      if (!parsed.actions.length && !parsed.problems.length && !data.truncated && retries < 1 && aiClaimsEdit(String(data.reply || ''))) {
+        retries++;
+        crixAi.msgs.push({ role: 'assistant', hidden: true, content: String(data.reply || '') });
+        crixAi.msgs.push({ role: 'user', hidden: true, content: '[Editor] Tu respuesta no tenía ningún bloque ```crix:...```, así que NO se aplicó ningún cambio en el proyecto. Describir lo que harías no edita nada. Escribí ahora los bloques crix: completos que hacen lo que pedí.' });
+        aiRender(); continue;
+      }
       parsed.problems.forEach(p => out.results.push({ ok: false, text: p }));
       if (data.truncated && !parsed.problems.length) out.results.push({ ok: false, text: 'La respuesta se cortó por longitud. Pedile que continúe.' });
       const msg = { role: 'assistant', content: String(data.reply || ''), results: out.results };
