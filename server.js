@@ -245,6 +245,12 @@ function broadcastRemote(events) {
 }
 dbSync = require('./db-sync')({ getDB: () => DB, onRemoteChange: broadcastRemote });
 dbSync.init();
+// Un contenido borrado no se puede volver a crear con el mismo id (un cliente con copia local vieja lo re-subía al iniciar sesión).
+function rejectIfDeleted(res, col, id) {
+  if (!dbSync || !dbSync.isDeleted(col, id)) return false;
+  res.status(410).json({ ok:false, code:'DELETED', err:'Este contenido fue eliminado' });
+  return true;
+}
 persist.setSync({ merge(remote) { const changed = dbSync.merge(remote); if (changed) saveDB(); return changed; } });
 persist.startSync();
 
@@ -2155,6 +2161,7 @@ app.post('/api/maps', (req, res) => {
     if (!m || !m.id) return res.json({ ok:false });
     if (m.partial) return res.status(400).json({ ok:false, err:'Juego incompleto (catálogo liviano): se descarga completo antes de guardarlo' });
     const old = DB.maps[m.id];
+    if (!old && rejectIfDeleted(res, 'maps', m.id)) return;
     if (old && !canEditMap(old, user))
       return res.status(403).json({ ok:false, err:'No podés editar este juego' });
     const isOwner = !old || old.authorId === user.id || !!user.isAdmin;
@@ -2222,6 +2229,7 @@ app.delete('/api/maps/:id', (req, res) => {
     return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
   const aid = assetId(req.params.id);
   delete DB.maps[req.params.id];
+  dbSync.tombstone('maps', req.params.id);
   if (DB.appData) delete DB.appData[req.params.id];
   if (DB.appScores) delete DB.appScores[req.params.id];
   scriptDataStore.removeMap(req.params.id);
@@ -2544,6 +2552,7 @@ app.post('/api/videos', async (req, res) => {
     if (!VIDEO_ID_RE.test(String(v.id))) return res.status(400).json({ ok:false, err:'Identificador de video inválido' });
     DB.videos = DB.videos || [];
     const idx = DB.videos.findIndex(x => x.id === v.id);
+    if (idx < 0 && rejectIfDeleted(res, 'videos', v.id)) return;
     if (idx >= 0 && DB.videos[idx].authorId !== user.id && !user.isAdmin)
       return res.status(403).json({ ok:false, err:'No podés editar este contenido' });
     const old = idx >= 0 ? DB.videos[idx] : null;
@@ -2618,6 +2627,10 @@ async function finalizeVideoUpload(video, tmp, size) {
     const wasReady = !!video.ready, oldPath = videoFilePath(video), file = `${video.id}.${VIDEO_EXT[mime]}`;
     fs.renameSync(tmp, path.join(VIDEO_DIR, file));
     if (oldPath && path.basename(oldPath) !== file) { try { fs.unlinkSync(oldPath); } catch {} persist.delKey('videos/' + path.basename(oldPath)); }
+    if (!(DB.videos || []).includes(video)) {   // lo borraron mientras se subía el archivo: no se deja huérfano ni se avisa
+      try { fs.unlinkSync(path.join(VIDEO_DIR, file)); } catch {}
+      return { ok:false, err:'El video fue eliminado' };
+    }
     video.file = file; video.mime = mime; video.size = size; video.ready = true; delete video.data;
     await settleUpload(persist.putFile('videos/' + file, path.join(VIDEO_DIR, file)));
     saveDB();
@@ -2740,6 +2753,7 @@ app.delete('/api/videos/:id', (req, res) => {
   if (video.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este video' });
   DB.videos = DB.videos.filter(v => v.id !== req.params.id);
+  dbSync.tombstone('videos', req.params.id);
   { const f = videoFilePath(video); if (f) { try { fs.unlinkSync(f); } catch {} persist.delKey('videos/' + path.basename(f)); } }
   saveDB();
   emitVideoEvent(video, 'video_deleted', { id:req.params.id });
@@ -2760,6 +2774,7 @@ app.post('/api/posts', (req, res) => {
     DB.posts = DB.posts || [];
     const index = DB.posts.findIndex(existing => existing.id === p.id);
     const previous = index >= 0 ? DB.posts[index] : null;
+    if (!previous && rejectIfDeleted(res, 'posts', p.id)) return;
     if (previous && previous.authorId !== user.id && !user.isAdmin)
       return res.status(403).json({ ok:false, err:'No podés editar esta publicación' });
     const savedPost = { ...(previous || {}), ...p, authorId:previous?.authorId || user.id, authorName:previous?.authorName || user.username, privacy:'public' };
@@ -2781,6 +2796,7 @@ app.delete('/api/posts/:id', (req, res) => {
   if (post && post.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar esta publicación' });
   DB.posts = (DB.posts || []).filter(p => p.id !== req.params.id);
+  if (post) dbSync.tombstone('posts', req.params.id);
   saveDB();
   io.emit('post_deleted', { id: req.params.id });
   res.json({ ok: true });

@@ -2361,9 +2361,10 @@ async function pubClassify() { const m = getMaps()[pubMapId]; const c = await cl
 async function uploadMapWithRetry(id) {
   for (let n = 1; n <= 3; n++) {
     const map = getMaps()[id];   // siempre la versión más reciente
-    if (!map || map.partial || !teamCanEdit(map)) { UNSYNCED_MAPS.delete(id); return { ok:true, skipped:true }; }
+    if (!map || map.partial || !teamCanEdit(map) || pendingMapDeletes().includes(id)) { UNSYNCED_MAPS.delete(id); return { ok:true, skipped:true }; }
     try { await apiRequest('/api/maps', { method:'POST', body:map }); UNSYNCED_MAPS.delete(id); return { ok:true, id }; }
     catch (err) {
+      if (err && err.status === 410) { UNSYNCED_MAPS.delete(id); const ms = getMaps(); if (ms[id]) { delete ms[id]; DB.set('maps', ms); } if (ME && Array.isArray(ME.games)) { ME.games = ME.games.filter(g => g !== id); try { saveMe(); } catch (_) {} } return { ok:true, skipped:true }; }
       if (err && err.status === 422) { UNSYNCED_MAPS.delete(id); const ms = getMaps(); if (ms[id]) { delete ms[id].classification; DB.set('maps', ms); } return { ok:false, err:(err.message || clsT('rejected')) }; }
       if (err && err.status === 403 && ME && map.authorId === ME.id) { const nid = reIdMap(id); if (nid) { id = nid; continue; } }
       if (n === 3 || (err && (err.status === 401 || err.status === 403))) { UNSYNCED_MAPS.add(id); return { ok:false, err:(err && err.message) || 'sin conexión' }; }
@@ -2407,10 +2408,30 @@ function setMaps(m)  {
     }
   });
   Object.entries(previous).forEach(([id, map]) => {
-    if (map?.authorId === ME.id && !m[id])
-      apiRequest('/api/maps/' + encodeURIComponent(id), { method:'DELETE' }).catch(() => {});
+    if (map?.authorId === ME.id && !m[id]) queueMapDelete(id);
   });
 }
+// Borrado de juegos: antes el DELETE se lanzaba una sola vez y si fallaba (red, sesión) el error se tragaba: el juego seguía en el
+// servidor y volvía a aparecer en la siguiente sincronización. Ahora el borrado queda anotado en el dispositivo y se reintenta hasta
+// que el servidor lo confirme; además espera a que termine cualquier guardado en curso de ese juego (si no, ese guardado lo recreaba).
+function pendingMapDeletes() { const v = DB.get('pending_map_deletes'); return Array.isArray(v) ? v : []; }
+function setPendingMapDeletes(list) { DB.set('pending_map_deletes', [...new Set(list)]); }
+function queueMapDelete(id) {
+  UNSYNCED_MAPS.delete(id);
+  setPendingMapDeletes([...pendingMapDeletes(), id]);
+  return flushMapDelete(id);
+}
+function flushMapDelete(id) {
+  if (!ME || !DB.get('token')) return Promise.resolve(false);
+  return (MAP_UPLOADS[id] = (MAP_UPLOADS[id] || Promise.resolve()).catch(() => {}).then(async () => {
+    try { await apiRequest('/api/maps/' + encodeURIComponent(id), { method:'DELETE' }); }
+    catch (err) { if (!(err && (err.status === 404 || err.status === 410))) return false; }   // 403 o red: se reintenta; 404/410: ya no existe
+    setPendingMapDeletes(pendingMapDeletes().filter(x => x !== id));
+    return true;
+  }));
+}
+function flushPendingMapDeletes() { pendingMapDeletes().forEach(id => flushMapDelete(id)); }
+setInterval(() => { if (ME && DB.get('token')) flushPendingMapDeletes(); }, 30000);
 function getConvs() {
   const raw = DB.get('convs') || {};
   const encrypted = {};
@@ -2690,7 +2711,9 @@ async function syncCloudData() {
   const localVideos = getVideos();
   const localPosts = getPosts();
   try {
-    const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id && !map.partial);
+    const delPending = new Set(pendingMapDeletes());
+    await Promise.all([...delPending].map(id => flushMapDelete(id)));   // primero se confirman los borrados pendientes
+    const ownMaps = Object.values(localMaps).filter(map => map.authorId === ME.id && !map.partial && !pendingMapDeletes().includes(map.id));
     const ownVideos = localVideos.filter(video => video.authorId === ME.id);
     const ownPosts = localPosts.filter(post => post.authorId === ME.id);
     // El envío inicial se hace una sola vez por sesión (los reintentos solo vuelven a descargar).
@@ -2714,6 +2737,7 @@ async function syncCloudData() {
     const users = { ...(usersResult.users || {}) };
     const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
     const maps = keepUnsyncedMaps({ ...(mapsResult.maps || {}) });
+    pendingMapDeletes().forEach(id => { delete maps[id]; });
     const vidsById = Object.fromEntries(localVideos.map(video => [video.id, video]));
     const videos = (videosResult.videos || []).map(video => ({ ...video, data: video.data === '[data]' ? (vidsById[video.id]?.data || null) : video.data }));
     const posts = postsResult.posts || [];   // el servidor es la fuente de verdad (antes la copia local pisaba likes y respuestas de otros)
@@ -2742,7 +2766,7 @@ async function refreshCloudContent() {
     const ownProfile = sessionProfile(sessionResult.user, users); users[ownProfile.id] = ownProfile;
     const videosById = Object.fromEntries(localVideos.map(video => [video.id, video]));
     const videos = (videosResult.videos || []).map(video => ({ ...video, data:video.data === '[data]' ? (videosById[video.id]?.data || null) : video.data }));
-    DB.set('users', users); DB.set('maps', keepUnsyncedMaps({ ...(mapsResult.maps || {}) })); DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
+    DB.set('users', users); DB.set('maps', (() => { const mm = keepUnsyncedMaps({ ...(mapsResult.maps || {}) }); pendingMapDeletes().forEach(id => { delete mm[id]; }); return mm; })()); DB.set('crix_videos', videos); DB.set('crix_posts', postsResult.posts || []);
     ME = ownProfile;
     checkNotifs();
     if (!_screenActive('s-game')) rerenderLiveScreens('maps');
@@ -6843,6 +6867,7 @@ async function refreshLive(kind) {
       const r = await apiRequest('/api/maps'), merged = { ...(r.maps||{}) }, mine = getMaps();
       if (stMapId && mine[stMapId] && (!merged[stMapId] || (merged[stMapId].partial && !mine[stMapId].partial))) merged[stMapId] = mine[stMapId];
       keepUnsyncedMaps(merged);
+      pendingMapDeletes().forEach(id => { delete merged[id]; });
       DB.set('maps', merged);
     } else if (kind === 'users') {
       // Se pide también la sesión: así tu propia cuenta (amigos, solicitudes, foto, bio) se actualiza desde lo que hiciste en OTRO dispositivo.

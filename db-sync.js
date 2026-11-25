@@ -17,7 +17,8 @@ const crypto = require('crypto');
 const KEYED = ['users', 'maps', 'sessions', 'apiKeys', 'accessories', 'datastores'];   // datastores: un registro por juego (DataStore de los scripts)   // objeto { id: registro }
 const LISTS = ['videos', 'posts'];             // arreglo de registros con `id`
 const COLS = [...KEYED, ...LISTS];
-const TOMB_KEEP_MS = 30 * 24 * 3600 * 1000;
+const TOMB_KEEP_MS = 365 * 24 * 3600 * 1000;
+const TOMB_WINS = ['maps', 'videos', 'posts'];   // el borrado gana incluso a ediciones posteriores (vistas, likes…) de otra instancia
 
 module.exports = function createDbSync({ getDB, onRemoteChange }) {
   const cache = new Map();   // 'col:id' → { sig, u }
@@ -104,7 +105,7 @@ module.exports = function createDbSync({ getDB, onRemoteChange }) {
       const local = new Map(entries(DB, col));
       for (const [id, r] of entries(remote, col)) {
         const l = local.get(id), t = Number(T[col][id]) || 0, ru = Number(r._u) || 0;
-        if (t && t >= ru) {   // fue borrado después de su última modificación
+        if (t && (t >= ru || TOMB_WINS.includes(col))) {   // borrado: gana a cualquier edición de otra instancia (vistas, likes, comentarios…); recrear exige un id nuevo
           if (l && (Number(l._u) || 0) <= t) { drop(DB, col, id); cache.delete(col + ':' + id); known[col].delete(id); events.push([col, 'deleted', id, l]); changed = true; }
           continue;
         }
@@ -168,5 +169,12 @@ module.exports = function createDbSync({ getDB, onRemoteChange }) {
     return changed;
   }
 
-  return { init, reconcile, merge };
+  // Deja la lápida en el acto (sin esperar al próximo guardado): así ninguna fusión ni re-subida puede resucitar el registro.
+  function tombstone(col, id) {
+    const T = tombs(); id = String(id);
+    T[col][id] = Date.now(); cache.delete(col + ':' + id); known[col].delete(id);
+  }
+  const isDeleted = (col, id) => !!tombs()[col]?.[String(id)];
+
+  return { init, reconcile, merge, tombstone, isDeleted };
 };
