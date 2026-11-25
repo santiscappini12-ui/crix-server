@@ -9452,39 +9452,63 @@ function aiChip(btn) { const i = aiEl('ai-input'); i.value = btn.textContent; ai
 
 // ── Contexto que ve el modelo ──
 function aiContext() {
+  // Le da a la IA TODO lo que hay en el proyecto: ajustes, luz, resumen, NPC, cada pieza con todos sus campos, scripts completos, GUI completa y sonidos.
   try { const ov = aiEl('code-overlay'); if (ov && ov.classList.contains('open')) saveActiveScript(); } catch {}
   const m = (getMaps() || {})[stMapId] || {}, r2 = n => Math.round((Number(n) || 0) * 100) / 100, L = [];
-  L.push('Nombre del proyecto: ' + (m.name || 'Sin nombre'));
+  const short = v => { if (v === null || v === undefined || v === '') return undefined; if (typeof v === 'number') return r2(v); if (typeof v === 'string') return v.length > 160 ? '(texto largo de ' + v.length + ' caracteres)' : v; if (typeof v === 'object') { let t = ''; try { t = JSON.stringify(v); } catch {} return t.length > 300 ? '(datos grandes)' : v; } return v; };
+  const SKIP = new Set(['meshData', 'modelObj', 'textureData', 'thumb', 'data', 'buffer']), DEF = { anchored: true, canCollide: true, transparent: 0, rx: 0, ry: 0, rz: 0, material: 'SmoothPlastic', behavior: 'none' };
+  const partLine = e => {
+    const d = e.data, o = {};
+    for (const k of Object.keys(d)) { if (SKIP.has(k)) continue; if (k in DEF && d[k] === DEF[k]) continue; const v = short(d[k]); if (v !== undefined) o[k] = v; }
+    if (d.type === 'ImportedMesh') o.mesh = true;
+    return JSON.stringify(o);
+  };
+  L.push('Nombre del proyecto: ' + (m.name || 'Sin nombre') + (m.id ? ' · id ' + m.id : ''));
   L.push('Ajustes del juego: ' + JSON.stringify(stSettings || {}));
   L.push('Iluminación: ' + JSON.stringify(stLighting || {}));
-  if (selPart && selPart.data) L.push('Pieza seleccionada ahora: ' + (selPart.data.name || selPart.data.id));
-  L.push('PIEZAS (' + stParts.length + '), una por línea:');
-  const MAX = 250;
-  stParts.slice(0, MAX).forEach(e => {
-    const d = e.data, o = { id: d.id, name: d.name, type: d.type, x: r2(d.x), y: r2(d.y), z: r2(d.z), sx: r2(d.sx), sy: r2(d.sy), sz: r2(d.sz) };
-    if (d.rx || d.ry || d.rz) { o.rx = r2(d.rx); o.ry = r2(d.ry); o.rz = r2(d.rz); }
-    o.color = d.color; if (d.material && d.material !== 'SmoothPlastic') o.material = d.material;
-    if (d.anchored === false) o.anchored = false; if (d.canCollide === false) o.canCollide = false; if (d.transparent) o.transparent = d.transparent;
-    if (d.behavior && d.behavior !== 'none') { o.behavior = d.behavior; o.behaviorValue = d.behaviorValue; }
-    if (d.target) o.target = d.target; if (d.isNPC) o.npc = true; if (d.type === 'ImportedMesh') o.mesh = true;
-    L.push(JSON.stringify(o));
-  });
-  if (stParts.length > MAX) L.push('(… y ' + (stParts.length - MAX) + ' piezas más sin listar)');
+  if (selPart && selPart.data) L.push('Pieza seleccionada ahora por la persona: ' + (selPart.data.name || selPart.data.id));
+  try {
+    const types = {}; let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, ymax = -1e9;
+    stParts.forEach(e => { const d = e.data; types[d.type] = (types[d.type] || 0) + 1; x0 = Math.min(x0, d.x - (d.sx || 0) / 2); x1 = Math.max(x1, d.x + (d.sx || 0) / 2); z0 = Math.min(z0, d.z - (d.sz || 0) / 2); z1 = Math.max(z1, d.z + (d.sz || 0) / 2); ymax = Math.max(ymax, d.y + (d.sy || 0) / 2); });
+    const sp = stParts.find(e => e.data.type === 'Spawn'), names = {}; stParts.forEach(e => { names[e.data.name] = (names[e.data.name] || 0) + 1; });
+    const dup = Object.keys(names).filter(n => names[n] > 1).slice(0, 15).map(n => n + ' ×' + names[n]);
+    L.push('RESUMEN: ' + stParts.length + ' piezas (' + Object.entries(types).map(([k, v]) => k + ' ' + v).join(', ') + '), ' + stScripts.length + ' scripts, ' + (stGuis || []).length + ' pantallas de interfaz.' +
+      (stParts.length ? ' Mapa ocupa x ' + r2(x0) + '…' + r2(x1) + ', z ' + r2(z0) + '…' + r2(z1) + ', altura máx ' + r2(ymax) + '.' : '') + (sp ? ' Spawn en x=' + r2(sp.data.x) + ', y=' + r2(sp.data.y) + ', z=' + r2(sp.data.z) + '.' : ' No hay Spawn.') +
+      (dup.length ? ' Nombres repetidos (cuidado con los scripts que buscan por nombre): ' + dup.join(', ') + '.' : ''));
+  } catch {}
+  try {   // NPC: nombre EXACTO que hay que usar en game.moveNpc / game.getNpc
+    const npcs = stParts.filter(e => e.data && e.data.isNPC);
+    L.push('NPC (' + npcs.length + '): ' + (npcs.length ? npcs.map(e => '«' + e.data.name + '» en x=' + r2(e.data.x) + ', z=' + r2(e.data.z)).join('; ') : 'ninguno (se crean con crix:add_npcs)'));
+  } catch {}
+  // Scripts primero (lo más importante para editar), completos mientras entren en el presupuesto.
   L.push('SCRIPTS (' + stScripts.length + '):');
-  let budget = 14000;
+  let budget = 50000;
   [...stScripts].sort((a, b) => (b.id === activeScriptId) - (a.id === activeScriptId)).forEach(s => {
     const code = String(s.code || ''), head = '--- ' + s.type + ' «' + s.name + '» (' + (s.language || 'javascript') + ') ---';
     if (code.length <= budget) { budget -= code.length; L.push(head, code); } else L.push(head, '(' + code.length + ' caracteres; usá crix:read_script para leerlo)');
   });
   if (stGuis && stGuis.length) {
-    L.push('INTERFAZ (GUI):');
-    stGuis.forEach(g => L.push('Pantalla «' + g.name + '»' + (g.visible === false ? ' (oculta)' : '') + ': ' + g.elements.slice(0, 40).map(e => e.type + ' «' + e.name + '» [' + [e.x, e.y, e.w, e.h].map(r2).join(',') + ']' + (e.text ? ' "' + String(e.text).slice(0, 40) + '"' : '')).join('; ')));
+    L.push('INTERFAZ (GUI), cada elemento con todos sus campos:');
+    let gb = 20000;
+    stGuis.forEach(g => {
+      L.push('Pantalla «' + g.name + '»' + (g.visible === false ? ' (oculta)' : '') + ':');
+      (g.elements || []).slice(0, 80).forEach(e => { const o = {}; for (const k of Object.keys(e)) { const v = short(e[k]); if (v !== undefined) o[k] = v; } const line = JSON.stringify(o); if (gb > 0) { L.push('  ' + line); gb -= line.length; } });
+    });
   }
   try {   // sonidos ya subidos al proyecto: el asistente solo puede reproducir estos por nombre (no puede subir audio)
     const names = [...new Set([...Object.values(m.sounds || {}).map(x => x && x.name), ...(m.scripts || []).filter(x => x.type === 'Sound').map(x => x.name)].filter(Boolean).map(String))].slice(0, 60);
     L.push('SONIDOS (' + names.length + '): ' + (names.length ? names.join(', ') : 'ninguno subido todavía'));
   } catch {}
-  let out = L.join('\n'); if (out.length > 45000) out = out.slice(0, 45000) + '\n(…estado recortado)';
+  try { const tn = Object.values(stTexNames || {}).filter(Boolean); if (tn.length) L.push('TEXTURAS subidas (' + tn.length + '): ' + tn.slice(0, 40).join(', ')); } catch {}
+  // Todas las piezas, con todos sus campos, hasta llenar el presupuesto; el resto se resume por nombre.
+  let pb = 55000, listed = 0;
+  L.push('PIEZAS (' + stParts.length + '), una por línea (solo se muestran los campos que no están en su valor por defecto):');
+  for (const e of stParts) { const line = partLine(e); if (pb - line.length < 0) break; pb -= line.length; L.push(line); listed++; }
+  if (listed < stParts.length) {
+    const rest = {}; stParts.slice(listed).forEach(e => { const k = String(e.data.name || '').replace(/[\s_-]*\d+$/, '') || e.data.type; rest[k] = (rest[k] || 0) + 1; });
+    L.push('(… y ' + (stParts.length - listed) + ' piezas más sin listar, por nombre: ' + Object.entries(rest).slice(0, 60).map(([k, v]) => k + ' ×' + v).join(', ') + '. Se pueden tocar con "target" por nombre o prefijo*.)');
+  }
+  let out = L.join('\n'); if (out.length > 140000) out = out.slice(0, 140000) + '\n(…estado recortado)';
   return out;
 }
 function aiClaimsEdit(t) { return /\b(agregu[ée]|agreg[oó]|cre[éeó]|creamos|hice|hizo|hecho|puse|pus[eo]|cambi[ée]|cambi[oó]|modifiqu[ée]|actualic[ée]|borr[ée]|elimin[ée]|apliqu[ée]|reescrib[íi]|ajust[ée]|a[ñn]ad[íi]|listo|ya est[aá])\b|\b(added|created|updated|changed|removed|done)\b/i.test(t); }
@@ -9691,6 +9715,23 @@ function aiApply(actions) {
           const r = aiSetGui(aiJson(a.body)); flags.guis = true;
           ok('Pantalla «' + r.screen + '»: ' + r.added + ' elementos nuevos' + (r.updated ? ', ' + r.updated + ' actualizados' : ''));
           if (aiEl('gui-overlay')?.classList.contains('open')) { try { guiEdRenderAll(); } catch {} }
+          break;
+        }
+        case 'add_npcs': {
+          const j = aiJson(a.body), list = (Array.isArray(j) ? j : (j && Array.isArray(j.npcs) ? j.npcs : [j])).filter(x => x && typeof x === 'object').slice(0, 50);
+          begin(); let n = 0;
+          for (const src of list) {
+            const base = (typeof NPC_LOOKS !== 'undefined' && NPC_LOOKS[String(src.look || src.preset || '').toLowerCase()]) || {};
+            const color = aiHex(src.color, '#2f80ff'), skin = aiHex(src.skinColor || src.skin, '#ffd9b3');
+            const d = { id: aiId(), type: 'NPC', name: String(src.name || 'NPC').slice(0, 80), x: aiNum(src.x, 0, -100000, 100000), y: aiNum(src.y, 0.5, -100000, 100000), z: aiNum(src.z, 0, -100000, 100000),
+              sx: 1, sy: 3.05, sz: 1, rx: 0, ry: aiNum(src.ry, 0, -100, 100), rz: 0, color, skinColor: skin, look: Object.assign({}, base), anchored: false, canCollide: true, transparent: 0, material: 'SmoothPlastic',
+              isNPC: true, npcType: 'Jugador', hp: aiNum(src.hp, 100, 1, 100000), maxHp: aiNum(src.hp, 100, 1, 100000), npcIcon: '🧍' };
+            if (typeof src.face === 'string') d.look.face = src.face;
+            if (typeof src.hair === 'string') d.look.hair = src.hair;
+            if (typeof src.scale === 'number') d.look.scale = aiNum(src.scale, 1, 0.3, 4);
+            addPartMesh(d); n++;
+          }
+          partsTouched = true; if (n) { changed(); ok(n + (n === 1 ? ' NPC agregado' : ' NPC agregados')); } else bad('add_npcs vino vacío');
           break;
         }
         case 'rename_project': {
