@@ -6,11 +6,11 @@ const LANGS = ['pt', 'fr', 'de', 'it'];
 
 const TR = {
   // ── Legalidad ──
-  'Does it contain sexual content involving minors, or sexualized depictions of minors? (This includes drawings, fiction, humor, or AI-generated content.)': [
-    'Contém conteúdo sexual envolvendo menores de idade ou representações sexualizadas de menores? (Vale também para desenhos, ficção, humor ou conteúdo feito com IA.)',
-    'Contient-il du contenu sexuel impliquant des mineurs ou des représentations sexualisées de mineurs ? (Cela inclut les dessins, la fiction, l’humour et les contenus générés par IA.)',
-    'Enthält es sexuelle Inhalte mit Minderjährigen oder sexualisierte Darstellungen von Minderjährigen? (Dazu zählen auch Zeichnungen, Fiktion, Humor oder KI-generierte Inhalte.)',
-    'Contiene contenuti sessuali che coinvolgono minorenni o rappresentazioni sessualizzate di minorenni? (Vale anche per disegni, finzione, umorismo o contenuti generati con l’IA.)'],
+  'Does it contain sexual content involving minors, or sexualized depictions of minors? (This includes drawings, fiction, humor, or AI-generated content. It does not include satire or jokes that mock or criticize pedophilia, South Park style, without showing or sexualizing minors.)': [
+    'Contém conteúdo sexual envolvendo menores de idade ou representações sexualizadas de menores? (Vale também para desenhos, ficção, humor ou conteúdo feito com IA. Não vale sátira ou piada que zomba da pedofilia ou a critica, no estilo South Park, sem mostrar nem sexualizar menores.)',
+    'Contient-il du contenu sexuel impliquant des mineurs ou des représentations sexualisées de mineurs ? (Cela inclut les dessins, la fiction, l’humour et les contenus générés par IA. Cela n’inclut pas la satire ou la blague qui se moque de la pédophilie ou la critique, style South Park, sans montrer ni sexualiser de mineurs.)',
+    'Enthält es sexuelle Inhalte mit Minderjährigen oder sexualisierte Darstellungen von Minderjährigen? (Dazu zählen auch Zeichnungen, Fiktion, Humor oder KI-generierte Inhalte. Nicht dazu zählt Satire oder ein Witz, der Pädophilie verspottet oder kritisiert, im Stil von South Park, ohne Minderjährige zu zeigen oder zu sexualisieren.)',
+    'Contiene contenuti sessuali che coinvolgono minorenni o rappresentazioni sessualizzate di minorenni? (Vale anche per disegni, finzione, umorismo o contenuti generati con l’IA. Non vale la satira o la battuta che deride o critica la pedofilia, stile South Park, senza mostrare né sessualizzare minorenni.)'],
   'Does it show intimate or sexual images of real people without their consent? (This includes parody, humor, or AI-generated fakes.)': [
     'Mostra imagens íntimas ou sexuais de pessoas reais sem o consentimento delas? (Vale também para paródia, humor ou montagens feitas com IA.)',
     'Montre-t-il des images intimes ou sexuelles de personnes réelles sans leur consentement ? (Cela inclut la parodie, l’humour et les faux générés par IA.)',
