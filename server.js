@@ -78,7 +78,7 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'video-cuestionario-2026-11-23-ia';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'texturas-pwa-2026-11-25';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
@@ -2080,7 +2080,7 @@ app.get('/api/maps/:id/textures/:tid', async (req, res) => {
   if (!map || !MAP_ID_RE.test(req.params.id) || !TEX_ID_RE.test(req.params.tid) || !canReadMap(map, user)) return res.status(404).end();
   if (!canEnterAdult(map, user)) return res.status(403).end();
   const file = texFile(assetId(req.params.id), req.params.tid) || await persist.fetchTexture(assetId(req.params.id), req.params.tid); if (!file) return res.status(404).end();
-  res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': mapIsPublic(map) ? 'public, max-age=86400' : 'private, max-age=600' });
+  res.set({ 'Content-Type': TEX_MIME[path.extname(file).slice(1)] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff', 'Cache-Control': mapIsPublic(map) ? 'public, no-cache' : 'private, no-cache' });   // no-cache = se revalida con ETag (304 si no cambió): una textura reemplazada se ve enseguida
   res.sendFile(file, { dotfiles:'allow' }, err => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
 });
 

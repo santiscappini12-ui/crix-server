@@ -5213,7 +5213,7 @@ window.playMap = async function(mapId, instanceId = null) {
   if (stPlaytesting && !targetInstanceId && !getMaps()[mapId]?.isHtmlGame) { try { showToast('⚠️ Sin conexión con el servidor: los Script se prueban en este navegador y pueden comportarse distinto que en el juego real.'); } catch (_) {} }
   netServerScriptsActive=!!(targetInstanceId&&ME&&!getMaps()[mapId]?.isHtmlGame);
   crixAppReset(!!getMaps()[mapId]?.isHtmlGame, !!(targetInstanceId && ME));
-  try { await registerMapTextures(getMaps()[mapId]); } catch {}
+  try { await registerMapTextures(getMaps()[mapId], true); } catch {}
   _origPlayMap(mapId);
   setTimeout(() => { if (targetInstanceId) netJoinGame(mapId, targetInstanceId); _patchGameLoopWithNet(); }, 200);
 };
@@ -6922,7 +6922,7 @@ function refreshOpenVideoPlayer() {
 }
 function refreshStudioAssets() {
   // Co-edición: texturas subidas por otra persona del equipo (o desde otro dispositivo) aparecen sin recargar.
-  try { if (stMapId && typeof registerMapTextures === 'function') registerMapTextures(getMaps()[stMapId]); } catch (_) {}
+  try { if (stMapId && typeof registerMapTextures === 'function') registerMapTextures(getMaps()[stMapId], true); } catch (_) {}
 }
 function rerenderLiveScreens(kind) {
   try {
@@ -9202,8 +9202,19 @@ function texUrl(mapId, tid) {
   const m = getMaps()[mapId], base = '/api/maps/' + encodeURIComponent(mapId) + '/textures/' + encodeURIComponent(tid), token = DB.get('token');
   return (m && (m.privacy || 'public') !== 'public' && token) ? base + '?t=' + encodeURIComponent(token) : base;
 }
-function texLibSet(id, src) {
-  const old = texLib[id]; if (old && (old.src === src || old.ready)) return old.promise || Promise.resolve(old);
+function texLibSet(id, src, force) {
+  const old = texLib[id];
+  if (old && old.ready && force && !/^(data|blob):/.test(src)) {
+    // Recarga forzada (la textura pudo reemplazarse con el mismo nombre): se baja de nuevo saltando cualquier caché
+    // y solo se cambia cuando la nueva ya cargó, así no parpadea ni se pierde la textura mientras tanto.
+    return new Promise(resolve => {
+      const img = new Image(), t = setTimeout(() => resolve(old), 6000);
+      img.onload = () => { clearTimeout(t); const e = { src, img, ready:true }; e.promise = Promise.resolve(e); texLib[id] = e; refreshTexturedMeshes(id); resolve(e); };
+      img.onerror = () => { clearTimeout(t); resolve(old); };
+      img.src = src + (src.includes('?') ? '&' : '?') + '_r=' + Date.now();
+    });
+  }
+  if (old && (old.src === src || old.ready)) return old.promise || Promise.resolve(old);
   const entry = texLib[id] = { src, img:new Image(), ready:false };
   entry.promise = new Promise(resolve => {
     let done = false; const end = () => { if (!done) { done = true; resolve(entry); } };
@@ -9213,10 +9224,10 @@ function texLibSet(id, src) {
   });
   entry.img.src = src; return entry.promise;
 }
-function registerMapTextures(m) {
+function registerMapTextures(m, force) {
   if (!m) return Promise.resolve();
   const jobs = [], ids = m.textureIds || [];
-  for (const id of ids) jobs.push(texLibSet(id, stTexData[id] || texUrl(m.id, id)));
+  for (const id of ids) jobs.push(texLibSet(id, stTexData[id] || texUrl(m.id, id), force));
   for (const id of Object.keys(stTexData)) if (!ids.includes(id)) jobs.push(texLibSet(id, stTexData[id]));
   return Promise.all(jobs);
 }

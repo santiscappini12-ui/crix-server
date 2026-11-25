@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crix-shell-v26';
+const CACHE_NAME = 'crix-shell-v27';
 // Archivos que la persona descargó para usar sin conexión (juegos, apps, videos, accesorios). Este caché NO se borra al
 // actualizar el service worker: solo se vacía cuando la persona quita la descarga (o borra los datos del sitio).
 const OFFLINE_CACHE = 'crix-offline-v1';
@@ -53,9 +53,10 @@ async function offlineMatch(request) {
   return hit ? rangeFrom(hit, request) : null;
 }
 // Archivos pesados que no cambian (texturas, sonidos, videos): primero lo descargado, si no hay, la red.
-const OFFLINE_FIRST = /^\/api\/(maps\/[^/]+\/(textures|sounds)\/[^/]+|videos\/[^/]+\/stream)$/;
+const OFFLINE_FIRST = /^\/api\/(maps\/[^/]+\/sounds\/[^/]+|videos\/[^/]+\/stream)$/;
 // Datos que sí pueden cambiar (el juego, el accesorio): primero la red; sin conexión, lo descargado. Si estaba descargado, se actualiza la copia.
-const OFFLINE_FRESH = /^\/api\/(maps\/[^/]+|accessories\/[^/]+(\/model)?)$/;
+// Las texturas también van por aquí: si el creador las reemplaza (mismo nombre), la PWA NO puede quedarse con la vieja.
+const OFFLINE_FRESH = /^\/api\/(maps\/[^/]+(\/textures\/[^/]+)?|accessories\/[^/]+(\/model)?)$/;
 
 async function networkFirst(request, cacheName, key) {
   const cache = await caches.open(cacheName);
@@ -93,7 +94,7 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(OFFLINE_CACHE);
       const saved = await cache.match(key);
       try {
-        const response = await fetch(request);
+        const response = await fetch(request, { cache: 'no-cache' });   // revalida con el servidor: nunca sirve la copia vieja del caché HTTP de iOS/Chrome
         // Solo se refresca la copia si ya la había descargado la persona (nunca se guarda algo por cuenta propia).
         if (saved && response.ok) cache.put(key, response.clone()).catch(() => {});
         return response;
