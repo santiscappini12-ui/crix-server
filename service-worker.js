@@ -1,10 +1,10 @@
-const CACHE_NAME = 'crix-shell-v27';
+const CACHE_NAME = 'crix-shell-v29';
 // Archivos que la persona descargó para usar sin conexión (juegos, apps, videos, accesorios). Este caché NO se borra al
 // actualizar el service worker: solo se vacía cuando la persona quita la descarga (o borra los datos del sitio).
 const OFFLINE_CACHE = 'crix-offline-v1';
 const SHELL = ['/', '/manifest.webmanifest', '/crix-icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-72.png'];
 // Código de la app: se guarda para que Crix abra sin internet (siempre se intenta primero la red, así las actualizaciones llegan igual).
-const APP_FILES = ['/crix-rules.js', '/crix-report.js', '/crix-console.js', '/crix-native.js', '/crix-gfx.js', '/GLTFLoader.js', '/crix-avatar.js', '/crix-joints.js', '/crix-objects.js', '/crix-anim.js',
+const APP_FILES = ['/crix-rules-v2.js', '/crix-rules.js', '/crix-report.js', '/crix-console.js', '/crix-native.js', '/crix-gfx.js', '/GLTFLoader.js', '/crix-avatar.js', '/crix-joints.js', '/crix-objects.js', '/crix-anim.js',
   '/socket.io/socket.io.js', '/crix-rigid.js', '/crix-predict.js', '/crix-rapier.js', '/crix-fx.js', '/crix-ext.js', '/crix-animator.js', '/crix-csg.js', '/crix-edit.js',
   '/crix-offline.js', '/crix-avatar.glb', '/death-scream.mp3', '/favicon.svg', '/favicon-48.png', '/icons/apple-touch-icon.png', '/icons/icon-maskable-512.png'];
 const CDN_FILES = ['https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'];
