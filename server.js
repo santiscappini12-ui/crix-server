@@ -783,8 +783,9 @@ function requireAdmin(req, res, next) {
   next();
 }
 // Un juego/app todavía sin clasificar (borrador) no se muestra a nadie más hasta que su autor complete el cuestionario.
-function mapIsPublic(map) { return !!map && (map.privacy || 'public') === 'public' && !map.unrated; }
+function mapIsPublic(map) { return !!map && !map.modHidden && (map.privacy || 'public') === 'public' && !map.unrated; }
 function canReadMap(map, user) {
+  if (map.modHidden) return !!user && (user.isAdmin || map.authorId === user.id);   // oculto por denuncia
   const privacy = map.privacy || 'public';
   if (map.unrated && !(user && (map.authorId === user.id || user.isAdmin || (Array.isArray(map.collaborators) && map.collaborators.includes(user.id))))) return false;
   if (privacy === 'public') return true;
@@ -1007,9 +1008,10 @@ function userFromToken(token) {
 }
 
 // Igual que los juegos: un video sin clasificar (cuestionario sin completar) es un borrador que solo ven su autor y los admins.
-function videoIsPublic(video) { return !!video && (video.privacy || 'public') === 'public' && !!video.classification; }
+function videoIsPublic(video) { return !!video && !video.modHidden && (video.privacy || 'public') === 'public' && !!video.classification; }
 function canReadVideo(video, user) {
   const owner = !!user && (video.authorId === user.id || user.isAdmin);
+  if (video.modHidden) return owner;
   if (!video.classification) return owner;
   if ((video.privacy || 'public') === 'public') return true;
   return owner;
@@ -1038,7 +1040,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js',
+const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js','/crix-report.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
@@ -2185,6 +2187,7 @@ app.post('/api/maps', (req, res) => {
     next.allowDownload = isOwner && m.allowDownload !== undefined ? m.allowDownload === true : old?.allowDownload === true;   // permiso de descarga sin conexión: solo lo decide el dueño
     if (okIconData(m.icon)) next.icon = m.icon; else if (okIconData(old?.icon)) next.icon = old.icon; else delete next.icon;
     delete next.hasIcon;
+    if (old?.modHidden) next.modHidden = true; else delete next.modHidden;   // solo lo cambia la moderación
     delete next.unrated; delete next.classification;
     if (cls) next.classification = cls;
     // Qué muestra la miniatura (0-3): lo declara el dueño; quien colabora no lo cambia. Una miniatura sensible exige clasificación acorde.
@@ -2770,7 +2773,8 @@ app.delete('/api/videos/:id', (req, res) => {
 
 // ── POSTS (Foros) ──
 app.get('/api/posts', (req, res) => {
-  res.json({ ok: true, posts:DB.posts || [] });
+  const viewer = readSession(req);
+  res.json({ ok: true, posts:(DB.posts || []).filter(p => !p.modHidden || (viewer && (viewer.isAdmin || p.authorId === viewer.id))) });
 });
 
 app.post('/api/posts', (req, res) => {
@@ -2786,6 +2790,7 @@ app.post('/api/posts', (req, res) => {
     if (previous && previous.authorId !== user.id && !user.isAdmin)
       return res.status(403).json({ ok:false, err:'No podés editar esta publicación' });
     const savedPost = { ...(previous || {}), ...p, authorId:previous?.authorId || user.id, authorName:previous?.authorName || user.username, privacy:'public' };
+    if (previous?.modHidden) savedPost.modHidden = true; else delete savedPost.modHidden;
     if (index >= 0) DB.posts[index] = savedPost; else DB.posts.unshift(savedPost);
     saveDB();
     if (previous) io.emit('post_updated', { id: savedPost.id, refetch:true });   // edición: sin aviso de "nuevo post"
@@ -2855,6 +2860,11 @@ app.delete('/api/posts/:id/replies/:rid', (req, res) => {
   io.emit('post_updated', { id:p.id, refetch:true });
   res.json({ ok:true });
 });
+
+// ── DENUNCIAS ──
+require('./reports')(app, { getDB: () => DB, saveDB, requireAuth, requireAdmin, onVisibility(type, id, hidden) {
+  io.emit(type + (hidden ? '_deleted' : '_updated'), type === 'map' ? { mapId:id } : { id, refetch:true });
+} });
 
 // ── STATUS ──
 // Asistente de IA del Crix Hub (proxy hacia un modelo compatible con la API de OpenAI)

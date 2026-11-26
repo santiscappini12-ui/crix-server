@@ -14,7 +14,7 @@
 // ══════════════════════════════════════════════════════════════════
 const crypto = require('crypto');
 
-const KEYED = ['users', 'maps', 'sessions', 'apiKeys', 'accessories', 'datastores'];   // datastores: un registro por juego (DataStore de los scripts)   // objeto { id: registro }
+const KEYED = ['users', 'maps', 'sessions', 'apiKeys', 'accessories', 'datastores', 'reports'];   // datastores: un registro por juego (DataStore de los scripts)   // objeto { id: registro }
 const LISTS = ['videos', 'posts'];             // arreglo de registros con `id`
 const COLS = [...KEYED, ...LISTS];
 const TOMB_KEEP_MS = 365 * 24 * 3600 * 1000;

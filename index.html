@@ -1170,6 +1170,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <div id="toast"></div>
 <script src="/crix-console.js"></script>
 <script src="/crix-native.js"></script>
+<script src="/crix-report.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/crix-gfx.js"></script>
 <script src="/GLTFLoader.js"></script>
@@ -3091,7 +3092,8 @@ function renderProfile(uid) {
   const adminBanBtn = isAdmin() && !isMe ? (isBanned
     ? '<button class="btn btn-green" style="font-size:12px" onclick="unbanUser(\''+u.id+'\')">✅ Desbanear</button>'
     : '<button class="btn btn-red" style="font-size:12px" onclick="banUser(\''+u.id+'\')">🚫 Banear</button>') : '';
-  const adminAdultBtn = isAdmin() ? adultBtnHtml(u, 'profile', 'font-size:12px') : '';
+  const adminAdultBtn = (isAdmin() ? adultBtnHtml(u, 'profile', 'font-size:12px') : '') +
+    (!isMe ? '<button class="btn btn-g" style="font-size:12px" onclick="crixReport(\'user\',\''+u.id+'\')">🚩 Denunciar</button>' : '');
   const adminRoleBtn = removeAdminBtnHtml(u, 'font-size:12px');
   const ageTagHtml = isMe && ME && ME.adult ? '<div class="pf-bio">'+esc(clsT('ageTag'))+'</div>' : '';   // solo la propia persona; nunca cómo lo consiguió
   document.getElementById('profile-inner').innerHTML =
@@ -3452,6 +3454,7 @@ function openAdminPanel() {
   const userList = Object.values(users).filter(u => u.id !== ME.id);
   document.getElementById('profile-inner').innerHTML =
     '<div style="font-family:var(--display);font-size:22px;font-weight:800;margin-bottom:16px;color:var(--yellow)">\u26A1 Panel de Admin</div>'+
+    '<button class="btn btn-red" style="margin-bottom:16px" onclick="crixReportsPanel()">🚩 Ver denuncias</button>'+
     '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'+
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;flex:1;min-width:120px;text-align:center">'+
     '<div style="font-size:24px;font-weight:800;color:var(--acc)">'+userList.length+'</div>'+
@@ -5702,6 +5705,7 @@ function renderVideos() {
       '<div class="video-title" style="flex:1" onclick="openVideoPlayer(\'' + v.id + '\')">' + esc(v.title) + clsBadge(v, !!ME && v.authorId === ME.id) + '</div>' +
       (ME && v.authorId === ME.id ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="openEditVideo(\'' + v.id + '\')" title="Editar datos">✏️</button>' : '') +
       (ME && v.authorId === ME.id ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="clsReclassifyVideo(\'' + v.id + '\')" title="' + clsT('classify') + '">🏷️</button>' : '') +
+      (ME && v.authorId !== ME.id ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="crixReport(\'video\',\'' + v.id + '\')" title="Denunciar">🚩</button>' : '') +
       (canDel ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="deleteVideo(\'' + v.id + '\')" title="Borrar">🗑</button>' : '') +
       '</div>' +
       '<div class="video-meta"><span>👁 ' + views + '</span><span>❤️ ' + likes + '</span></div>' +
@@ -6034,6 +6038,7 @@ function renderForums() {
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
       '<span style="font-weight:700;font-size:13px;cursor:pointer" onclick="goTab(\'profile\',\'' + p.authorId + '\')">' + esc(p.authorName) + '</span>' +
       '<span style="font-size:10px;color:var(--text3)">· ' + timeAgo(p.created) + '</span>' +
+      (p.authorId !== ME.id ? '<button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0" onclick="crixReport(\'post\',\'' + p.id + '\')" title="Denunciar">🚩</button>' : '') +
       (canDel ? '<button style="margin-left:auto;background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px" onclick="deletePost(\'' + p.id + '\')">🗑</button>' : '') +
       '</div>' +
       '<div style="font-size:14px;color:var(--text);line-height:1.5;white-space:pre-wrap;word-break:break-word">' + displayText + '</div>' +
@@ -6291,6 +6296,7 @@ async function openGamePage(mapId) {
     '<button class="btn btn-g" id="gp-like-btn" onclick="toggleLike(\''+mapId+'\',this)">'+
     (liked?'❤️':'🤍')+' '+(m.likes||0)+'</button>'+
     (window.CrixOffline && canPlay ? CrixOffline.button(m.kind === 'app' || m.isHtmlGame ? 'app' : 'map', m) : '')+
+    (ME && !isOwner ? '<button class="btn btn-g" onclick="crixReport(\'map\',\''+mapId+'\')">🚩 Denunciar</button>' : '')+
     (isOwner ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editUploadData(\''+mapId+'\')">⚙️ Datos de subida</button>' : '')+
     ((isOwner || isCollab) ? '<button class="btn btn-g" onclick="closeModal(\'mo-game-page\');editMap(\''+mapId+'\')">✏️ Editar'+(isCollab?' (equipo)':'')+'</button>' : '')+
     (isOwner ? '<button class="btn btn-red" onclick="closeModal(\'mo-game-page\');deleteMap(\''+mapId+'\')">🗑️ Borrar</button>' : '')+
