@@ -1,7 +1,7 @@
 // Botón de denuncia y lista de denuncias para el admin.
 (function () {
   // Solo se puede denunciar lo ilegal (y el abuso de los servidores). No existen motivos de contenido legal.
-  const REASONS = { ilegal:'Contenido ilegal', menores:'Pone en riesgo a menores', violencia:'Amenazas', estafa:'Estafa o robo de contraseñas', copyright:'Copia sin permiso', servidor:'Ataca o explota los servidores a propósito' };
+  const REASONS = { ilegal:'Contenido ilegal', menores:'Pone en riesgo a menores', intimas:'Imágenes íntimas sin consentimiento', violencia:'Amenazas', odio:'Odio o acoso', estafa:'Estafa o robo de contraseñas', malware:'Virus o código malicioso', copyright:'Copia sin permiso', servidor:'Ataca o explota los servidores a propósito' };
   const TYPES = { map:'Juego/app', video:'Video', post:'Post', user:'Usuario', accessory:'Accesorio' };
 
   async function call(url, body) {
@@ -41,10 +41,10 @@
     const el = box('🚩 Denunciar');
     const sel = document.createElement('select'); sel.style.cssText = field;
     for (const [k, v] of Object.entries(REASONS)) sel.add(new Option(v, k));
-    const txt = document.createElement('textarea'); txt.style.cssText = field; txt.maxLength = 500; txt.rows = 3; txt.placeholder = 'Contanos qué pasa (opcional). Solo se denuncia lo ilegal.';
+    const txt = document.createElement('textarea'); txt.style.cssText = field; txt.maxLength = 500; txt.rows = 3; txt.placeholder = 'Contanos qué pasa (opcional). Solo se denuncia lo que rompe las reglas de uso.';
     const note = document.createElement('div');
     note.style.cssText = 'font-size:12px;color:var(--text3);margin:2px 0 6px';
-    note.textContent = 'Adjuntá una captura o un video que muestre lo ilegal (máx. 20 MB). La denuncia llega a crix.support@gmail.com.';
+    note.textContent = 'Adjuntá una captura o un video que muestre el problema (máx. 20 MB). La denuncia llega a crix.support@gmail.com.';
     const file = document.createElement('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime';
     file.style.cssText = 'width:100%;font-size:13px;margin-bottom:8px;color:var(--text)';
     const send = button('Enviar denuncia', 'btn-red', async () => {
