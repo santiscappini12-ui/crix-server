@@ -1,6 +1,8 @@
 // Botón de denuncia y lista de denuncias para el admin.
 (function () {
-  const REASONS = { ilegal:'Contenido ilegal', sexual:'Contenido sexual', menores:'Pone en riesgo a menores', violencia:'Violencia o amenazas', odio:'Odio o acoso', estafa:'Estafa o robo de contraseñas', copyright:'Copia sin permiso', spam:'Spam', otro:'Otro' };
+  // 'sexual' ya no se ofrece como motivo (es legal); queda en OLD_REASONS para mostrar denuncias viejas en el panel.
+  const REASONS = { ilegal:'Contenido ilegal', menores:'Pone en riesgo a menores', violencia:'Violencia o amenazas', odio:'Odio o acoso', estafa:'Estafa o robo de contraseñas', copyright:'Copia sin permiso', spam:'Spam', otro:'Otro' };
+  const OLD_REASONS = { ...REASONS, sexual:'Contenido sexual' };
   const TYPES = { map:'Juego/app', video:'Video', post:'Post', user:'Usuario', accessory:'Accesorio' };
 
   async function call(url, body) {
@@ -72,7 +74,7 @@
       const card = document.createElement('div');
       card.style.cssText = 'border-top:1px solid var(--border);padding:10px 0;font-size:13px;white-space:pre-wrap;word-break:break-word';
       const state = !x.exists ? 'Borrado' : x.hidden ? 'Oculto' : x.status === 'open' ? 'PENDIENTE' : 'Revisada';
-      card.textContent = `${state} · ${TYPES[x.type]}: ${x.label}\nMotivo: ${REASONS[x.reason]}${x.evidence ? ' · 📎 con adjunto' : ''}${x.emailed ? ' · ✉️ enviada por mail' : ''}${x.detail ? '\n' + x.detail : ''}\nDenunció: ${x.reporterName} · ID: ${x.targetId}\n`;
+      card.textContent = `${state} · ${TYPES[x.type]}: ${x.label}\nMotivo: ${OLD_REASONS[x.reason] || x.reason}${x.evidence ? ' · 📎 con adjunto' : ''}${x.emailed ? ' · ✉️ enviada por mail' : ''}${x.detail ? '\n' + x.detail : ''}\nDenunció: ${x.reporterName} · ID: ${x.targetId}\n`;
       const act = async action => {
         const a = await call('/api/admin/reports/' + encodeURIComponent(x.id), { action });
         if (!a.ok) return showToast(a.err || 'Error');
