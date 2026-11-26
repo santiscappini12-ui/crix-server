@@ -2580,7 +2580,7 @@ async function doLogin() {
     const legacy = Object.values(getUsers()).find(x => x.username.toLowerCase() === username.toLowerCase());
     if (!legacy || legacy.pw !== btoa(unescape(encodeURIComponent(password)))) { authErr('Usuario no encontrado o contraseña incorrecta.'); return; }
     try {
-      const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color, acceptRules: confirm(window.crixT('Para pasar tu cuenta tenés que aceptar las reglas de uso de Crix (no publicar nada ilegal, dañino ni abusar de los servidores). ¿Aceptás?')) ? 1 : 0 }, token:'' });
+      const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color, acceptRules: confirm(window.crixT('Para pasar tu cuenta tenés que aceptar las reglas de uso de Crix (no publicar nada ilegal, dañino ni abusar de los servidores). ¿Aceptás?')) ? 2 : 0 }, token:'' });
       loginAs(result.user, result.token, legacy.id, password);
     } catch (migrationError) { authErr(migrationError.message); }
   }
@@ -2596,7 +2596,7 @@ async function doRegister() {
   if (!/^[a-zA-Z0-9_]+$/.test(username)) { authErr('Solo letras, números y guión bajo.'); return; }
   if (!document.getElementById('r-rules').checked) { authErr('Tenés que aceptar las reglas de uso.'); return; }
   try {
-    const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor(), acceptRules:1 }, token:'' });
+    const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor(), acceptRules:2 }, token:'' });
     loginAs(result.user, result.token, null, password);
   } catch (err) { authErr(err.message); }
 }

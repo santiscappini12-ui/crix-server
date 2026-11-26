@@ -1,6 +1,6 @@
 'use strict';
 // Reglas de uso: hay que aceptarlas para registrarse y para publicar. Si cambia el texto, subí RULES_VERSION.
-const RULES_VERSION = 1;
+const RULES_VERSION = 2;
 const PUBLISH = {
   post: ['/api/maps', '/api/maps/:id/textures', '/api/maps/:id/comments', '/api/videos', '/api/videos/:id/finish',
     '/api/videos/:id/comment', '/api/posts', '/api/posts/:id/reply', '/api/accessories', '/api/convs/:convId'],
