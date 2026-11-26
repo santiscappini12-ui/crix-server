@@ -2576,6 +2576,7 @@ async function doLogin() {
     const result = await apiRequest('/api/login', { method:'POST', body:{ username, pw:password }, token:'' });
     loginAs(result.user, result.token, null, password);
   } catch (err) {
+    if (err.payload?.banned) { showBanScreen(err.payload.banned, { username, appealToken: err.payload.appealToken, mail: err.payload.appealMail }); return; }
     if (err.payload?.err !== 'Usuario no encontrado') { authErr(err.message); return; }
     const legacy = Object.values(getUsers()).find(x => x.username.toLowerCase() === username.toLowerCase());
     if (!legacy || legacy.pw !== btoa(unescape(encodeURIComponent(password)))) { authErr('Usuario no encontrado o contraseña incorrecta.'); return; }
@@ -2879,22 +2880,77 @@ function bootApp() {
   setTimeout(initCallSocketEvents, 1500);
   setTimeout(ageHandleReturn, 700);
 }
-function showBanScreen() {
+function showBanScreen(banInfo, ctx) {
   document.getElementById('s-auth').classList.remove('active');
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const b = ME.banned;
+  document.getElementById('ban-screen')?.remove();
+  const b = banInfo || ME.banned || {};
+  const c = ctx || {};
+  window.__banAppeal = { token: c.appealToken || '', username: c.username || (ME && ME.username) || '', mail: c.mail || '' };
+  const needPw = !window.__banAppeal.token;
   const durTxt = b.permanent ? 'PERMANENTE' : ('Hasta: ' + new Date(b.until).toLocaleString('es-AR'));
+  const inp = 'width:100%;box-sizing:border-box;background:var(--bg3,#11151d);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;color:var(--text,#fff);font:inherit;font-size:13px';
   document.body.insertAdjacentHTML('beforeend', `
-    <div id="ban-screen" style="position:fixed;inset:0;background:#080a0f;display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:16px;padding:24px">
-      <div style="font-size:48px">🚫</div>
+    <div id="ban-screen" style="position:fixed;inset:0;background:#080a0f;display:flex;align-items:center;justify-content:flex-start;z-index:9999;flex-direction:column;gap:16px;padding:24px;overflow-y:auto">
+      <div style="font-size:48px;margin-top:auto">🚫</div>
       <div style="font-family:var(--display);font-size:28px;font-weight:800;color:var(--red)">Cuenta Suspendida</div>
       <div style="background:var(--bg2);border:1px solid rgba(239,68,68,.3);border-radius:14px;padding:20px;max-width:400px;width:100%;display:flex;flex-direction:column;gap:10px">
         <div><span style="color:var(--text3);font-size:11px">DURACIÓN</span><div style="font-weight:700;color:var(--red)">${durTxt}</div></div>
         <div><span style="color:var(--text3);font-size:11px">MOTIVO</span><div style="font-weight:600">${esc(b.reason||'Sin motivo especificado')}</div></div>
         ${b.notes ? '<div><span style="color:var(--text3);font-size:11px">NOTAS</span><div style="font-size:13px;color:var(--text2)">' + esc(b.notes) + '</div></div>' : ''}
       </div>
-      <button class="btn btn-g" onclick="DB.del('session');DB.del('token');location.reload()">← Cerrar sesión</button>
+      <div id="appeal-box" style="background:var(--bg2);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:20px;max-width:400px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px">
+        <div style="font-weight:700">📨 ¿Creés que fue un error? Apelá el ban</div>
+        <div style="font-size:12px;color:var(--text3)">Tu mensaje le llega al equipo de Crix y la respuesta te llega al mail verificado de tu cuenta.</div>
+        ${needPw ? `<input id="appeal-user" placeholder="Usuario" value="${esc(window.__banAppeal.username)}" autocomplete="username" style="${inp}"><input id="appeal-pw" type="password" placeholder="Contraseña" autocomplete="current-password" style="${inp}">` : ''}
+        <textarea id="appeal-msg" rows="5" maxlength="2000" placeholder="Explicá por qué el ban es un error o por qué deberían levantarlo…" style="${inp};resize:vertical"></textarea>
+        <div id="appeal-mail" style="font-size:12px;color:var(--text2)"></div>
+        <div id="appeal-err" style="display:none;color:var(--red);font-size:12px"></div>
+        <button id="appeal-send" class="btn btn-p" style="width:100%" onclick="sendBanAppeal()">Enviar apelación</button>
+      </div>
+      <button class="btn btn-g" style="margin-bottom:auto" onclick="DB.del('session');DB.del('token');location.reload()">← Cerrar sesión</button>
     </div>`);
+  renderAppealMail();
+}
+function renderAppealMail() {
+  const A = window.__banAppeal || {}, el = document.getElementById('appeal-mail'); if (!el) return;
+  if (A.mail) { el.innerHTML = '✅ Te vamos a responder a <b>' + esc(A.mail) + '</b>'; return; }
+  el.innerHTML = '⚠️ Para apelar tenés que vincular un mail verificado. <button class="btn btn-g" style="font-size:12px;margin-top:6px" onclick="linkAppealMail()">✉️ Vincular mail</button>';
+}
+function linkAppealMail() {
+  const A = window.__banAppeal || {};
+  let ctx;
+  if (A.token) ctx = { appealToken: A.token };
+  else {
+    const username = (document.getElementById('appeal-user')?.value || '').trim(), pw = document.getElementById('appeal-pw')?.value || '';
+    if (!username || !pw) { const e = document.getElementById('appeal-err'); e.textContent = 'Completá usuario y contraseña para vincular el mail.'; e.style.display = 'block'; return; }
+    ctx = { username, pw };
+  }
+  crixLinkEmail(ctx, r => { A.mail = r.masked || 'tu mail'; renderAppealMail(); }, 'Para apelar necesitás un mail verificado: ahí te mandamos la respuesta.');
+}
+async function sendBanAppeal() {
+  const err = document.getElementById('appeal-err'), btn = document.getElementById('appeal-send');
+  const fail = m => { err.textContent = m; err.style.display = 'block'; };
+  err.style.display = 'none';
+  const message = document.getElementById('appeal-msg').value.trim();
+  if (message.length < 10) return fail('Explicá por qué creés que el ban es un error (mínimo 10 caracteres).');
+  const A = window.__banAppeal || {};
+  if (!A.mail) return fail('Primero vinculá un mail verificado.');
+  const body = { message };
+  if (A.token) body.appealToken = A.token;
+  else {
+    body.username = (document.getElementById('appeal-user')?.value || '').trim();
+    body.pw = document.getElementById('appeal-pw')?.value || '';
+    if (!body.username || !body.pw) return fail('Completá usuario y contraseña.');
+  }
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    await apiRequest('/api/appeals', { method:'POST', body, token:'' });
+    document.getElementById('appeal-box').innerHTML = '<div style="font-weight:700;color:#22c55e">✅ Apelación enviada</div><div style="font-size:13px;color:var(--text2)">El equipo de Crix la va a revisar' + ' y te responde a ' + esc(A.mail) + '. Podés mandar otra recién en 24 horas.</div>';
+  } catch (e) {
+    if (e.payload?.code === 'EMAIL_REQUIRED') { A.mail = ''; renderAppealMail(); }
+    fail(e.message); btn.disabled = false; btn.textContent = 'Enviar apelación';
+  }
 }
 function goTab(t, extra) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); const el = document.getElementById('s-' + t); if (el) el.classList.add('active'); document.querySelectorAll('.nav-tab').forEach((b, i) => { const tabs=['home','discover','videos','forums','studio','msg','profile']; b.classList.toggle('active', tabs[i] === t); }); if (t === 'home') renderHome(); if (t === 'discover') renderDiscover(); if (t === 'studio') initStudio(); if (t === 'videos') initVideos(); if (t === 'forums') initForums(); if (t === 'msg') loadConvList(); if (t === 'profile') renderProfile(extra || ME.id); }
 function showToast(m, dur = 3000) { const t = document.getElementById('toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = 'none', dur); }
@@ -3458,7 +3514,7 @@ function openAdminPanel() {
   const userList = Object.values(users).filter(u => u.id !== ME.id);
   document.getElementById('profile-inner').innerHTML =
     '<div style="font-family:var(--display);font-size:22px;font-weight:800;margin-bottom:16px;color:var(--yellow)">\u26A1 Panel de Admin</div>'+
-    '<button class="btn btn-red" style="margin-bottom:16px" onclick="crixReportsPanel()">🚩 Ver denuncias</button>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"><button class="btn btn-red" onclick="crixReportsPanel()">🚩 Ver denuncias</button><button class="btn btn-g" onclick="crixAppealsPanel()">📨 Apelaciones</button></div>'+
     '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'+
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;flex:1;min-width:120px;text-align:center">'+
     '<div style="font-size:24px;font-weight:800;color:var(--acc)">'+userList.length+'</div>'+
@@ -11113,7 +11169,10 @@ async function onGoogleCredential(resp) {
   try {
     const r = await apiRequest('/api/google', { method:'POST', body:{ credential:resp.credential }, token:'' });
     loginAs(r.user, r.token, null, '');
-  } catch (e) { authErr(e.message); }
+  } catch (e) {
+    if (e.payload?.banned) { showBanScreen(e.payload.banned, { appealToken: e.payload.appealToken, mail: e.payload.appealMail }); return; }
+    authErr(e.message);
+  }
 }
 async function initGoogle() {
   let cid = '';

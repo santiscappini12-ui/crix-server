@@ -734,7 +734,7 @@ function banActive(u) {
 function safeUser(u) { if (!u) return null; const {pw:_,e2eeVault:__,googleSub:___g,ageVerified:___a,ageCheck:___c,...s}=u; s.adult = isAgeVerified(u); if (s.look && typeof s.look === 'object') s.look = CrixAvatar.profileLook(s.look); return s; }
 function publicUser(u) {
   if (!u) return null;
-  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ageVerified:_________, ageCheck:__________, prefs:___________, ...profile } = u;
+  const { pw:_, e2eeVault:__, banned:___, adminGrantedBy:____, friendRequests:_____, friendRequests_recv:______, friendRequests_sent:_______, googleSub:________, ageVerified:_________, ageCheck:__________, prefs:___________, mail:____________, ...profile } = u;
   if (profile.look && typeof profile.look === 'object') profile.look = CrixAvatar.profileLook(profile.look);
   return profile;
 }
@@ -756,6 +756,18 @@ function tokenHash(token) { return crypto.createHash('sha256').update(token).dig
 function issueSession(user) {
   const token = crypto.randomBytes(32).toString('base64url');
   DB.sessions[tokenHash(token)] = { userId: user.id, expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 30 };
+  saveDB();
+  return token;
+}
+// ── Apelaciones de baneo ──
+// Una cuenta baneada no puede iniciar sesión, así que apela con un token de un solo propósito (30 min) que recibe al intentar entrar,
+// o con usuario + contraseña. La apelación se guarda y se manda por mail a crix.support@gmail.com (reply_to = el contacto que dejó).
+const APPEAL_TOKEN_MS = 30 * 60 * 1000, APPEAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+function issueAppealToken(user) {
+  const now = Date.now(), toks = DB.appealTokens || (DB.appealTokens = {});
+  for (const k of Object.keys(toks)) if (toks[k].expiresAt <= now) delete toks[k];
+  const token = crypto.randomBytes(24).toString('base64url');
+  toks[tokenHash(token)] = { userId: user.id, expiresAt: now + APPEAL_TOKEN_MS };
   saveDB();
   return token;
 }
@@ -1223,7 +1235,7 @@ app.post('/api/login', (req, res) => {
       const perm  = user.banned.permanent;
       const until = user.banned.until ? new Date(user.banned.until) : null;
       if (perm || (until && until > new Date())) {
-        return res.json({ ok:false, banned: user.banned });
+        return res.json({ ok:false, banned: user.banned, appealToken: issueAppealToken(user), appealMail: hasMail(user) ? maskEmail(user.mail.address) : '' });
       }
       delete user.banned; saveDB();
     }
@@ -1275,7 +1287,7 @@ app.post('/api/google', async (req, res) => {
     }
     if (user.banned) {
       const until = user.banned.until ? new Date(user.banned.until) : null;
-      if (user.banned.permanent || (until && until > new Date())) return res.status(403).json({ ok:false, err:'Esta cuenta está suspendida.', banned: user.banned });
+      if (user.banned.permanent || (until && until > new Date())) return res.status(403).json({ ok:false, err:'Esta cuenta está suspendida.', banned: user.banned, appealToken: issueAppealToken(user), appealMail: hasMail(user) ? maskEmail(user.mail.address) : '' });
       delete user.banned; saveDB();
     }
     log('GOOGLE', user.username);
@@ -1602,7 +1614,8 @@ app.post('/api/admin/users/:id/adult', requireAuth, requireAdmin, (req, res) => 
 // Vista de admin: incluye el booleano `adult` de cada cuenta (para que el botón muestre Marcar o Desmarcar).
 // Nunca sale el detalle de cómo lo consiguió (ageVerified): solo el booleano, y solo para admins.
 function adminView(u, viewer) {
-  return safeUser(u);
+  const { mail:_m, ...rest } = safeUser(u) || {};   // el admin responde desde el panel: no necesita ver la dirección
+  return rest;
 }
 app.get('/api/users', (req, res) => {
   const viewer = readSession(req);
@@ -2863,8 +2876,163 @@ app.delete('/api/posts/:id/replies/:rid', (req, res) => {
   res.json({ ok:true });
 });
 
+// ── MAIL VINCULADO ──
+// Para denunciar o apelar hace falta un mail verificado en la cuenta (user.mail = { address, verified, at }). Las respuestas del equipo
+// a denuncias y apelaciones se mandan a esa dirección. Nunca sale en perfiles públicos ni en la lista de usuarios.
+const { sendReportMail: sendMailRaw, configured: mailConfigured } = require('./report-mail');
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+const hasMail = u => !!(u && u.mail && u.mail.verified && u.mail.address);
+function maskEmail(a) { const [n, d] = String(a || '').split('@'); return n && d ? n[0] + '***@' + d : ''; }
+// Quién es: sesión normal, token de apelación (cuenta baneada) o usuario + contraseña.
+function resolveMailUser(req) {
+  const b = req.body || {};
+  if (b.appealToken) {
+    const rec = (DB.appealTokens || {})[tokenHash(String(b.appealToken))];
+    return rec && rec.expiresAt > Date.now() ? (DB.users[rec.userId] || null) : null;
+  }
+  if (b.username && b.pw) {
+    const u = Object.values(DB.users).find(x => x.username.toLowerCase() === String(b.username).toLowerCase());
+    return u && String(b.pw).length <= 128 && verifyPassword(String(b.pw), u.pw) ? u : null;
+  }
+  return readSession(req);
+}
+app.post('/api/email/request', async (req, res) => {
+  if (authLimited(req, res)) return;
+  try {
+    const user = resolveMailUser(req);
+    if (!user) return res.status(401).json({ ok:false, err:'No pudimos identificar tu cuenta. Iniciá sesión de nuevo.' });
+    const email = String((req.body || {}).email || '').trim().toLowerCase().slice(0, 200);
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ ok:false, err:'Ese mail no es válido.' });
+    if (!mailConfigured()) return res.status(503).json({ ok:false, err:'El envío de mails no está disponible ahora. Probá más tarde.' });
+    const codes = DB.mailCodes || (DB.mailCodes = {}), now = Date.now(), prev = codes[user.id];
+    if (prev && now - prev.sentAt < 60 * 1000) return res.status(429).json({ ok:false, err:'Esperá un minuto para pedir otro código.' });
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    codes[user.id] = { email, hash:tokenHash(code), expiresAt:now + 15 * 60 * 1000, sentAt:now, tries:0 };
+    saveDB();
+    try {
+      await sendMailRaw({ to:email, subject:'Tu código de verificación de Crix', text:`Hola ${user.username},\n\nTu código para vincular este mail a tu cuenta de Crix es: ${code}\n\nVence en 15 minutos. Si no lo pediste vos, ignorá este mensaje.` });
+    } catch (e) {
+      delete codes[user.id]; saveDB();
+      console.error('[MAIL] no se pudo mandar el código a ' + user.username + ': ' + e.message);
+      return res.status(502).json({ ok:false, err:'No pudimos mandar el mail. Revisá que la dirección esté bien.' });
+    }
+    res.json({ ok:true });
+  } catch (e) { res.status(500).json({ ok:false, err:'No se pudo enviar el código.' }); }
+});
+app.post('/api/email/verify', (req, res) => {
+  if (authLimited(req, res)) return;
+  try {
+    const user = resolveMailUser(req);
+    if (!user) return res.status(401).json({ ok:false, err:'No pudimos identificar tu cuenta. Iniciá sesión de nuevo.' });
+    const rec = (DB.mailCodes || {})[user.id], code = String((req.body || {}).code || '').trim();
+    if (!rec || rec.expiresAt <= Date.now()) return res.status(400).json({ ok:false, err:'El código venció. Pedí uno nuevo.' });
+    if (++rec.tries > 5) { delete DB.mailCodes[user.id]; saveDB(); return res.status(429).json({ ok:false, err:'Demasiados intentos. Pedí un código nuevo.' }); }
+    if (rec.hash !== tokenHash(code)) { saveDB(); return res.status(400).json({ ok:false, err:'El código no es correcto.' }); }
+    user.mail = { address:rec.email, verified:true, at:new Date().toISOString() };
+    delete DB.mailCodes[user.id];
+    saveDB();
+    log('MAIL', user.username);
+    res.json({ ok:true, mail:{ address:user.mail.address, verified:true }, masked:maskEmail(user.mail.address) });
+  } catch (e) { res.status(500).json({ ok:false, err:'No se pudo verificar el código.' }); }
+});
+// Respuesta del equipo al usuario (denuncias y apelaciones). Devuelve true si salió el mail.
+async function mailUser(to, subject, text) {
+  if (!to || !mailConfigured()) return false;
+  try { await sendMailRaw({ to, subject: String(subject).slice(0, 200), text }); return true; }
+  catch (e) { console.error('[MAIL] no se pudo responder a ' + maskEmail(to) + ': ' + e.message); return false; }
+}
+
+// ── APELACIONES DE BANEO ──
+app.post('/api/appeals', async (req, res) => {
+  if (authLimited(req, res)) return;
+  try {
+    const b = req.body || {};
+    const message = String(b.message || '').trim().slice(0, 2000);
+    if (message.length < 10) return res.status(400).json({ ok:false, err:'Explicá por qué creés que el ban es un error (mínimo 10 caracteres).' });
+    let user = null;
+    if (b.appealToken) {
+      const rec = (DB.appealTokens || {})[tokenHash(String(b.appealToken))];
+      if (rec && rec.expiresAt > Date.now()) user = DB.users[rec.userId] || null;
+      if (!user) return res.status(401).json({ ok:false, err:'La sesión de apelación venció. Intentá iniciar sesión de nuevo para apelar.' });
+    } else {
+      const username = String(b.username || ''), pw = String(b.pw || '');
+      if (!username || !pw || pw.length > 128) return res.status(400).json({ ok:false, err:'Completá usuario y contraseña.' });
+      user = Object.values(DB.users).find(u => u.username.toLowerCase() === username.toLowerCase()) || null;
+      if (!user || !verifyPassword(pw, user.pw)) return res.status(401).json({ ok:false, err:'Usuario o contraseña incorrectos.' });
+    }
+    if (!banActive(user)) return res.status(400).json({ ok:false, err:'Esta cuenta no está suspendida.' });
+    if (!hasMail(user)) return res.status(403).json({ ok:false, code:'EMAIL_REQUIRED', err:'Para apelar tenés que vincular un mail verificado: ahí te mandamos la respuesta.' });
+    const appeals = DB.appeals || (DB.appeals = {});
+    const last = Object.values(appeals).filter(a => a.userId === user.id).sort((x, y) => String(y.created).localeCompare(String(x.created)))[0];
+    if (last && Date.now() - new Date(last.created).getTime() < APPEAL_COOLDOWN_MS) return res.status(429).json({ ok:false, err:'Ya mandaste una apelación hace poco. Esperá 24 horas para mandar otra.' });
+    const id = 'apl_' + crypto.randomUUID();
+    const ban = user.banned || {};
+    appeals[id] = { id, userId:user.id, username:user.username, message, email:user.mail.address, status:'open', created:new Date().toISOString(),
+      ban:{ reason:ban.reason || '', notes:ban.notes || '', permanent:!!ban.permanent, until:ban.until || null, bannedBy:ban.bannedBy || '', bannedAt:ban.bannedAt || '' }, emailed:false };
+    saveDB();
+    log('APPEAL', user.username);
+    res.json({ ok:true, email:maskEmail(user.mail.address) });
+    if (!mailConfigured()) { console.warn('[APELACION] CRIX_RESEND_KEY sin configurar: no se mandó el mail de ' + id); return; }
+    const a = appeals[id];
+    const text = [
+      `Apelación de baneo de ${a.username}`,
+      '',
+      'Mensaje del usuario:', a.message, '',
+      `Mail verificado del usuario: ${a.email} (respondiéndole a este mensaje le llega a esa dirección)`,
+      '',
+      `Motivo del ban: ${a.ban.reason || 'Sin motivo especificado'}`,
+      a.ban.notes ? `Notas: ${a.ban.notes}` : '',
+      `Duración: ${a.ban.permanent ? 'permanente' : 'hasta ' + a.ban.until}`,
+      a.ban.bannedBy ? `Baneado por: ${a.ban.bannedBy}` : '',
+      '',
+      `ID de usuario: ${a.userId}`,
+      `ID de apelación: ${a.id}`,
+      `Fecha: ${a.created}`,
+      'También se puede responder desde el panel de admin (Apelaciones).',
+    ].filter((x, i, arr) => x !== '' || arr[i - 1] !== '').join('\n');
+    try {
+      await sendMailRaw({ subject: `[Crix] Apelación de baneo · ${a.username}`.slice(0, 200), text, replyTo: a.email });
+      a.emailed = true; saveDB();
+    } catch (e) { console.error('[APELACION] no se pudo mandar el mail de ' + id + ': ' + e.message); }
+  } catch (e) { res.status(500).json({ ok:false, err:'No se pudo enviar la apelación.' }); }
+});
+app.get('/api/admin/appeals', requireAuth, requireAdmin, (req, res) => {
+  const list = Object.values(DB.appeals || {})
+    .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || String(b.created).localeCompare(String(a.created)))
+    .slice(0, 200)
+    .map(a => ({ ...a, email:maskEmail(a.email), stillBanned: !!(DB.users[a.userId] && banActive(DB.users[a.userId])) }));
+  res.json({ ok:true, appeals:list });
+});
+// action: accept (levanta el ban) · reject. La respuesta (reply) le llega al mail verificado del usuario.
+app.post('/api/admin/appeals/:id', requireAuth, requireAdmin, async (req, res) => {
+  const a = Object.prototype.hasOwnProperty.call(DB.appeals || {}, req.params.id) ? DB.appeals[req.params.id] : null;
+  const action = String(req.body?.action || ''), reply = String(req.body?.reply || '').trim().slice(0, 2000);
+  if (!a) return res.status(404).json({ ok:false, err:'Apelación no encontrada' });
+  if (!['accept', 'reject'].includes(action)) return res.status(400).json({ ok:false, err:'Acción inválida' });
+  if (a.status !== 'open') return res.status(400).json({ ok:false, err:'Esa apelación ya fue respondida' });
+  if (action === 'reject' && reply.length < 3) return res.status(400).json({ ok:false, err:'Escribí una respuesta para explicarle por qué se rechaza.' });
+  const u = DB.users[a.userId];
+  if (action === 'accept' && u && u.banned) {
+    delete u.banned;
+    notifyActivity(u.id, { kind:'home', id:'unban', title:'✅ Tu cuenta fue reactivada', body:'Ya podés volver a usar Crix.', tag:'ban' });
+    log('UNBAN', u.id); const t = onlineUsers[u.id]; if (t) io.to(t.socketId).emit('you_are_unbanned');
+    io.emit('user_updated', { userId:u.id });
+  }
+  Object.assign(a, { status: action === 'accept' ? 'accepted' : 'rejected', reply, reviewedBy:req.user.id, reviewedAt:new Date().toISOString() });
+  saveDB();
+  const text = [
+    `Hola ${a.username},`, '',
+    action === 'accept' ? 'Revisamos tu apelación y levantamos la suspensión de tu cuenta. Ya podés volver a entrar a Crix.' : 'Revisamos tu apelación y por ahora mantenemos la suspensión de tu cuenta.',
+    reply ? '\nMensaje del equipo de Crix:\n' + reply : '',
+    '', 'Equipo de Crix',
+  ].join('\n');
+  const emailed = await mailUser(a.email, `Respuesta a tu apelación en Crix · ${action === 'accept' ? 'aprobada' : 'rechazada'}`, text);
+  a.replyEmailed = emailed; saveDB();
+  res.json({ ok:true, emailed });
+});
+
 // ── DENUNCIAS ──
-require('./reports')(app, { getDB: () => DB, saveDB, requireAuth, requireAdmin, onVisibility(type, id, hidden) {
+require('./reports')(app, { getDB: () => DB, saveDB, requireAuth, requireAdmin, hasMail, maskEmail, mailUser, onVisibility(type, id, hidden) {
   io.emit(type + (hidden ? '_deleted' : '_updated'), type === 'map' ? { mapId:id } : { id, refetch:true });
 } });
 

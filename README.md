@@ -657,3 +657,12 @@ El mail sale por la API HTTP de [Resend](https://resend.com) (Render gratis bloq
 | `CRIX_RESEND_KEY` | Clave de API de Resend. Sin ella la denuncia se guarda igual pero no se envía el mail. |
 | `CRIX_MAIL_FROM` | Remitente, p. ej. `Crix <denuncias@tudominio.com>` (dominio verificado en Resend). Por defecto `onboarding@resend.dev`, que solo puede escribirle al correo con el que creaste la cuenta de Resend: creala con crix.support@gmail.com. |
 | `CRIX_REPORT_TO` | Destino (por defecto `crix.support@gmail.com`). |
+
+## Denuncias, apelaciones y mail vinculado
+
+Para **denunciar** o **apelar un ban** la cuenta necesita un mail **verificado** (se vincula con un código de 6 dígitos que llega a esa dirección; en la pantalla de ban también se puede vincular con el token de apelación). El mail no se muestra en perfiles ni en la lista de usuarios.
+
+- Las denuncias y apelaciones llegan a `CRIX_REPORT_TO` (por defecto `crix.support@gmail.com`) con `reply_to` = el mail verificado de la persona.
+- Desde el panel de admin (**🚩 Ver denuncias** y **📨 Apelaciones**) se puede escribir una respuesta: le llega por mail a la persona junto con lo que se decidió (denuncia: ocultado/descartado; apelación: aceptada, que además desbanea, o rechazada).
+- API: `POST /api/email/request` · `POST /api/email/verify` · `POST /api/appeals` · `GET/POST /api/admin/appeals[/:id]` · `POST /api/admin/reports/:id` (acepta `reply`).
+- **Requisito de envío:** mandarle mails a los usuarios exige `CRIX_RESEND_KEY` y un **dominio verificado en Resend** en `CRIX_MAIL_FROM` (con el remitente por defecto `onboarding@resend.dev` Resend solo entrega a la cuenta dueña de la clave, así que los códigos y las respuestas no llegarían). Sin `CRIX_RESEND_KEY` no se puede verificar ningún mail y, por lo tanto, nadie puede denunciar ni apelar.

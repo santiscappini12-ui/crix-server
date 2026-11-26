@@ -14,7 +14,7 @@ const MAX_OPEN_PER_USER = 20;
 const EVIDENCE_MAX_BYTES = 20 * 1048576;
 const EVIDENCE_TYPES = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp', 'image/gif':'gif', 'video/mp4':'mp4', 'video/webm':'webm', 'video/quicktime':'mov' };
 
-module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requireAdmin, onVisibility }) {
+module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requireAdmin, hasMail, maskEmail, mailUser, onVisibility }) {
   const all = () => { const DB = getDB(); return DB.reports || (DB.reports = {}); };
   function target(type, id) {
     const DB = getDB();
@@ -27,6 +27,7 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
 
   app.post('/api/reports', requireAuth, (req, res) => {
     const type = String(req.body?.type || ''), id = String(req.body?.id || ''), reason = String(req.body?.reason || '');
+    if (!hasMail(req.user)) return res.status(403).json({ ok:false, code:'EMAIL_REQUIRED', err:'Para denunciar tenés que vincular un mail verificado: ahí te avisamos qué decidimos.' });
     if (!TYPES.includes(type) || !REASONS.includes(reason)) return res.status(400).json({ ok:false, err:'Denuncia inválida' });
     const t = target(type, id);
     if (!t) return res.status(404).json({ ok:false, err:'Eso ya no existe' });
@@ -46,7 +47,7 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
     }
     const rid = 'rep_' + crypto.randomUUID();
     all()[rid] = { id:rid, type, targetId:id, authorId, label:label(type, t), reason,
-      detail:String(req.body?.detail || '').slice(0, 500), reporterId:req.user.id, reporterName:req.user.username,
+      detail:String(req.body?.detail || '').slice(0, 500), reporterId:req.user.id, reporterName:req.user.username, reporterEmail:req.user.mail.address,
       status:'open', created:new Date().toISOString(),
       evidence: evidence ? { mime:evidence.mime, size:evidence.size } : undefined, emailed:false };
     saveDB();
@@ -67,7 +68,7 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
       '',
       `ID del contenido: ${r.targetId}` + (link ? `\nEnlace: ${link}` : ''),
       `Autor (ID): ${r.authorId}`,
-      `Denunciante: ${r.reporterName} (${r.reporterId})`,
+      `Denunciante: ${r.reporterName} (${r.reporterId}) · mail verificado: ${r.reporterEmail}`,
       `Fecha: ${r.created}`,
       `ID de denuncia: ${r.id}`,
       evidence ? `Adjunto: ${evidence.mime}, ${(evidence.size / 1048576).toFixed(1)} MB` : 'Sin captura ni video adjunto.',
@@ -77,6 +78,7 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
         subject: `[Crix] Denuncia: ${REASON_TEXT[r.reason]} · ${TYPE_TEXT[r.type]} «${r.label}»`.slice(0, 200),
         text,
         attachments: evidence ? [{ filename:`evidencia-${r.id}.${evidence.ext}`, content:evidence.data }] : [],
+        replyTo: r.reporterEmail,
       });
       r.emailed = true; saveDB();
     } catch (e) { console.error('[DENUNCIA] no se pudo mandar el mail de ' + r.id + ': ' + e.message); }
@@ -90,10 +92,11 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
     res.json({ ok:true, reports:list });
   });
 
-  // action: hide (ocultar) · restore (volver a mostrar) · dismiss (descartar)
-  app.post('/api/admin/reports/:rid', requireAuth, requireAdmin, (req, res) => {
+  // action: hide (ocultar) · restore (volver a mostrar) · dismiss (descartar). `reply` (opcional) es un mensaje para el denunciante:
+  // al resolverse la denuncia (y las demás sobre lo mismo) se le manda por mail a su dirección verificada, con o sin mensaje.
+  app.post('/api/admin/reports/:rid', requireAuth, requireAdmin, async (req, res) => {
     const r = Object.prototype.hasOwnProperty.call(all(), req.params.rid) ? all()[req.params.rid] : null;
-    const action = String(req.body?.action || '');
+    const action = String(req.body?.action || ''), reply = String(req.body?.reply || '').trim().slice(0, 1000);
     if (!r) return res.status(404).json({ ok:false, err:'Denuncia no encontrada' });
     if (!['hide', 'restore', 'dismiss'].includes(action)) return res.status(400).json({ ok:false, err:'Acción inválida' });
     if (action !== 'dismiss') {
@@ -103,9 +106,32 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
       onVisibility(r.type, r.targetId, action === 'hide');
     }
     const status = { hide:'hidden', restore:'dismissed', dismiss:'dismissed' }[action];
+    const toNotify = [];
     for (const o of Object.values(all()))
-      if (o.id === r.id || (action !== 'dismiss' && o.type === r.type && o.targetId === r.targetId)) Object.assign(o, { status, reviewedBy:req.user.id, reviewedAt:new Date().toISOString() });
+      if (o.id === r.id || (action !== 'dismiss' && o.type === r.type && o.targetId === r.targetId)) {
+        if (o.status === 'open') toNotify.push(o);
+        Object.assign(o, { status, reviewedBy:req.user.id, reviewedAt:new Date().toISOString(), ...(o.id === r.id && reply ? { reply } : {}) });
+      }
     saveDB();
-    res.json({ ok:true });
+    // Un mail por persona (si denunció dos veces lo mismo, uno solo).
+    const sent = new Set(); let emailed = 0, failed = 0;
+    for (const o of toNotify) {
+      const to = o.reporterEmail || (getDB().users[o.reporterId]?.mail?.verified ? getDB().users[o.reporterId].mail.address : '');
+      if (!to || sent.has(to + '|' + o.targetId)) continue;
+      sent.add(to + '|' + o.targetId);
+      const outcome = action === 'hide'
+        ? 'Revisamos tu denuncia y ocultamos el contenido porque rompe las reglas de uso de Crix.'
+        : 'Revisamos tu denuncia y, por ahora, no encontramos que rompa las reglas de uso de Crix, así que no tomamos medidas.';
+      const text = [
+        `Hola ${o.reporterName},`, '',
+        `Sobre tu denuncia de ${TYPE_TEXT[o.type]} «${o.label}» (${REASON_TEXT[o.reason] || 'motivo retirado'}):`, '',
+        outcome,
+        reply && o.id === r.id ? '\nMensaje del equipo de Crix:\n' + reply : '',
+        '', 'Gracias por ayudar a cuidar Crix.', 'Equipo de Crix',
+      ].join('\n');
+      (await mailUser(to, `Respuesta a tu denuncia en Crix · ${TYPE_TEXT[o.type]} «${o.label}»`, text)) ? emailed++ : failed++;
+    }
+    saveDB();
+    res.json({ ok:true, emailed, failed });
   });
 };
