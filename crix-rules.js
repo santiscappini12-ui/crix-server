@@ -143,6 +143,8 @@
     const bg = document.createElement('div');
     bg.className = 'no-i18n';
     bg.id = 'crix-rules-box';
+    bg.dataset.lang = String(window.__crixLang);   // para re-renderizar si cambia el idioma con la ventana abierta
+    bg.dataset.must = mustAccept ? '1' : '0';
     bg.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px';
     bg.innerHTML = '<div style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:16px;width:100%;max-width:520px;max-height:85vh;overflow:auto;font-size:14px;line-height:1.5">' +
       '<div style="font-weight:800;font-size:18px">' + L.title + '</div><p><b>' + L.no + '</b></p><ol style="padding-left:20px">' +
@@ -170,6 +172,7 @@
   // Cubre todas las formas de entrar (contraseña, Google, sesión guardada). Sin conexión no se pide: no se puede publicar.
   setInterval(() => {
     const open = document.getElementById('crix-rules-box');
+    if (open && open.dataset.lang !== String(window.__crixLang)) { show(open.dataset.must === '1'); return; }
     if (typeof ME === 'undefined' || !ME || !DB.get('token') || !navigator.onLine) return;
     if (ME.rulesAccepted !== VERSION && !open) show(true);
   }, 1500);
