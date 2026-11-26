@@ -10123,6 +10123,7 @@ function stuAddSound(folderId) {
     <div class="set-note" id="set-thumb-note" style="margin-top:6px"></div>
   </div>
   <div class="field-grp"><label class="field-lbl">Sin conexión</label><div class="set-note" style="margin-bottom:8px">Juegos, apps, videos y accesorios que descargaste para usar sin internet.</div><button class="btn btn-g" onclick="closeModal('mo-settings');CrixOffline.openManager()">📥 Mis descargas</button></div>
+  <div class="field-grp"><label class="field-lbl">Reglas de uso</label><button class="btn btn-g" onclick="closeModal('mo-settings');crixShowRules()">📜 Leer las reglas</button></div>
   <div class="field-grp"><label class="field-lbl">Cuenta</label><div id="set-account"></div></div>
   <div class="mo-btns"><button class="btn btn-g" onclick="closeModal('mo-settings')">Cerrar</button></div>
 </div>
@@ -10165,6 +10166,11 @@ const LANGS = { es:'Español', en:'English', pt:'Português', fr:'Français', de
 const ORDER = ['es','en','pt','fr','de','it'];
 const GLOC  = { es:'es', en:'en', pt:'pt-BR', fr:'fr', de:'de', it:'it' };
 const ROWS = [
+  ["Reglas de uso", "Usage rules", "Regras de uso", "Règles d’utilisation", "Nutzungsregeln", "Regole d’uso"],
+  ["📜 Leer las reglas", "📜 Read the rules", "📜 Ler as regras", "📜 Lire les règles", "📜 Regeln lesen", "📜 Leggi le regole"],
+  ["Acepto las", "I accept the", "Aceito as", "J’accepte les", "Ich akzeptiere die", "Accetto le"],
+  ["reglas de uso", "usage rules", "regras de uso", "règles d’utilisation", "Nutzungsregeln", "regole d’uso"],
+  ["Tenés que aceptar las reglas de uso.", "You have to accept the usage rules.", "Você precisa aceitar as regras de uso.", "Tu dois accepter les règles d’utilisation.", "Du musst die Nutzungsregeln akzeptieren.", "Devi accettare le regole d’uso."],
   // acceso
   ["Creá. Jugá. Conectate.","Create. Play. Connect.","Crie. Jogue. Conecte-se.","Crée. Joue. Connecte-toi.","Erstelle. Spiele. Vernetze dich.","Crea. Gioca. Connettiti."],
   ["Iniciar Sesión","Log in","Entrar","Se connecter","Anmelden","Accedi"],
