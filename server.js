@@ -2935,6 +2935,32 @@ app.post('/api/email/verify', (req, res) => {
     res.json({ ok:true, mail:{ address:user.mail.address, verified:true }, masked:maskEmail(user.mail.address) });
   } catch (e) { res.status(500).json({ ok:false, err:'No se pudo verificar el código.' }); }
 });
+// ── Idioma de los mails al usuario ──
+// Se usa el idioma de Crix de la cuenta (user.prefs.crix_lang); si no hay, el que mande el cliente al apelar; si no, español.
+const MAIL_LANGS = ['es','en','pt','fr','de','it'];
+const userLang = (u, fallback) => { const l = u && u.prefs && u.prefs.crix_lang; return MAIL_LANGS.includes(l) ? l : (MAIL_LANGS.includes(fallback) ? fallback : 'es'); };
+const MAIL_I18N = {
+  appealAccepted: {
+    es:['Respuesta a tu apelación en Crix · aprobada', n => `Hola ${n},`, 'Revisamos tu apelación y levantamos la suspensión de tu cuenta. Ya podés volver a entrar a Crix.', 'Mensaje del equipo de Crix:', 'Equipo de Crix'],
+    en:['Reply to your Crix appeal · approved', n => `Hi ${n},`, 'We reviewed your appeal and lifted your account suspension. You can use Crix again.', 'Message from the Crix team:', 'The Crix team'],
+    pt:['Resposta à sua apelação no Crix · aprovada', n => `Olá ${n},`, 'Analisamos sua apelação e levantamos a suspensão da sua conta. Você já pode voltar a usar o Crix.', 'Mensagem da equipe do Crix:', 'Equipe do Crix'],
+    fr:['Réponse à ton appel sur Crix · accepté', n => `Salut ${n},`, 'Nous avons examiné ton appel et levé la suspension de ton compte. Tu peux de nouveau utiliser Crix.', 'Message de l’équipe Crix :', 'L’équipe Crix'],
+    de:['Antwort auf deinen Crix-Einspruch · angenommen', n => `Hallo ${n},`, 'Wir haben deinen Einspruch geprüft und die Sperre deines Kontos aufgehoben. Du kannst Crix wieder verwenden.', 'Nachricht vom Crix-Team:', 'Das Crix-Team'],
+    it:['Risposta al tuo ricorso su Crix · accolto', n => `Ciao ${n},`, 'Abbiamo esaminato il tuo ricorso e revocato la sospensione del tuo account. Puoi tornare a usare Crix.', 'Messaggio del team di Crix:', 'Il team di Crix'],
+  },
+  appealRejected: {
+    es:['Respuesta a tu apelación en Crix · rechazada', n => `Hola ${n},`, 'Revisamos tu apelación y por ahora mantenemos la suspensión de tu cuenta.', 'Mensaje del equipo de Crix:', 'Equipo de Crix'],
+    en:['Reply to your Crix appeal · rejected', n => `Hi ${n},`, 'We reviewed your appeal and, for now, your account suspension stays in place.', 'Message from the Crix team:', 'The Crix team'],
+    pt:['Resposta à sua apelação no Crix · rejeitada', n => `Olá ${n},`, 'Analisamos sua apelação e, por enquanto, mantemos a suspensão da sua conta.', 'Mensagem da equipe do Crix:', 'Equipe do Crix'],
+    fr:['Réponse à ton appel sur Crix · refusé', n => `Salut ${n},`, 'Nous avons examiné ton appel et, pour l’instant, la suspension de ton compte est maintenue.', 'Message de l’équipe Crix :', 'L’équipe Crix'],
+    de:['Antwort auf deinen Crix-Einspruch · abgelehnt', n => `Hallo ${n},`, 'Wir haben deinen Einspruch geprüft; die Sperre deines Kontos bleibt vorerst bestehen.', 'Nachricht vom Crix-Team:', 'Das Crix-Team'],
+    it:['Risposta al tuo ricorso su Crix · respinto', n => `Ciao ${n},`, 'Abbiamo esaminato il tuo ricorso e, per ora, la sospensione del tuo account resta in vigore.', 'Messaggio del team di Crix:', 'Il team di Crix'],
+  },
+};
+function appealReplyMail(accepted, username, reply, lang) {
+  const t = MAIL_I18N[accepted ? 'appealAccepted' : 'appealRejected'][MAIL_LANGS.includes(lang) ? lang : 'es'];
+  return { subject:t[0], text:[t[1](username), '', t[2], reply ? '\n' + t[3] + '\n' + reply : '', '', t[4]].join('\n') };
+}
 // Respuesta del equipo al usuario (denuncias y apelaciones). Devuelve true si salió el mail.
 async function mailUser(to, subject, text) {
   if (!to || !mailConfigured()) return false;
@@ -2967,7 +2993,7 @@ app.post('/api/appeals', async (req, res) => {
     if (last && Date.now() - new Date(last.created).getTime() < APPEAL_COOLDOWN_MS) return res.status(429).json({ ok:false, err:'Ya mandaste una apelación hace poco. Esperá 24 horas para mandar otra.' });
     const id = 'apl_' + crypto.randomUUID();
     const ban = user.banned || {};
-    appeals[id] = { id, userId:user.id, username:user.username, message, email:user.mail.address, status:'open', created:new Date().toISOString(),
+    appeals[id] = { id, userId:user.id, username:user.username, message, email:user.mail.address, lang:userLang(user, String(b.lang || '')), status:'open', created:new Date().toISOString(),
       ban:{ reason:ban.reason || '', notes:ban.notes || '', permanent:!!ban.permanent, until:ban.until || null, bannedBy:ban.bannedBy || '', bannedAt:ban.bannedAt || '' }, emailed:false };
     saveDB();
     log('APPEAL', user.username);
@@ -2979,6 +3005,7 @@ app.post('/api/appeals', async (req, res) => {
       '',
       'Mensaje del usuario:', a.message, '',
       `Mail verificado del usuario: ${a.email} (respondiéndole a este mensaje le llega a esa dirección)`,
+      `Idioma de Crix de la persona: ${a.lang} → respondele en ese idioma (el mail de respuesta del panel de admin sale automáticamente en ese idioma).`,
       '',
       `Motivo del ban: ${a.ban.reason || 'Sin motivo especificado'}`,
       a.ban.notes ? `Notas: ${a.ban.notes}` : '',
@@ -3020,13 +3047,9 @@ app.post('/api/admin/appeals/:id', requireAuth, requireAdmin, async (req, res) =
   }
   Object.assign(a, { status: action === 'accept' ? 'accepted' : 'rejected', reply, reviewedBy:req.user.id, reviewedAt:new Date().toISOString() });
   saveDB();
-  const text = [
-    `Hola ${a.username},`, '',
-    action === 'accept' ? 'Revisamos tu apelación y levantamos la suspensión de tu cuenta. Ya podés volver a entrar a Crix.' : 'Revisamos tu apelación y por ahora mantenemos la suspensión de tu cuenta.',
-    reply ? '\nMensaje del equipo de Crix:\n' + reply : '',
-    '', 'Equipo de Crix',
-  ].join('\n');
-  const emailed = await mailUser(a.email, `Respuesta a tu apelación en Crix · ${action === 'accept' ? 'aprobada' : 'rechazada'}`, text);
+  const lang = a.lang || userLang(u);
+  const mail = appealReplyMail(action === 'accept', a.username, reply, lang);
+  const emailed = await mailUser(a.email, mail.subject, mail.text);
   a.replyEmailed = emailed; saveDB();
   res.json({ ok:true, emailed });
 });
