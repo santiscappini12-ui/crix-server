@@ -5,7 +5,8 @@ FROM node:22-bookworm
 USER node
 ENV HOME=/home/node \
     PORT=8080 \
-    NODE_ENV=production
+    NODE_ENV=production \
+    MALLOC_ARENA_MAX=2
 WORKDIR /home/node/app
 
 COPY --chown=node:node package*.json ./

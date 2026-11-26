@@ -78,7 +78,7 @@ app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
-const CRIX_BUILD = 'texturas-pwa-2026-11-25';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
+const CRIX_BUILD = 'ligero-2026-11-25';   // sirve para comprobar qué versión del código está corriendo realmente en el hosting
 app.use('/api', (req, res, next) => { res.set({ 'X-Crix-Instance': INSTANCE_TAG, 'X-Crix-Build': CRIX_BUILD }); next(); });
 // Lecturas del catálogo: primero se trae lo que otra instancia haya subido (así lo publicado se ve en todos lados al instante).
 app.use(['/api/maps', '/api/videos', '/api/posts', '/api/users'], async (req, res, next) => {
@@ -178,18 +178,22 @@ function saveDB() {
   const wait = Math.max(1500, Math.min(30000, Math.round(_saveCost * 8)));
   _saveTimer = setTimeout(() => { _saveTimer = null; saveDBNow(); }, wait);
 }
+const SYNC_OFF = process.env.CRIX_SYNC_MS === '0';   // sin sincronización entre instancias nadie lee los sellos `_u`: no hace falta calcularlos
 function saveDBNow() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
   const t0 = Date.now();
   try {
-    if (dbSync) dbSync.reconcile();   // estampa `_u` en lo que cambió y deja lápidas de lo que se borró
+    if (dbSync && !SYNC_OFF) dbSync.reconcile();   // estampa `_u` en lo que cambió y deja lápidas de lo que se borró
     // Solo se escribe (y se sube al almacenamiento externo) si el contenido cambió.
+    // Antes la base se recorría 3 veces (sellos + firma + archivo); ahora se serializa UNA sola vez (sin `_v`), se firma ese texto
+    // y, si cambió, el mismo texto es el archivo: menos CPU y menos memoria pasajera (clave en contenedores de 256 MB / 0,1 vCPU).
     const prevV = DB._v || 0;
-    DB._v = 0;
-    const sig = crypto.createHash('sha1').update(JSON.stringify(DB)).digest('hex');
-    if (sig === lastDbSig) { DB._v = prevV; return; }
+    delete DB._v;
+    let body; try { body = JSON.stringify(DB); } finally { DB._v = prevV; }
+    const sig = crypto.createHash('sha1').update(body).digest('hex');
+    if (sig === lastDbSig) return;
     DB._v = prevV + 1;
-    const json = JSON.stringify(DB);
+    const json = body === '{}' ? '{"_v":' + DB._v + '}' : '{"_v":' + DB._v + ',' + body.slice(1);
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     const tempFile = `${DATA_FILE}.${process.pid}.tmp`;
     fs.writeFileSync(tempFile, json, 'utf8');
@@ -261,7 +265,7 @@ const scriptDataStore = require('./datastore')({ getDB: () => DB, saveDB });
 const push = require('./push')({ getDB: () => DB, saveDB });
 push.init();
 // Guardar cada 10 segundos para no perder datos
-setInterval(saveDB, 20000);
+setInterval(saveDB, LOWRES.low ? 60000 : 20000);   // red de seguridad; los cambios normales ya agendan su propio guardado
 
 // ══════════════════════════════════════════════
 // ESTADO EN MEMORIA (sesiones activas)
