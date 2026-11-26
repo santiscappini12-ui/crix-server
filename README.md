@@ -645,3 +645,15 @@ Elementos de la cara (cada uno es su propia pista y se puede poner en otra capa/
 - **Barra del visor:** 🗂 Model · 📁 Folder · ⤴ Sacar del grupo · ⤓ Desagrupar · ⬡ Unir · ➖ Restar · ◐ Negar · uniones · ⧉ Duplicar · ✕ Borrar (todo con Ctrl+Z).
 - **Unión de piezas (como Roblox):** ⬡ **Unir** funde las piezas elegidas en una sola malla; las marcadas ◐ **negativas** (rojas translúcidas) se **restan** al unir. ➖ **Restar** = la primera menos todas las demás. El resultado es una pieza `ImportedMesh` que conserva color/material del primer positivo y **colisiona como su caja envolvente**. Límite de complejidad para que el editor no se cuelgue (si es demasiado, avisa). Las uniones de las piezas originales se quitan.
 - **Explorador:** árbol de Models y Folders anidados con sus piezas, uniones y objetos.
+
+## Denuncias por mail
+
+Cada 🚩 (tarjetas de juegos/apps, videos, accesorios, posts y perfiles) abre un formulario con motivo, detalle y una **captura o video opcional** (png/jpg/webp/gif/mp4/webm/mov, máx. 20 MB). La denuncia se guarda para el panel de admin y además se manda a **crix.support@gmail.com** con el adjunto.
+
+El mail sale por la API HTTP de [Resend](https://resend.com) (Render gratis bloquea SMTP). Variables de entorno:
+
+| Variable | Valor |
+| --- | --- |
+| `CRIX_RESEND_KEY` | Clave de API de Resend. Sin ella la denuncia se guarda igual pero no se envía el mail. |
+| `CRIX_MAIL_FROM` | Remitente, p. ej. `Crix <denuncias@tudominio.com>` (dominio verificado en Resend). Por defecto `onboarding@resend.dev`, que solo puede escribirle al correo con el que creaste la cuenta de Resend: creala con crix.support@gmail.com. |
+| `CRIX_REPORT_TO` | Destino (por defecto `crix.support@gmail.com`). |

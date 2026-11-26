@@ -1324,12 +1324,12 @@ function validateGlb(buf) {
 app.get('/api/accessories', (req, res) => {
   const user = readSession(req), all = Object.values(DB.accessories || {}).filter(a => a && a.id);
   const mine = user ? all.filter(a => a.authorId === user.id).sort((a, b) => b.createdAt - a.createdAt) : [];
-  const pub = all.filter(a => a.scope === 'public' && (!user || a.authorId !== user.id)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 200);
+  const pub = all.filter(a => a.scope === 'public' && !a.modHidden && (!user || a.authorId !== user.id)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 200);
   res.set('Cache-Control', 'no-store'); res.json({ ok:true, mine:mine.map(accView), pub:pub.map(accView) });
 });
 app.get('/api/accessories/:id', (req, res) => {
   const a = ACC_ID_PARAM.test(req.params.id) && DB.accessories && DB.accessories[req.params.id];
-  if (!a) return res.status(404).json({ ok:false, err:'Accesorio no encontrado' });
+  if (!a || (a.modHidden && !(readSession(req) && (readSession(req).isAdmin || readSession(req).id === a.authorId)))) return res.status(404).json({ ok:false, err:'Accesorio no encontrado' });
   res.set('Cache-Control', 'no-cache'); res.json({ ok:true, accessory:accView(a) });
 });
 app.get('/api/accessories/:id/model', async (req, res) => {
