@@ -75,6 +75,7 @@ const LIM = {
 app.use(express.json({ limit: LIM.json }));
 // Los listados de la API nunca se cachean (ni en el navegador ni en un proxy): cada cliente ve lo último que hay.
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+require('./rules')(app, { readSession, requireAuth, saveDB });   // antes que las rutas que protege
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));   // health check del hosting
 // Identifica qué instancia respondió (cabecera X-Crix-Instance): si dos navegadores ven ids distintos, hay más de una instancia corriendo.
 const INSTANCE_TAG = cluster.nodeId;
@@ -1040,7 +1041,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js','/crix-report.js',
+const PUBLIC_FILES = ['/index.html','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js','/crix-report.js','/crix-rules.js',
   '/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
@@ -1191,6 +1192,7 @@ app.post('/api/register', (req, res) => {
       following:[], liked:[], isAdmin: false,
     };
     if (isCrix) user.isAdmin = true;
+    user.rulesAccepted = require('./rules').RULES_VERSION; user.rulesAcceptedAt = user.created;
     DB.users[uid] = user;
     const token = issueSession(user);
     log('REGISTER', username);

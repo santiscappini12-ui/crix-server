@@ -80,6 +80,10 @@ Sin estas variables Crix funciona como antes, solo con disco local.
 
 Crix **no filtra ni modera contenido automáticamente**: no hay filtros de palabras, detección de imágenes, censura de chat ni bloqueos o baneos automáticos. Lo único que se rechaza es lo **ilegal** (cuestionario de legalidad al subir un medio, ver abajo); lo demás se **clasifica por edad**, no se prohíbe. Los baneos son siempre una decisión manual de un admin. Los límites de ritmo (anti-flood de comentarios, comandos, etc.) son técnicos y no miran el contenido.
 
+## Reglas de uso y denuncias
+
+Estas reglas reemplazan lo que se dice arriba sobre qué se permite: hay que aceptarlas para registrarse y para publicar (texto en `crix-rules.js`, control en `rules.js`). Cualquier cuenta puede denunciar juegos, videos, posts y perfiles; un admin los revisa en **Panel de Admin → Ver denuncias** y puede ocultarlos (`reports.js`).
+
 ## Clasificación de medios por país
 
 Crix solo prohíbe lo **ilegal**. Antes de subir un video, un juego o una app hay que completar un cuestionario propio de Crix para que el medio lleve la insignia de edad de **tu país**: Crix AR, Crix EUU, Crix EU, Crix DE, Crix BR, Crix JP, Crix KR, Crix AU, Crix MX, Crix CL, Crix CO, o Crix Global para el resto. Cada una tiene su propia forma y código. Si se declara «para niños» junto con contenido de 13+ no se rechaza: se clasifica por el contenido y se quita la marca infantil. Se clasifica el medio **entero** (un video, o un juego completo con sus texturas y sonidos), nunca cada textura o archivo suelto.

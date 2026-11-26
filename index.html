@@ -605,6 +605,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
         <label class="field-lbl">Repetir Contraseña</label>
         <input class="inp" id="r-p2" type="password" placeholder="••••••••">
       </div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text2);margin-bottom:10px"><input type="checkbox" id="r-rules"><span>Acepto las <button type="button" class="link-btn" onclick="event.preventDefault();crixShowRules()">reglas de uso</button></span></label>
       <button class="btn btn-p" style="width:100%;margin-top:4px" onclick="doRegister()">Crear Cuenta →</button>
       <div style="text-align:center;font-size:12px;color:var(--text2);margin-top:14px">
         ¿Ya tenés? <button class="link-btn" onclick="swapForm('login')">Iniciá sesión</button>
@@ -1171,6 +1172,7 @@ body.is-guest [onclick*="createNewGame"],body.is-guest [onclick*="createNewApp"]
 <script src="/crix-console.js"></script>
 <script src="/crix-native.js"></script>
 <script src="/crix-report.js" defer></script>
+<script src="/crix-rules.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/crix-gfx.js"></script>
 <script src="/GLTFLoader.js"></script>
@@ -2578,7 +2580,7 @@ async function doLogin() {
     const legacy = Object.values(getUsers()).find(x => x.username.toLowerCase() === username.toLowerCase());
     if (!legacy || legacy.pw !== btoa(unescape(encodeURIComponent(password)))) { authErr('Usuario no encontrado o contraseña incorrecta.'); return; }
     try {
-      const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color }, token:'' });
+      const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color, acceptRules: confirm('Para pasar tu cuenta tenés que aceptar las reglas de uso de Crix (no publicar nada ilegal, dañino ni abusar de los servidores). ¿Aceptás?') ? 1 : 0 }, token:'' });
       loginAs(result.user, result.token, legacy.id, password);
     } catch (migrationError) { authErr(migrationError.message); }
   }
@@ -2592,8 +2594,9 @@ async function doRegister() {
   if (password.length < 6) { authErr('La contraseña necesita al menos 6 caracteres.'); return; }
   if (password !== repeat) { authErr('Las contraseñas no coinciden.'); return; }
   if (!/^[a-zA-Z0-9_]+$/.test(username)) { authErr('Solo letras, números y guión bajo.'); return; }
+  if (!document.getElementById('r-rules').checked) { authErr('Tenés que aceptar las reglas de uso.'); return; }
   try {
-    const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor() }, token:'' });
+    const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor(), acceptRules:1 }, token:'' });
     loginAs(result.user, result.token, null, password);
   } catch (err) { authErr(err.message); }
 }
