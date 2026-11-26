@@ -11,12 +11,10 @@
    "Contenido sexual con menores o que los ponga en riesgo.",
    "Imágenes íntimas sin consentimiento, reales o falsas.",
    "Terrorismo, violencia extrema o contenido que busque causar daño.",
-   "Odio, acoso o discriminación.",
    "Estafas, engaños dañinos, suplantación o logins falsos.",
    "Virus o código malicioso.",
    "Copiar obras o marcas sin permiso.",
-   "Vender drogas, armas, falsificaciones u otros productos ilegales, o apuestas ilegales.",
-   "Spam."
+   "Vender drogas, armas, falsificaciones u otros productos ilegales, o apuestas ilegales."
   ],
   "servers": "Tampoco se permite abusar de los servidores: atacarlos o saturarlos, saltarse límites o seguridad, hacer pruebas de vulnerabilidad sin permiso, minar criptomonedas, usarlos como proxy, VPN o túnel, hacer scraping no autorizado o crear cuentas para evadir sanciones o límites.",
   "end": "Podemos ocultar o borrar contenido y suspender cuentas que incumplan.",
@@ -33,12 +31,10 @@
    "Sexual content involving minors or content that endangers them.",
    "Intimate images without consent, real or fake.",
    "Terrorism, extreme violence or content meant to cause harm.",
-   "Hate, harassment or discrimination.",
    "Scams, harmful deception, impersonation or fake logins.",
    "Viruses or malicious code.",
    "Copying works or trademarks without permission.",
-   "Selling drugs, weapons, counterfeits or other illegal products, or illegal gambling.",
-   "Spam."
+   "Selling drugs, weapons, counterfeits or other illegal products, or illegal gambling."
   ],
   "servers": "Abusing the servers is not allowed either: attacking or overloading them, bypassing limits or security, testing for vulnerabilities without permission, mining cryptocurrency, using them as a proxy, VPN or tunnel, unauthorized scraping, or creating accounts to evade bans or limits.",
   "end": "We may hide or delete content and suspend accounts that break these rules.",
@@ -55,12 +51,10 @@
    "Conteúdo sexual com menores ou que os coloque em risco.",
    "Imagens íntimas sem consentimento, reais ou falsas.",
    "Terrorismo, violência extrema ou conteúdo que busque causar danos.",
-   "Ódio, assédio ou discriminação.",
    "Golpes, enganos prejudiciais, falsa identidade ou logins falsos.",
    "Vírus ou código malicioso.",
    "Copiar obras ou marcas sem permissão.",
-   "Vender drogas, armas, falsificações ou outros produtos ilegais, ou apostas ilegais.",
-   "Spam."
+   "Vender drogas, armas, falsificações ou outros produtos ilegais, ou apostas ilegais."
   ],
   "servers": "Também não é permitido abusar dos servidores: atacá-los ou sobrecarregá-los, contornar limites ou a segurança, testar vulnerabilidades sem permissão, minerar criptomoedas, usá-los como proxy, VPN ou túnel, fazer scraping não autorizado ou criar contas para evitar punições ou limites.",
   "end": "Podemos ocultar ou apagar conteúdo e suspender contas que descumprirem as regras.",
@@ -77,12 +71,10 @@
    "Les contenus sexuels impliquant des mineurs ou les mettant en danger.",
    "Les images intimes sans consentement, réelles ou fausses.",
    "Le terrorisme, la violence extrême ou les contenus visant à nuire.",
-   "La haine, le harcèlement ou la discrimination.",
    "Les arnaques, tromperies nuisibles, usurpations d’identité ou fausses pages de connexion.",
    "Les virus ou codes malveillants.",
    "La copie d’œuvres ou de marques sans autorisation.",
-   "La vente de drogues, d’armes, de contrefaçons ou d’autres produits illégaux, et les jeux d’argent illégaux.",
-   "Le spam."
+   "La vente de drogues, d’armes, de contrefaçons ou d’autres produits illégaux, et les jeux d’argent illégaux."
   ],
   "servers": "Il est aussi interdit d’abuser des serveurs : les attaquer ou les surcharger, contourner les limites ou la sécurité, tester des vulnérabilités sans autorisation, miner des cryptomonnaies, les utiliser comme proxy, VPN ou tunnel, faire du scraping non autorisé ou créer des comptes pour échapper aux sanctions ou aux limites.",
   "end": "Nous pouvons masquer ou supprimer des contenus et suspendre les comptes en infraction.",
@@ -99,12 +91,10 @@
    "Sexuelle Inhalte mit Minderjährigen oder Inhalte, die sie gefährden.",
    "Intime Bilder ohne Einwilligung, echt oder gefälscht.",
    "Terrorismus, extreme Gewalt oder Inhalte, die Schaden anrichten sollen.",
-   "Hass, Belästigung oder Diskriminierung.",
    "Betrug, schädliche Täuschung, Identitätsmissbrauch oder gefälschte Anmeldeseiten.",
    "Viren oder Schadcode.",
    "Werke oder Marken ohne Erlaubnis kopieren.",
-   "Verkauf von Drogen, Waffen, Fälschungen oder anderen illegalen Waren sowie illegales Glücksspiel.",
-   "Spam."
+   "Verkauf von Drogen, Waffen, Fälschungen oder anderen illegalen Waren sowie illegales Glücksspiel."
   ],
   "servers": "Auch der Missbrauch der Server ist verboten: sie angreifen oder überlasten, Limits oder Sicherheit umgehen, ohne Erlaubnis auf Schwachstellen testen, Kryptowährungen schürfen, sie als Proxy, VPN oder Tunnel nutzen, unerlaubtes Scraping oder Konten erstellen, um Sperren oder Limits zu umgehen.",
   "end": "Wir können Inhalte verbergen oder löschen und Konten sperren, die gegen die Regeln verstoßen.",
@@ -121,12 +111,10 @@
    "Contenuti sessuali con minori o che li mettano a rischio.",
    "Immagini intime senza consenso, reali o false.",
    "Terrorismo, violenza estrema o contenuti volti a causare danni.",
-   "Odio, molestie o discriminazione.",
    "Truffe, inganni dannosi, furto d’identità o false pagine di accesso.",
    "Virus o codice dannoso.",
    "Copiare opere o marchi senza permesso.",
-   "Vendere droga, armi, merce contraffatta o altri prodotti illegali, o gioco d’azzardo illegale.",
-   "Spam."
+   "Vendere droga, armi, merce contraffatta o altri prodotti illegali, o gioco d’azzardo illegale."
   ],
   "servers": "Non è consentito neanche abusare dei server: attaccarli o sovraccaricarli, aggirare limiti o sicurezza, cercare vulnerabilità senza permesso, minare criptovalute, usarli come proxy, VPN o tunnel, fare scraping non autorizzato o creare account per eludere sanzioni o limiti.",
   "end": "Possiamo nascondere o eliminare contenuti e sospendere gli account che violano le regole.",

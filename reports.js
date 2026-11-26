@@ -5,10 +5,9 @@ const crypto = require('crypto');
 const { sendReportMail, configured: mailConfigured } = require('./report-mail');
 
 const TYPES = ['map', 'video', 'post', 'user', 'accessory'];
-// Solo se puede denunciar lo ilegal. Los motivos de contenido legal (sexual, odio, spam, otro...) ya no se aceptan;
-// sus textos quedan en REASON_TEXT solo para mostrar denuncias viejas.
+// Solo se puede denunciar lo ilegal (y el abuso de los servidores). No existen motivos de contenido legal.
 const REASONS = ['ilegal', 'menores', 'violencia', 'estafa', 'copyright', 'servidor'];
-const REASON_TEXT = { servidor:'Ataca o explota los servidores a propósito', ilegal:'Contenido ilegal', sexual:'Contenido sexual', menores:'Pone en riesgo a menores', violencia:'Amenazas', odio:'Odio o acoso', estafa:'Estafa o robo de contraseñas', copyright:'Copia sin permiso', spam:'Spam', otro:'Otro' };
+const REASON_TEXT = { ilegal:'Contenido ilegal', menores:'Pone en riesgo a menores', violencia:'Amenazas', estafa:'Estafa o robo de contraseñas', copyright:'Copia sin permiso', servidor:'Ataca o explota los servidores a propósito' };
 const TYPE_TEXT = { map:'Juego/app', video:'Video', post:'Post', user:'Usuario', accessory:'Accesorio' };
 const MAX_OPEN_PER_USER = 20;
 // Evidencia (captura o video) que se adjunta al mail. El cliente la manda en base64.
