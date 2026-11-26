@@ -1,8 +1,8 @@
 // Botón de denuncia y lista de denuncias para el admin.
 (function () {
-  // 'sexual' ya no se ofrece como motivo (es legal); queda en OLD_REASONS para mostrar denuncias viejas en el panel.
-  const REASONS = { ilegal:'Contenido ilegal', menores:'Pone en riesgo a menores', violencia:'Violencia o amenazas', odio:'Odio o acoso', estafa:'Estafa o robo de contraseñas', copyright:'Copia sin permiso', spam:'Spam', otro:'Otro' };
-  const OLD_REASONS = { ...REASONS, sexual:'Contenido sexual' };
+  // Solo se puede denunciar lo ilegal. Los motivos de contenido legal quedan en OLD_REASONS para mostrar denuncias viejas.
+  const REASONS = { ilegal:'Contenido ilegal', menores:'Pone en riesgo a menores', violencia:'Amenazas', estafa:'Estafa o robo de contraseñas', copyright:'Copia sin permiso', servidor:'Ataca o explota los servidores a propósito' };
+  const OLD_REASONS = { ...REASONS, violencia:'Violencia o amenazas', sexual:'Contenido sexual', odio:'Odio o acoso', spam:'Spam', otro:'Otro' };
   const TYPES = { map:'Juego/app', video:'Video', post:'Post', user:'Usuario', accessory:'Accesorio' };
 
   async function call(url, body) {
@@ -42,7 +42,7 @@
     const el = box('🚩 Denunciar');
     const sel = document.createElement('select'); sel.style.cssText = field;
     for (const [k, v] of Object.entries(REASONS)) sel.add(new Option(v, k));
-    const txt = document.createElement('textarea'); txt.style.cssText = field; txt.maxLength = 500; txt.rows = 3; txt.placeholder = 'Contanos qué pasa (opcional)';
+    const txt = document.createElement('textarea'); txt.style.cssText = field; txt.maxLength = 500; txt.rows = 3; txt.placeholder = 'Contanos qué pasa (opcional). Solo se denuncia lo ilegal.';
     const note = document.createElement('div');
     note.style.cssText = 'font-size:12px;color:var(--text3);margin:2px 0 6px';
     note.textContent = 'Adjuntá una captura o un video que muestre lo ilegal (máx. 20 MB). La denuncia llega a crix.support@gmail.com.';
