@@ -2224,11 +2224,11 @@ app.post('/api/maps/:id/migrate-id', requireAuth, (req, res) => {
 });
 
 // ── DELETE mapa ──
-app.delete('/api/maps/:id', (req, res) => {
+app.delete('/api/maps/:id', async (req, res) => {
   const user = readSession(req);
   if (!user) return res.status(401).json({ ok:false, err:'Iniciá sesión para borrar juegos' });
   const existing = DB.maps[req.params.id];
-  if (!existing) return res.json({ ok:true });
+  if (!existing) { try { await persist.flush(5000); } catch (_) {} return res.json({ ok:true }); }   // ya no está: se asegura que lo pendiente llegue al bucket
   if (existing.authorId !== user.id && !user.isAdmin)
     return res.status(403).json({ ok:false, err:'No podés borrar este juego' });
   const aid = assetId(req.params.id);
@@ -2238,8 +2238,12 @@ app.delete('/api/maps/:id', (req, res) => {
   if (DB.appScores) delete DB.appScores[req.params.id];
   scriptDataStore.removeMap(req.params.id);
   if (MAP_ID_RE.test(aid)) { try { fs.rmSync(texDir(aid), { recursive:true, force:true }); } catch {} persist.delPrefix(`textures/${aid}/`); try { fs.rmSync(soundDir(aid), { recursive:true, force:true }); } catch {} persist.delPrefix(`sounds/${aid}/`); }
-  saveDB();
+  // Borrar es definitivo: se guarda YA (no «en unos segundos») y se espera a que la base nueva llegue al bucket antes de confirmar.
+  // Antes se confirmaba enseguida y el guardado quedaba agendado; si el servidor se reiniciaba antes, arrancaba con la base vieja del
+  // bucket y el juego «se restauraba solo».
+  saveDBNow();
   io.emit('map_deleted', { mapId: req.params.id });
+  try { await persist.flush(10000); } catch (_) {}
   res.json({ ok:true });
 });
 
