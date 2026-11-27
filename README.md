@@ -27,7 +27,7 @@ Dentro de los juegos 3D (no en los menús ni en el editor de avatar) Crix se ve 
 
 `crix-steps.js` genera con Web Audio (sin archivos de audio) pisadas realistas y bajitas, y un sonido de salto y aterrizaje. Cada pisada mezcla un roce filtrado y un golpe grave, con variación al azar y pie izquierdo/derecho alternados. En modo automático el sonido cambia según el `material` de la pieza que se pisa (pasto, arena, madera, piedra, metal, suave). Las pisadas de otros jugadores suenan más bajas con la distancia y paneadas según de qué lado están.
 
-Dentro del juego, el botón 🦶 (arriba a la derecha, junto a «Salir») abre el panel: pisadas on/off, salto y aterrizaje on/off, pisadas de otros on/off, volumen (por defecto 35 %) y tipo de sonido (automático o fijo). Se guarda en el navegador y en la cuenta (`crix_step_on`, `crix_step_vol`, `crix_step_style`, `crix_jump_on`, `crix_step_others`).
+Dentro del juego, el botón 🦶 (arriba a la derecha, junto a «Salir») abre el panel: pisadas on/off, salto y aterrizaje on/off, pisadas de otros on/off, volumen (por defecto 30 %) y tipo de sonido (automático o fijo). Se guarda en el navegador y en la cuenta (`crix_step_on`, `crix_step_vol`, `crix_step_style`, `crix_jump_on`, `crix_step_others`).
 
 ## Creaciones sin conexión (PWA)
 

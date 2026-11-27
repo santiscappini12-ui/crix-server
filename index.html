@@ -5149,7 +5149,7 @@ function _stepPlayer(mx, mz, moving) {
   // Salto: margen de gracia al salir de un borde (coyote) y salto "guardado" si se pulsa justo antes de aterrizar.
   if (gOnGround) gCoyote = 6; else if (gCoyote > 0) gCoyote--;
   if (gJumpBuf > 0) gJumpBuf--;
-  if (gJumpBuf > 0 && gCoyote > 0) { gVelY = G_JUMP; gOnGround = false; gCoyote = 0; gJumpBuf = 0; try { if (window.CrixSteps) CrixSteps.jump(); } catch (_) {} }
+  if (gJumpBuf > 0 && gCoyote > 0) { gVelY = G_JUMP; gOnGround = false; gCoyote = 0; gJumpBuf = 0; try { if (window.CrixSteps) CrixSteps.jump(_groundMaterial()); } catch (_) {} }
   // Aceleración: firme en el suelo, con algo de inercia en el aire (se conservan los impulsos de trampolines y lanzadores).
   if (moving) {
     const dir = new THREE.Vector3(mx, 0, mz).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), gCamTheta);
