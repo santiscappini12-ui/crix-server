@@ -30,7 +30,7 @@ let _fatalCount = 0, _fatalWindowAt = 0;
 function _onFatal(kind, err) {
   console.error(`[${kind}]`, err && err.stack ? err.stack : err);
   const t = Date.now(); if (t - _fatalWindowAt > 60000) { _fatalWindowAt = t; _fatalCount = 0; }
-  if (++_fatalCount > 200) { console.error('[FATAL] Demasiados errores seguidos; reinicio limpio.'); process.exit(1); }
+  if (++_fatalCount > 200) { console.error('[FATAL] Demasiados errores seguidos; reinicio limpio.'); try { saveRoomSnapshots(true); saveDBNow(); } catch (_) {} setTimeout(() => process.exit(1), 2000); }
 }
 process.on('uncaughtException', err => _onFatal('uncaughtException', err));
 process.on('unhandledRejection', err => _onFatal('unhandledRejection', err));
@@ -435,6 +435,7 @@ function initializeRoomWorld(room, map) {
   room.models=CrixObjects.buildModelsInfo(Object.values(room.worldParts||{}),room.joints,room.instances);
   room.animations=(Array.isArray(map?.animations)?map.animations:[]).map(item=>CrixAnim.sanitize(item));   // biblioteca de animaciones del mapa (por id)
   room.pendingReset=false;room.scriptStarted=false;room.scriptStatus='stopped';room.commandTimes=[];room.watched=new Set();room.appliedSeq=0;room.phys=null;room.collectedIds=new Set();
+  room.partHist=new Map();room.predClaims=new Map();room.predDirty=new Map();room.predRunAt=0;   // árbitro de predicciones (ver arbitratePredictions)
 }
 
 function roomWorldSnapshot(room) {
@@ -625,6 +626,119 @@ function stepRoomJoints(room,now,channel,roomId,mark) {
   if(list.length){io.to(channel).emit('joint_poses',{t:now,parts:list.slice(0,600)});scriptRunner?.send({type:'worldPositions',roomId,parts:update,appliedSeq:room.appliedSeq||0});}
 }
 
+// ══════════════════════════════════════════════
+// ÁRBITRO DE PREDICCIONES DE LOS CLIENTES
+// Cada cliente simula en local las piezas sueltas (para que se vean fluidas) y las reconcilia con el servidor. Antes, si dos
+// versiones divergían, el cliente solo se "acercaba" a lo que mandaba el servidor sin que éste supiera que había una diferencia.
+// Ahora, cuando la predicción de un cliente se aparta de lo último que le mandó el servidor, el cliente informa su estado
+// (`pred_report`) y el servidor DECIDE cuál es el real:
+//   1. Compara cada informe con lo que el servidor tenía en ESE instante (historial corto por pieza, no con el estado de ahora).
+//   2. Si coincide (dentro de la tolerancia) el cliente solo iba con retraso: el servidor tenía razón.
+//   3. Si difiere, se agrupan los informes divergentes que coinciden entre sí. Un grupo gana solo si tiene MÁS votos que los
+//      que apoyan al servidor (el propio servidor + los clientes que coinciden con él). Un solo cliente nunca gana: así nadie
+//      puede mover piezas a su gusto.
+//   4. Gana el servidor → se corrige (`pred_verdict`) solo a quienes divergieron. Gana un grupo → el servidor adopta ese
+//      estado (porque su simulación se había equivocado), resetea la pieza y lo manda a TODA la sala.
+// CRIX_PRED_ARBITER=0 lo desactiva.
+// ══════════════════════════════════════════════
+const PRED_ON = process.env.CRIX_PRED_ARBITER !== '0';
+const PRED_TOL = Math.max(0.2, Number(process.env.CRIX_PRED_TOL) || 1.0);   // studs: diferencia tolerada entre predicción y servidor (el cliente corrige sin avisar por debajo de 0,8)
+const PRED_MAX_DIFF = 60;        // studs: un informe más lejos que esto es un teletransporte o un intento de trampa: gana el servidor
+const PRED_HIST_MS = 1500, PRED_CLAIM_MS = 600, PRED_RUN_MS = 50, PRED_VERDICT_GAP_MS = 250;
+const PRED_COLLECT_MS = 150;     // ventana para juntar los informes de TODOS los jugadores sobre una pieza antes de decidir (los clientes informan a ≤10 Hz)
+const predFinite = (...v) => v.every(n => Number.isFinite(n));
+const predDist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+function recordPartHistory(room, now, changed) {
+  if (!PRED_ON || !room.partHist) return;
+  for (const u of changed) {
+    let h = room.partHist.get(u.id); if (!h) room.partHist.set(u.id, h = []);
+    h.push({ t: now, x: u.x, y: u.y, z: u.z });
+    while (h.length && now - h[0].t > PRED_HIST_MS) h.shift();
+    if (h.length > 60) h.splice(0, h.length - 60);
+  }
+}
+// Dónde estaba la pieza para el servidor en el instante `t` (ms, reloj del servidor).
+function serverStateAt(room, id, t) {
+  const part = room.worldParts[id], h = room.partHist && room.partHist.get(id);
+  if (!part) return null;
+  if (!h || !h.length || t >= h[h.length - 1].t) return { x: part.x, y: part.y, z: part.z };
+  if (t <= h[0].t) return { x: h[0].x, y: h[0].y, z: h[0].z };
+  for (let i = h.length - 1; i > 0; i--) {
+    const a = h[i - 1], b = h[i];
+    if (t >= a.t) { const k = b.t > a.t ? (t - a.t) / (b.t - a.t) : 1; return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, z: a.z + (b.z - a.z) * k }; }
+  }
+  return { x: part.x, y: part.y, z: part.z };
+}
+function predSnapshotOf(room, id) {
+  const part = room.worldParts[id]; if (!part) return null;
+  let v = null; try { v = worldPhysics.getVelocity(room, id); } catch (_) {}
+  const r3 = n => Math.round(n * 1000) / 1000, out = { id, x: r3(part.x), y: r3(part.y), z: r3(part.z), rx: r3(part.rx || 0), ry: r3(part.ry || 0), rz: r3(part.rz || 0) };
+  if (v) { out.vx = r3(v.x || 0); out.vy = r3(v.y || 0); out.vz = r3(v.z || 0); }
+  return out;
+}
+// Un informe `c` llevado al instante `t` con su propia velocidad (para comparar informes tomados en momentos distintos).
+const predAlign = (c, t) => { const dt = Math.max(-0.5, Math.min(0.5, (t - c.t) / 1000)); return { x: c.x + (c.vx || 0) * dt, y: c.y + (c.vy || 0) * dt, z: c.z + (c.vz || 0) * dt }; };
+
+function arbitratePredictions(room, now) {
+  if (!room.predDirty || !room.predDirty.size) return;
+  if (now - room.predRunAt < PRED_RUN_MS) return;
+  room.predRunAt = now;
+  const channel = gameChannel(room.mapId, room.instanceId), roomId = roomKey(room.mapId, room.instanceId);
+  const accepted = [], perPlayer = new Map();   // sid → [verdict parts]
+  for (const [id, firstAt] of [...room.predDirty]) {
+    if (now - firstAt < PRED_COLLECT_MS) continue;   // todavía llegando informes de otros jugadores
+    room.predDirty.delete(id);
+    const claims = room.predClaims.get(id); room.predClaims.delete(id);
+    const part = room.worldParts[id];
+    if (!claims || !part || part.anchored) continue;
+    const fresh = [...claims].filter(([sid, c]) => now - c.at <= PRED_CLAIM_MS && room.players[sid]);
+    if (!fresh.length) continue;
+    const consistent = [], diverged = [];
+    for (const [sid, c] of fresh) {
+      const ref = serverStateAt(room, id, c.t); if (!ref) continue;
+      const err = predDist(c, ref);
+      if (err <= PRED_TOL) consistent.push(sid);
+      else if (err <= PRED_MAX_DIFF) diverged.push({ sid, c, err });
+      else (perPlayer.get(sid) || perPlayer.set(sid, []).get(sid)).push(predSnapshotOf(room, id));   // informe absurdo: el servidor corrige y no cuenta como voto
+    }
+    if (!diverged.length) continue;
+    // Grupos de informes divergentes que coinciden entre sí (tomados al mismo instante de referencia).
+    const tRef = Math.max(...diverged.map(d => d.c.t)), pos = new Map(diverged.map(d => [d.sid, predAlign(d.c, tRef)]));
+    let best = [];
+    for (const d of diverged) {
+      const group = diverged.filter(o => predDist(pos.get(d.sid), pos.get(o.sid)) <= PRED_TOL * 1.5);
+      if (group.length > best.length) best = group;
+    }
+    const serverVotes = 1 + consistent.length;
+    if (best.length > serverVotes) {
+      // El grupo gana: se adopta el informe más central (el que menos se aleja de los demás), llevado al instante actual.
+      const rep = best.reduce((m, d) => { const sum = best.reduce((a, o) => a + predDist(pos.get(d.sid), pos.get(o.sid)), 0); return !m || sum < m.sum ? { d, sum } : m; }, null).d.c;
+      const dt = Math.max(0, Math.min(0.5, (now - rep.t) / 1000));
+      part.x = rep.x + (rep.vx || 0) * dt; part.y = rep.y + (rep.vy || 0) * dt; part.z = rep.z + (rep.vz || 0) * dt;
+      part.rx = rep.rx; part.ry = rep.ry; part.rz = rep.rz;
+      if (room.basePartIds.has(id)) room.changedPartIds.add(id);
+      worldPhysics.resetBody(room, id);
+      if (rep.hasV) { try { worldPhysics.setVelocity(room, id, { x: rep.vx, y: rep.vy, z: rep.vz }); } catch (_) {} }
+      scriptRunner?.send({ type: 'worldPositions', roomId, parts: [{ id, x: part.x, y: part.y, z: part.z }], appliedSeq: room.appliedSeq || 0 });
+      const snap = predSnapshotOf(room, id); if (snap) accepted.push(snap);
+      log('PRED', `sala ${room.mapId}: ${best.length} clientes coinciden contra el servidor en «${id}» → se adopta su estado`);
+    } else {
+      // Gana el servidor: se corrige solo a quienes se apartaron (y no más de una vez cada PRED_VERDICT_GAP_MS por pieza y persona).
+      const snap = predSnapshotOf(room, id); if (!snap) continue;
+      for (const d of diverged) {
+        const pl = room.players[d.sid]; if (!pl) continue;
+        const last = pl.lastVerdict || (Object.defineProperty(pl, 'lastVerdict', { value: new Map(), writable: true, enumerable: false, configurable: true }), pl.lastVerdict);
+        if (now - (last.get(id) || 0) < PRED_VERDICT_GAP_MS) continue;
+        last.set(id, now);
+        (perPlayer.get(d.sid) || perPlayer.set(d.sid, []).get(d.sid)).push(snap);
+      }
+    }
+  }
+  if (accepted.length) io.to(channel).emit('pred_verdict', { t: now, parts: accepted.slice(0, 100), consensus: true });
+  for (const [sid, parts] of perPlayer) { const list = parts.filter(Boolean); if (list.length) io.to(sid).emit('pred_verdict', { t: now, parts: list.slice(0, 100) }); }
+}
+
 function stepRoomPhysicsSafe(room,now) {
   {
     if(!Object.keys(room.players).length||!room.worldParts){if(room.phys)room.phys.lastAt=0;return;}
@@ -634,11 +748,13 @@ function stepRoomPhysicsSafe(room,now) {
     stepRoomJoints(room,now,channel,roomId,false);
     if(result.changed.length){
       for(const update of result.changed)if(room.basePartIds.has(update.id))room.changedPartIds.add(update.id);
+      recordPartHistory(room,now,result.changed);
       // Un único paquete por tick con todas las piezas que se movieron (antes era uno por pieza).
       // `t` permite al cliente interpolar y descartar paquetes viejos.
       io.to(channel).emit('world_delta',{t:now,parts:result.changed});
       scriptRunner?.send({type:'worldPositions',roomId,parts:result.changed,appliedSeq:room.appliedSeq||0});
     }
+    if(PRED_ON)arbitratePredictions(room,now);
     if(result.events.length&&scriptRunner?.connected&&room.scriptStarted)scriptRunner.send({type:'contacts',roomId,events:result.events});
     // Resincronización de seguridad cada 2 s: estado autoritativo de TODAS las piezas con física.
     // Corrige a cualquier cliente que se haya perdido un paquete o estuviera en segundo plano.
@@ -3351,7 +3467,7 @@ G('join_game', (socket, data) => {
       socket.emit('join_error', { message:'Este servidor está lleno. Probá con otro.' });
       return;
     }
-    if (!room.worldParts || room.pendingReset) initializeRoomWorld(room,storedMap);
+    if (!room.worldParts || room.pendingReset) { initializeRoomWorld(room,storedMap); restoreRoomFromSnapshot(room); }
     const channel = gameChannel(mapId, instanceId);
     const pd = {
       socketId: socket.id, userId: userId||socket.id,
@@ -3420,6 +3536,27 @@ G('player_died', (socket) => {
     const now = Date.now(); if (player.diedAt && now - player.diedAt < 1500) return;   // antispam
     player.diedAt = now;
     socket.to(gameChannel(meta.mapId, meta.instanceId)).emit('player_died', { socketId:socket.id });
+});
+
+G('pred_report', (socket, data) => {
+    if (!PRED_ON) return;
+    const meta = connSockets[socket.id]; if (!meta?.mapId) return;
+    const room = rooms[roomKey(meta.mapId, meta.instanceId)]; if (!room?.players[socket.id] || !room.worldParts || !room.predClaims) return;
+    if (!rateOk(socket, 'predreport', 20) || !Array.isArray(data?.parts)) return;
+    const now = Date.now(), pl = room.players[socket.id];
+    let t = Number(data.t); if (!Number.isFinite(t) || Math.abs(t - now) > 2000) t = now;   // reloj del cliente fuera de rango: se usa la hora de llegada
+    const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? Math.max(-1e5, Math.min(1e5, n)) : d; };
+    for (const src of data.parts.slice(0, 32)) {
+      const id = String(src?.id || '').slice(0, 120), part = room.worldParts[id];
+      // Solo piezas que el servidor simula con física: ancladas, movidas por uniones o de otro tipo no tienen predicción que arbitrar.
+      if (!part || part.anchored || part.type === 'Spawn' || room.jointDriven?.has(id)) continue;
+      const c = { t, at: now, x: num(src.x, part.x), y: num(src.y, part.y), z: num(src.z, part.z), rx: num(src.rx), ry: num(src.ry), rz: num(src.rz), hasV: src.vx !== undefined };
+      if (!predFinite(c.x, c.y, c.z)) continue;
+      if (Math.hypot(c.x - pl.x, c.y - pl.y, c.z - pl.z) > 150) continue;   // informar de piezas lejísimos del propio jugador no tiene sentido (y es una vía de abuso)
+      if (c.hasV) { c.vx = num(src.vx); c.vy = num(src.vy); c.vz = num(src.vz); if (Math.hypot(c.vx, c.vy, c.vz) > 200) { c.hasV = false; c.vx = c.vy = c.vz = 0; } }
+      let m = room.predClaims.get(id); if (!m) room.predClaims.set(id, m = new Map());
+      m.set(socket.id, c); if (!room.predDirty.has(id)) room.predDirty.set(id, now);
+    }
 });
 
 G('part_collect', (socket, data) => {
@@ -3798,6 +3935,7 @@ function leaveRoom(socket, mapId, instanceId) {
   if (room.players[socket.id]) {
     socket.to(channel).emit('player_left', { socketId:socket.id });
     delete room.players[socket.id]; delete room.avatars[socket.id];
+    if(room.predClaims)for(const m of room.predClaims.values())m.delete(socket.id);
   }
   if(Object.keys(room.players).length){sendRoomPlayersToRunner(room);}
   else{
@@ -3863,12 +4001,94 @@ cluster.init(io).finally(() => adoptOrListen(() => {
   console.log('');
 }));
 
+// ══════════════════════════════════════════════
+// ESTADO VIVO DE LAS SALAS: sobrevive a reinicios
+// Las partidas viven en memoria. Cada pocos segundos (y al apagar) se guarda en disco/bucket lo que cambió DENTRO de cada sala con
+// gente: piezas creadas/movidas/destruidas, monedas recogidas, uniones, estado de la app, estado de los NPC y chat. Cuando el
+// servidor vuelve, el cliente se reconecta solo a la misma sala (mismo instanceId) y join_game la reconstruye desde esa copia.
+// Las salas vacías NO se guardan (por diseño se reinician al quedar sin jugadores). CRIX_ROOM_SNAP=0 lo desactiva.
+// ══════════════════════════════════════════════
+const ROOM_SNAP_ON = process.env.CRIX_ROOM_SNAP !== '0';
+const ROOM_SNAP_MS = Math.max(3000, Number(process.env.CRIX_ROOM_SNAP_MS) || 10000);
+const ROOM_SNAP_TTL = Math.max(60000, Number(process.env.CRIX_ROOM_SNAP_TTL_MS) || 15 * 60 * 1000);   // pasado este tiempo la copia ya no se usa
+let pendingRoomSnaps = ROOM_SNAP_ON ? { ...persist.takeLoadedRoomSnapshots() } : {};   // copias recuperadas al arrancar, a la espera de que vuelvan los jugadores
+let _lastRoomSnapSig = '', _lastRoomSnapAt = 0, _lastRoomSnapEmpty = true;
+
+function serializeRoom(room) {
+  const runtimeParts = [], changedParts = [];
+  for (const part of Object.values(room.worldParts || {})) {
+    if (!part || part.type === 'Spawn') continue;
+    if (!room.basePartIds.has(part.id)) runtimeParts.push(part);
+    else if (room.changedPartIds.has(part.id)) changedParts.push(part);
+  }
+  const npcAvatars = {};
+  for (const [k, v] of Object.entries(room.avatars || {})) if (k.startsWith('n:')) npcAvatars[k] = v;
+  return {
+    createdAt: room.createdAt, runtimeParts, changedParts, removedParts: [...room.removedPartIds],
+    collectedParts: [...(room.collectedIds || [])], joints: room.joints || [], npcAvatars,
+    appState: room.appState || null, chat: (room.chat || []).slice(-30),
+  };
+}
+function saveRoomSnapshots(force) {
+  if (!ROOM_SNAP_ON) return;
+  const now = Date.now(), live = {};
+  for (const [key, room] of Object.entries(rooms)) {
+    if (room.playtest || !room.worldParts || room.pendingReset || !Object.keys(room.players).length) continue;
+    try { live[key] = serializeRoom(room); } catch (e) { console.error('[SALAS] No se pudo serializar', key, e.message); }
+  }
+  // Copias recuperadas que todavía nadie reclamó: se conservan (si no, un segundo reinicio antes de que vuelvan los jugadores las perdería).
+  const waiting = {};
+  for (const [key, snap] of Object.entries(pendingRoomSnaps)) { if (live[key]) continue; if (now - (snap.at || 0) <= ROOM_SNAP_TTL) waiting[key] = snap; else delete pendingRoomSnaps[key]; }
+  const empty = !Object.keys(live).length && !Object.keys(waiting).length;
+  const sig = crypto.createHash('sha1').update(JSON.stringify(live)).update('|' + Object.keys(waiting).join(',')).digest('hex');
+  if (!force) {
+    if (empty && _lastRoomSnapEmpty) return;                                  // nada que guardar y nada que borrar
+    if (sig === _lastRoomSnapSig && now - _lastRoomSnapAt < 60000) return;    // sin cambios (igual se refresca cada minuto para que la copia no caduque)
+  }
+  _lastRoomSnapSig = sig; _lastRoomSnapAt = now; _lastRoomSnapEmpty = empty;
+  const out = {};
+  for (const [key, snap] of Object.entries(live)) out[key] = { at: now, ...snap };
+  Object.assign(out, waiting);
+  persist.saveRoomSnapshots(JSON.stringify({ savedAt: now, rooms: out }));
+}
+// Reaplica sobre el mundo recién creado (initializeRoomWorld) lo que había pasado en esa sala antes del reinicio.
+function restoreRoomFromSnapshot(room) {
+  const key = roomKey(room.mapId, room.instanceId), snap = pendingRoomSnaps[key];
+  if (!snap) return;
+  delete pendingRoomSnaps[key];
+  if (Date.now() - (snap.at || 0) > ROOM_SNAP_TTL) return;
+  try {
+    const parts = room.worldParts;
+    for (const raw of snap.removedParts || []) { const id = String(raw); delete parts[id]; if (room.basePartIds.has(id)) room.removedPartIds.add(id); }
+    for (const src of snap.changedParts || []) {
+      const id = src && String(src.id);
+      if (!id || !room.basePartIds.has(id) || !parts[id]) continue;   // la pieza ya no existe en el mapa (se editó el juego): se ignora
+      parts[id] = normalizeRoomPart(id, src); room.changedPartIds.add(id);
+    }
+    for (const src of snap.runtimeParts || []) {
+      const id = src && String(src.id);
+      if (!id || room.basePartIds.has(id)) continue;
+      parts[id] = normalizeRoomPart(id, src);
+    }
+    room.collectedIds = new Set((snap.collectedParts || []).map(String));
+    if (Array.isArray(snap.joints)) room.joints = snap.joints.map((joint, index) => CrixJoints.sanitize(joint, 'joint-' + index));
+    room.models = CrixObjects.buildModelsInfo(Object.values(parts), room.joints, room.instances);
+    for (const [k, v] of Object.entries(snap.npcAvatars || {})) if (k.startsWith('n:') && v && typeof v === 'object') room.avatars[k] = v;
+    if (snap.appState && typeof snap.appState === 'object') room.appState = snap.appState;
+    if (Array.isArray(snap.chat)) room.chat = snap.chat.slice(-30);
+    if (Number(snap.createdAt) > 0) room.createdAt = Number(snap.createdAt);
+    log('RESTAURADA', `sala ${room.mapId} / ${room.instanceId}: ${(snap.runtimeParts || []).length} piezas creadas, ${(snap.changedParts || []).length} movidas, ${(snap.removedParts || []).length} destruidas`);
+    setTimeout(() => saveRoomSnapshots(true), 1000);   // ya está viva otra vez: se vuelve a guardar enseguida, sin esperar al siguiente ciclo
+  } catch (e) { console.error('[SALAS] No se pudo restaurar', key, e && e.stack ? e.stack : e); }
+}
+if (ROOM_SNAP_ON) setInterval(() => { try { saveRoomSnapshots(false); } catch (e) { console.error('[SALAS] guardado:', e.message); } }, ROOM_SNAP_MS).unref();
+
 // Render envía SIGTERM en cada deploy: guardar y subir todo lo pendiente antes de salir.
 let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) return; shuttingDown = true;
   console.log(`[${signal}] Guardando datos antes de salir…`);
-  try { cluster.shutdown(); saveDBNow(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
+  try { cluster.shutdown(); saveRoomSnapshots(true); saveDBNow(); await persist.flush(25000); } catch (e) { console.error('[SHUTDOWN]', e.message); }
   process.exit(0);
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));

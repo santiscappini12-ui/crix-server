@@ -353,6 +353,70 @@ async function flush(timeoutMs = 25000) {
   return false;
 }
 
+// ── Estado vivo de las salas (lo que pasó DENTRO de una partida) ──
+// La base de datos guarda los juegos, pero las partidas en curso viven en memoria: al reiniciarse el servidor (deploy, falta de RAM,
+// caída) todo lo hecho en la sala —piezas creadas o movidas por scripts/físicas, piezas destruidas, monedas recogidas, uniones,
+// estado de la app, chat— se perdía. server.js ahora guarda una instantánea cada pocos segundos (y al recibir SIGTERM); acá se
+// escribe en disco y en el bucket (un archivo por instancia: no se pisan entre sí) y se lee al arrancar.
+const ROOMS_PREFIX = 'rooms/';
+const ROOMS_NODE = /^[0-9a-f]{8}$/.test(String(env.CRIX_NODE_ID || '')) ? String(env.CRIX_NODE_ID) : 'main';
+const ROOMS_KEY = `${ROOMS_PREFIX}${ROOMS_NODE}.json.gz`;
+const ROOMS_FILE = DATA_BASE + '_rooms.json.gz';
+let roomSnapsLoaded = {}, roomSnapsPromise = null, pendingRoomSnap = null, roomBusy = null, roomWarnAt = 0;
+async function parseRoomSnap(buf) {
+  try { const s = JSON.parse((await gunzip(buf)).toString('utf8')); return s && typeof s.rooms === 'object' && s.rooms ? s : null; }
+  catch { return null; }
+}
+// Nunca lanza: si no se puede leer, el servidor arranca igual (solo que sin recuperar las partidas en curso).
+function loadRoomSnapshots() {
+  if (roomSnapsPromise) return roomSnapsPromise;
+  roomSnapsPromise = (async () => {
+    const found = [];
+    try { if (fs.existsSync(ROOMS_FILE)) found.push(await parseRoomSnap(await fsp.readFile(ROOMS_FILE))); } catch {}
+    if (driver && Date.now() >= capUntil) {
+      try { for (const o of await retry(() => driver.list(ROOMS_PREFIX), 2, 500)) found.push(await parseRoomSnap(await driver.get(o.key))); }
+      catch (e) { noteCap(e); console.warn('[PERSIST] No se pudo leer el estado guardado de las salas:', e.message); }
+    }
+    const out = {};
+    for (const s of found) {
+      if (!s) continue;
+      for (const [key, snap] of Object.entries(s.rooms)) {
+        if (!snap || typeof snap !== 'object') continue;
+        const at = Number(snap.at) || Number(s.savedAt) || 0;
+        if (!out[key] || at > out[key].at) out[key] = { ...snap, at };   // si dos copias tienen la misma sala, gana la más nueva
+      }
+    }
+    roomSnapsLoaded = out;
+    const n = Object.keys(out).length;
+    if (n) console.log(`[PERSIST] Estado de ${n} sala(s) en curso recuperado; se restaura cuando vuelvan los jugadores`);
+    return out;
+  })();
+  return roomSnapsPromise;
+}
+// `json` ya viene serializado (server.js lo necesita para comparar cambios). Las subidas se funden: solo la más reciente cuenta.
+function saveRoomSnapshots(json) {
+  pendingRoomSnap = json;
+  if (roomBusy) return roomBusy;
+  roomBusy = track((async () => {
+    try {
+      while (pendingRoomSnap !== null) {
+        const cur = pendingRoomSnap; pendingRoomSnap = null;
+        try {
+          const gz = await gzip(Buffer.from(cur, 'utf8'));
+          await fsp.mkdir(path.dirname(ROOMS_FILE), { recursive: true });
+          const tmp = `${ROOMS_FILE}.${process.pid}.tmp`;
+          await fsp.writeFile(tmp, gz); await fsp.rename(tmp, ROOMS_FILE);
+          if (driver && Date.now() >= capUntil) await driver.put(ROOMS_KEY, gz, 'application/gzip');
+        } catch (e) {
+          noteCap(e);
+          if (Date.now() - roomWarnAt > 60000) { roomWarnAt = Date.now(); console.warn('[PERSIST] No se pudo guardar el estado de las salas:', e.message); }
+        }
+      }
+    } finally { roomBusy = null; }
+  })());
+  return roomBusy;
+}
+
 // ── Arranque: restaurar la base; texturas y videos se bajan bajo demanda ──
 function walkLocal(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -360,7 +424,7 @@ function walkLocal(dir) {
 }
 async function restore() {
   if (restored) return;
-  if (!driver) { restored = true; console.log('[PERSIST] Sin almacenamiento externo: los datos viven solo en el disco local'); return; }
+  if (!driver) { restored = true; console.log('[PERSIST] Sin almacenamiento externo: los datos viven solo en el disco local'); await loadRoomSnapshots(); return; }
   console.log(`[PERSIST] Restaurando desde ${driver.name}…`);
 
   // Si algo falla acá se lanza el error: es preferible no arrancar antes que arrancar vacío y pisar la copia remota.
@@ -387,6 +451,7 @@ async function restore() {
   const remoteTex = await retry(() => driver.list('textures/'), 5, 1000);
   console.log(`[PERSIST] Texturas en el bucket: ${remoteTex.length} (se bajan bajo demanda)`);
   restored = true;
+  await loadRoomSnapshots();
 
   // Migración / reparación: sube lo que exista en disco y falte en el bucket (en segundo plano).
   (async () => {
@@ -411,5 +476,6 @@ module.exports = {
   DATA_FILE, VIDEO_DIR, TEX_DIR, SOUND_DIR, ACC_DIR,
   get enabled() { return !!driver; },
   get restored() { return restored; },
+  loadRoomSnapshots, saveRoomSnapshots, takeLoadedRoomSnapshots: () => roomSnapsLoaded,
   restore, saveDb, setSync, startSync, pullRemote, pullFresh, putFile, delKey, delPrefix, ensureLocal, fetchTexture, fetchSound, fetchAccModel, flush,
 };

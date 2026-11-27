@@ -676,3 +676,34 @@ Para **denunciar** o **apelar un ban** la cuenta necesita un mail **verificado**
 - Desde el panel de admin (**🚩 Ver denuncias** y **📨 Apelaciones**) se puede escribir una respuesta: le llega por mail a la persona junto con lo que se decidió (denuncia: ocultado/descartado; apelación: aceptada, que además desbanea, o rechazada).
 - API: `POST /api/email/request` · `POST /api/email/verify` · `POST /api/appeals` · `GET/POST /api/admin/appeals[/:id]` · `POST /api/admin/reports/:id` (acepta `reply`).
 - **Requisito de envío:** mandarle mails a los usuarios exige `CRIX_RESEND_KEY` y un **dominio verificado en Resend** en `CRIX_MAIL_FROM` (con el remitente por defecto `onboarding@resend.dev` Resend solo entrega a la cuenta dueña de la clave, así que los códigos y las respuestas no llegarían). Sin `CRIX_RESEND_KEY` no se puede verificar ningún mail y, por lo tanto, nadie puede denunciar ni apelar.
+
+
+## Partidas que sobreviven a reinicios del servidor
+
+Las salas viven en memoria; antes, si el servidor se reiniciaba (deploy, falta de RAM, caída) todo lo ocurrido dentro de la
+partida se perdía. Ahora, cada `CRIX_ROOM_SNAP_MS` (10 s por defecto) y al recibir SIGTERM, el servidor guarda en disco y en el
+bucket (`rooms/<nodo>.json.gz`) lo que cambió en cada sala **con jugadores**: piezas creadas, movidas o destruidas por scripts y
+físicas, monedas recogidas, uniones, estado de la app (`app_state_set`), estado de los NPC y los últimos mensajes del chat.
+Al volver, el cliente se reconecta solo a la misma sala y `join_game` la reconstruye desde esa copia.
+
+- Las salas vacías no se guardan: por diseño se reinician cuando se va el último jugador.
+- La copia caduca a los 15 min (`CRIX_ROOM_SNAP_TTL_MS`).
+- `CRIX_ROOM_SNAP=0` lo desactiva. Con varias instancias (Redis) conviene fijar `CRIX_NODE_ID` (8 hex) distinto en cada una.
+- No se restauran las variables internas de los scripts del servidor: al volver, los scripts arrancan de cero sobre el mundo restaurado.
+
+
+## Árbitro de predicciones (el servidor decide qué es real)
+
+Cada cliente simula en local las piezas sueltas para que se vean fluidas. Cuando esa predicción se aparta de lo último que dijo el
+servidor (más de 0,8 studs), el cliente lo informa (`pred_report`, ≤10/s, ≤24 piezas, con la hora del servidor estimada) y el servidor
+**decide cuál es el estado real**:
+
+1. Compara cada informe con lo que el servidor tenía *en ese instante* (historial de 1,5 s por pieza), no con el estado de ahora.
+2. Si coincide dentro de `CRIX_PRED_TOL` (1 stud por defecto), el cliente solo iba con retraso: el servidor tenía razón.
+3. Si difiere, junta ~150 ms de informes de todos los jugadores y agrupa los que coinciden entre sí. Un grupo gana solo si tiene
+   **más votos** que quienes apoyan al servidor (él mismo + los clientes que coinciden con él): un cliente solo nunca gana.
+4. Gana el servidor → `pred_verdict` solo a quienes divergieron (pieza, rotación y velocidad). Gana un grupo → el servidor adopta ese
+   estado, resetea la pieza y lo manda a toda la sala. Las piezas unidas siguen a su raíz con la misma transformación.
+
+Se descartan informes de piezas ancladas, movidas por uniones, a más de 150 studs del jugador o con saltos de más de 60 studs.
+`CRIX_PRED_ARBITER=0` lo desactiva.

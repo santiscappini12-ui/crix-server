@@ -4704,6 +4704,7 @@ function applyNetworkPartUpsert(part,snap,ts) {
   const moveKeys=['x','y','z','rx','ry','rz'].some(key=>part[key]!==undefined),usePred=!!(_netPred&&ts&&!snap&&moveKeys);
   if(usePred&&!_netPred.push(id,ts,{...existing.data,...part},nowT))return;
   existing.data=normalizeGamePart(id,{...existing.data,...part});
+  if(moveKeys){const sd=existing.data;existing.srv={x:sd.x,y:sd.y,z:sd.z,rx:sd.rx||0,ry:sd.ry||0,rz:sd.rz||0,t:ts||0};}   // último estado que dijo el servidor (base del informe de predicción)
   if(existing.data.anchored)existing.velocity.set(0,0,0);
   existing.netVel=null;existing.netAng=null;existing.netPredOn=usePred;
   if(usePred){existing.netVel=_netPred.vel(id);existing.netAng=_netPred.ang(id);existing.netInt=_netPred.interval(id);}
@@ -4740,6 +4741,44 @@ function _reconcilePredicted(o,d){
   if(err>2.5){m.position.set(d.x,d.y,d.z);m.rotation.set(d.rx||0,d.ry||0,d.rz||0);if(_localRoom&&window.CrixWorldPhysics)CrixWorldPhysics.resetBody(_localRoom,String(o.id));_syncRuntimeCollider(o);if(oldP)_followKids(o,kidIds,oldP,oldQ);return;}
   const g=0.1*(err-0.8)/err;m.position.x+=ex*g;m.position.y+=ey*g;m.position.z+=ez*g;o._pp={x:m.position.x,y:m.position.y,z:m.position.z};_syncRuntimeCollider(o);
   if(oldP)_followKids(o,kidIds,oldP,oldQ);
+}
+// ── Árbitro de predicciones (ver «ÁRBITRO DE PREDICCIONES» en server.js) ──
+// Cada cliente simula en local las piezas sueltas. Si esa predicción se aparta de lo último que dijo el servidor (más allá de la zona
+// muerta de 0,8 studs que ya tolera _reconcilePredicted), se la informa al servidor con la hora del servidor estimada. El servidor
+// compara los informes de todos los jugadores con su propio historial, decide cuál es el real y manda `pred_verdict` para corregir.
+let _predRepAt=0;
+function _sendPredReports(){
+  if(!socket||!netConnected)return;
+  const now=performance.now();if(now-_predRepAt<100)return;_predRepAt=now;   // máx. 10 informes/s
+  const parts=[],WP=window.CrixWorldPhysics,r3=n=>Math.round(n*1000)/1000;
+  for(const o of runtimeObjects.values()){
+    if(parts.length>=24)break;
+    const s=o.srv,m=o.mesh;
+    if(!s||!m||!o.predOn||now-o.predOn>400||o.collected||o.data.anchored!==false)continue;
+    const p=m.position,err=Math.hypot(p.x-s.x,p.y-s.y,p.z-s.z);
+    if(err<=0.8){o._predRep=null;continue;}   // dentro de la zona muerta: coincide con el servidor, nada que informar
+    const r=o._predRep;
+    if(r&&now-r.at<1000&&Math.hypot(p.x-r.x,p.y-r.y,p.z-r.z)<0.15)continue;   // ya informada y sin cambios
+    o._predRep={x:p.x,y:p.y,z:p.z,at:now};
+    const e={id:String(o.id),x:r3(p.x),y:r3(p.y),z:r3(p.z),rx:r3(m.rotation.x),ry:r3(m.rotation.y),rz:r3(m.rotation.z)};
+    try{const v=WP&&_localRoom?WP.getVelocity(_localRoom,e.id):null;if(v){e.vx=r3(v.x||0);e.vy=r3(v.y||0);e.vz=r3(v.z||0);}}catch(_){}
+    parts.push(e);
+  }
+  if(parts.length)socket.emit('pred_report',{t:Date.now()+(window._crixClockOff||0),parts});
+}
+// El servidor decidió cuál es el estado real de la pieza: se coloca ahí (con sus piezas unidas), se reinicia su cuerpo local y se adopta su velocidad.
+function _applyPredVerdict(p,ts){
+  const id=String(p&&p.id||''),o=runtimeObjects.get(id);
+  if(!o||!o.mesh||![p.x,p.y,p.z].every(Number.isFinite))return;
+  const m=o.mesh,kids=_predDesc(id),oldP=kids.length?m.position.clone():null,oldQ=oldP?m.quaternion.clone():null;
+  m.position.set(p.x,p.y,p.z);m.rotation.set(p.rx||0,p.ry||0,p.rz||0);
+  Object.assign(o.data,{x:p.x,y:p.y,z:p.z,rx:p.rx||0,ry:p.ry||0,rz:p.rz||0});
+  o.srv={x:p.x,y:p.y,z:p.z,rx:p.rx||0,ry:p.ry||0,rz:p.rz||0,t:ts||0};
+  o.netTarget=null;o.netVel=null;o.netAng=null;o._pp={x:p.x,y:p.y,z:p.z};o._predRep=null;
+  try{if(_localRoom&&window.CrixWorldPhysics)CrixWorldPhysics.resetBody(_localRoom,id);}catch(_){}
+  if(p.vx!==undefined)o._adoptVel={x:p.vx,y:p.vy,z:p.vz};
+  _syncRuntimeCollider(o);
+  if(oldP)_followKids(o,kids,oldP,oldQ);   // las piezas unidas siguen a su raíz con la misma transformación (no se empujan entre sí)
 }
 // Acerca suavemente cada pieza sincronizada a la última posición que mandó el servidor.
 const _netQ=new THREE.Quaternion(),_netE=new THREE.Euler();
@@ -4985,7 +5024,7 @@ function _stepLocalSpheres(predict) {
   }
   for (const o of loose) if (!o._pp) o._pp = { x: o.mesh.position.x, y: o.mesh.position.y, z: o.mesh.position.z };
 }
-function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gameStep();}catch(err){if(!window._cxStepErr){window._cxStepErr=1;appendOutput('[Uniones] '+err.message,'err');}}const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();else _stepLocalSpheres(true);const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics,localRigid=localSpheres&&_clientRigidOn();for(const object of runtimeObjects.values()){if(localSpheres&&(object.data.type==='Sphere'||(localRigid&&object.data.anchored===false)))continue;if(object.data.anchored||(window.gJointDriven&&gJointDriven.has(String(object.id)))||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
+function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gameStep();}catch(err){if(!window._cxStepErr){window._cxStepErr=1;appendOutput('[Uniones] '+err.message,'err');}}const serverPhysics=netServerScriptsActive&&netConnected;if(!serverPhysics)_stepLocalSpheres();else{_stepLocalSpheres(true);_sendPredReports();}const localSpheres=!serverPhysics&&!!window.CrixWorldPhysics,localRigid=localSpheres&&_clientRigidOn();for(const object of runtimeObjects.values()){if(localSpheres&&(object.data.type==='Sphere'||(localRigid&&object.data.anchored===false)))continue;if(object.data.anchored||(window.gJointDriven&&gJointDriven.has(String(object.id)))||!object.mesh||!object.mesh.parent||object.collected||(serverPhysics&&!object.local))continue;object.data.y=object.mesh.position.y;const oldBox=new THREE.Box3().setFromObject(object.mesh),oldBottom=oldBox.min.y;object.velocity.y=Math.max(-0.8,object.velocity.y-G_GRAV);object.mesh.position.y+=object.velocity.y;if(!object.collider)continue;object.collider.box.setFromObject(object.mesh);for(const collider of gColliders){if(collider===object.collider)continue;collider.box.setFromObject(collider.mesh);if(!object.collider.box.intersectsBox(collider.box))continue;const bottom=object.collider.box.min.y;if(object.velocity.y<=0&&oldBottom>=collider.box.max.y-0.08&&bottom<collider.box.max.y){object.mesh.position.y+=collider.box.max.y-bottom;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}if(object.velocity.y>0&&oldBox.max.y<=collider.box.min.y+0.08&&object.collider.box.max.y>collider.box.min.y){object.mesh.position.y-=object.collider.box.max.y-collider.box.min.y;object.velocity.y=0;object.collider.box.setFromObject(object.mesh);break;}}} }
 // Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
 // así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
 // (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
@@ -5267,6 +5306,7 @@ function netConnect() {
   socket.on('part_collected',({id}={})=>_remoteCollect(id));
   // Resync periódico del servidor: solo corrige la posición de piezas que ya existen aquí. Nunca crea piezas.
   socket.on('world_sync',({t,parts=[]}={})=>{for(const part of parts){if(runtimeObjects.has(String(part.id)))applyNetworkPartUpsert(part,false,t);}});
+  socket.on('pred_verdict',({t,parts=[]}={})=>{for(const part of parts)_applyPredVerdict(part,t);});   // el servidor decidió qué estado es el real
   socket.on('script_remote',({name,data}={})=>{if(name)dispatchScriptEvent('remote:'+String(name),[data]);});
   socket.on('server_player_cmd',command=>{if(gPlayer&&command&&typeof command==='object')_playerCommand(command);});
   socket.on('script_output',message=>appendOutput('['+(message.script||'Servidor')+'] '+(message.text||''),message.cls||''));
