@@ -74,14 +74,15 @@
 
   window.crixReport = function (type, id) {
     if (!ME) return showToast('Iniciá sesión para denunciar');
-    if (!(ME.mail && ME.mail.verified)) return crixLinkEmail({}, () => crixReport(type, id), 'Para denunciar necesitás un mail verificado: ahí te avisamos qué decidimos.');
     const el = box('🚩 Denunciar');
     const sel = document.createElement('select'); sel.style.cssText = field;
     for (const [k, v] of Object.entries(REASONS)) sel.add(new Option(v, k));
     const txt = document.createElement('textarea'); txt.style.cssText = field; txt.maxLength = 500; txt.rows = 3; txt.placeholder = 'Contanos qué pasa (opcional). Solo se denuncia lo que rompe las reglas de uso.';
+    const contact = document.createElement('input'); contact.type = 'email'; contact.maxLength = 200; contact.autocomplete = 'email'; contact.style.cssText = field;
+    contact.placeholder = 'Tu mail para que te contactemos (opcional)'; contact.value = (ME.mail && ME.mail.verified && ME.mail.address) || '';
     const note = document.createElement('div');
     note.style.cssText = 'font-size:12px;color:var(--text3);margin:2px 0 6px';
-    note.textContent = 'Adjuntá una captura o un video que muestre el problema (máx. 20 MB). La denuncia llega a crix.support@gmail.com y la respuesta te llega a tu mail verificado.';
+    note.textContent = 'Adjuntá una captura o un video que muestre el problema (máx. 20 MB). La denuncia llega a crix.support@gmail.com y, si dejás un mail, te contactamos ahí.';
     const file = document.createElement('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime';
     file.style.cssText = 'width:100%;font-size:13px;margin-bottom:8px;color:var(--text)';
     const send = button('Enviar denuncia', 'btn-red', async () => {
@@ -93,16 +94,15 @@
         try { evidence = { name:f.name, mime:f.type, data:await toBase64(f) }; }
         catch (_) { send.disabled = false; return showToast('No se pudo leer el archivo'); }
       }
-      const r = await call('/api/reports', { type, id, reason:sel.value, detail:txt.value, evidence });
+      const r = await call('/api/reports', { type, id, reason:sel.value, detail:txt.value, contact:contact.value.trim(), evidence });
       if (!r.ok) {
         send.disabled = false;
-        if (r.code === 'EMAIL_REQUIRED') { ME.mail = null; return crixLinkEmail({}, () => crixReport(type, id), 'Para denunciar necesitás un mail verificado.'); }
         return showToast(r.err || 'No se pudo enviar');
       }
       document.getElementById('crix-report-box')?.remove();
       showToast(r.repeated ? 'Ya lo habías denunciado' : 'Denuncia enviada. La va a revisar un admin.');
     });
-    el.append(sel, txt, note, file, send, button('Cancelar', 'btn-g', () => document.getElementById('crix-report-box').remove()));
+    el.append(sel, txt, contact, note, file, send, button('Cancelar', 'btn-g', () => document.getElementById('crix-report-box').remove()));
   };
 
   window.crixReportsPanel = async function () {

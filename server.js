@@ -2987,24 +2987,25 @@ app.post('/api/appeals', async (req, res) => {
       if (!user || !verifyPassword(pw, user.pw)) return res.status(401).json({ ok:false, err:'Usuario o contraseña incorrectos.' });
     }
     if (!banActive(user)) return res.status(400).json({ ok:false, err:'Esta cuenta no está suspendida.' });
-    if (!hasMail(user)) return res.status(403).json({ ok:false, code:'EMAIL_REQUIRED', err:'Para apelar tenés que vincular un mail verificado: ahí te mandamos la respuesta.' });
+    // El mail es opcional: si no hay uno verificado, se usa el de contacto que deje la persona (sin verificar, solo para responderle a mano).
+    const contact = hasMail(user) ? user.mail.address : (EMAIL_RE.test(String(b.contact || '').trim()) ? String(b.contact).trim().slice(0, 200) : '');
     const appeals = DB.appeals || (DB.appeals = {});
     const last = Object.values(appeals).filter(a => a.userId === user.id).sort((x, y) => String(y.created).localeCompare(String(x.created)))[0];
     if (last && Date.now() - new Date(last.created).getTime() < APPEAL_COOLDOWN_MS) return res.status(429).json({ ok:false, err:'Ya mandaste una apelación hace poco. Esperá 24 horas para mandar otra.' });
     const id = 'apl_' + crypto.randomUUID();
     const ban = user.banned || {};
-    appeals[id] = { id, userId:user.id, username:user.username, message, email:user.mail.address, lang:userLang(user, String(b.lang || '')), status:'open', created:new Date().toISOString(),
+    appeals[id] = { id, userId:user.id, username:user.username, message, email:contact, emailVerified:hasMail(user), lang:userLang(user, String(b.lang || '')), status:'open', created:new Date().toISOString(),
       ban:{ reason:ban.reason || '', notes:ban.notes || '', permanent:!!ban.permanent, until:ban.until || null, bannedBy:ban.bannedBy || '', bannedAt:ban.bannedAt || '' }, emailed:false };
     saveDB();
     log('APPEAL', user.username);
-    res.json({ ok:true, email:maskEmail(user.mail.address) });
+    res.json({ ok:true, email:contact ? maskEmail(contact) : '' });
     if (!mailConfigured()) { console.warn('[APELACION] CRIX_RESEND_KEY sin configurar: no se mandó el mail de ' + id); return; }
     const a = appeals[id];
     const text = [
       `Apelación de baneo de ${a.username}`,
       '',
       'Mensaje del usuario:', a.message, '',
-      `Mail verificado del usuario: ${a.email} (respondiéndole a este mensaje le llega a esa dirección)`,
+      a.email ? `Mail ${a.emailVerified ? 'verificado' : 'de contacto (SIN verificar)'} del usuario: ${a.email} (respondiéndole a este mensaje le llega a esa dirección)` : 'La persona no dejó mail: si quiere, te escribe ella a este correo. También podés responder desde el panel de admin.',
       `Idioma de Crix de la persona: ${a.lang} → respondele en ese idioma (el mail de respuesta del panel de admin sale automáticamente en ese idioma).`,
       '',
       `Motivo del ban: ${a.ban.reason || 'Sin motivo especificado'}`,
@@ -3018,7 +3019,7 @@ app.post('/api/appeals', async (req, res) => {
       'También se puede responder desde el panel de admin (Apelaciones).',
     ].filter((x, i, arr) => x !== '' || arr[i - 1] !== '').join('\n');
     try {
-      await sendMailRaw({ subject: `[Crix] Apelación de baneo · ${a.username}`.slice(0, 200), text, replyTo: a.email });
+      await sendMailRaw({ subject: `[Crix] Apelación de baneo · ${a.username}`.slice(0, 200), text, ...(a.email ? { replyTo: a.email } : {}) });
       a.emailed = true; saveDB();
     } catch (e) { console.error('[APELACION] no se pudo mandar el mail de ' + id + ': ' + e.message); }
   } catch (e) { res.status(500).json({ ok:false, err:'No se pudo enviar la apelación.' }); }

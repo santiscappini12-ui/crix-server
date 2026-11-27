@@ -27,7 +27,6 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
 
   app.post('/api/reports', requireAuth, (req, res) => {
     const type = String(req.body?.type || ''), id = String(req.body?.id || ''), reason = String(req.body?.reason || '');
-    if (!hasMail(req.user)) return res.status(403).json({ ok:false, code:'EMAIL_REQUIRED', err:'Para denunciar tenés que vincular un mail verificado: ahí te avisamos qué decidimos.' });
     if (!TYPES.includes(type) || !REASONS.includes(reason)) return res.status(400).json({ ok:false, err:'Denuncia inválida' });
     const t = target(type, id);
     if (!t) return res.status(404).json({ ok:false, err:'Eso ya no existe' });
@@ -47,7 +46,7 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
     }
     const rid = 'rep_' + crypto.randomUUID();
     all()[rid] = { id:rid, type, targetId:id, authorId, label:label(type, t), reason,
-      detail:String(req.body?.detail || '').slice(0, 500), reporterId:req.user.id, reporterName:req.user.username, reporterEmail:req.user.mail.address,
+      detail:String(req.body?.detail || '').slice(0, 500), reporterId:req.user.id, reporterName:req.user.username, reporterEmail:(() => { const c = String(req.body?.contact || '').trim().slice(0, 200); return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(c) ? c : (hasMail(req.user) ? req.user.mail.address : ''); })(),
       status:'open', created:new Date().toISOString(),
       evidence: evidence ? { mime:evidence.mime, size:evidence.size } : undefined, emailed:false };
     saveDB();
@@ -68,7 +67,7 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
       '',
       `ID del contenido: ${r.targetId}` + (link ? `\nEnlace: ${link}` : ''),
       `Autor (ID): ${r.authorId}`,
-      `Denunciante: ${r.reporterName} (${r.reporterId}) · mail verificado: ${r.reporterEmail}`,
+      `Denunciante: ${r.reporterName} (${r.reporterId}) · mail de contacto: ${r.reporterEmail || 'no dejó (revisá la denuncia en el panel de admin)'}`,
       `Fecha: ${r.created}`,
       `ID de denuncia: ${r.id}`,
       evidence ? `Adjunto: ${evidence.mime}, ${(evidence.size / 1048576).toFixed(1)} MB` : 'Sin captura ni video adjunto.',
@@ -78,7 +77,7 @@ module.exports = function setupReports(app, { getDB, saveDB, requireAuth, requir
         subject: `[Crix] Denuncia: ${REASON_TEXT[r.reason]} · ${TYPE_TEXT[r.type]} «${r.label}»`.slice(0, 200),
         text,
         attachments: evidence ? [{ filename:`evidencia-${r.id}.${evidence.ext}`, content:evidence.data }] : [],
-        replyTo: r.reporterEmail,
+        ...(r.reporterEmail ? { replyTo: r.reporterEmail } : {}),
       });
       r.emailed = true; saveDB();
     } catch (e) { console.error('[DENUNCIA] no se pudo mandar el mail de ' + r.id + ': ' + e.message); }

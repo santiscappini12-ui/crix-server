@@ -2901,8 +2901,8 @@ function showBanScreen(banInfo, ctx) {
       </div>
       <div id="appeal-box" style="background:var(--bg2);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:20px;max-width:400px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:10px">
         <div style="font-weight:700">📨 ¿Creés que fue un error? Apelá el ban</div>
-        <div style="font-size:12px;color:var(--text3)">Tu mensaje le llega al equipo de Crix y la respuesta te llega al mail verificado de tu cuenta, en el idioma de tu Crix.</div>
-        <div style="font-size:12px;color:var(--text3)">Para apelar, respondé desde acá: el mail se vincula a tu cuenta apenas denunciás o apelás desde Crix.</div>
+        <div style="font-size:12px;color:var(--text3)">Tu mensaje le llega al equipo de Crix y te respondemos por mail, en el idioma de tu Crix.</div>
+        <div style="font-size:12px;color:var(--text3)">Para apelar, respondé desde acá. Dejar un mail es opcional: si no, escribinos al mail de soporte.</div>
         ${needPw ? `<input id="appeal-user" placeholder="Usuario" value="${esc(window.__banAppeal.username)}" autocomplete="username" style="${inp}"><input id="appeal-pw" type="password" placeholder="Contraseña" autocomplete="current-password" style="${inp}">` : ''}
         <textarea id="appeal-msg" rows="5" maxlength="2000" placeholder="Explicá por qué el ban es un error o por qué deberían levantarlo…" style="${inp};resize:vertical"></textarea>
         <div id="appeal-mail" style="font-size:12px;color:var(--text2)"></div>
@@ -2916,18 +2916,9 @@ function showBanScreen(banInfo, ctx) {
 function renderAppealMail() {
   const A = window.__banAppeal || {}, el = document.getElementById('appeal-mail'); if (!el) return;
   if (A.mail) { el.innerHTML = '✅ Te vamos a responder a <b>' + esc(A.mail) + '</b>'; return; }
-  el.innerHTML = '⚠️ Para apelar tenés que vincular un mail verificado. <button class="btn btn-g" style="font-size:12px;margin-top:6px" onclick="linkAppealMail()">✉️ Vincular mail</button>';
-}
-function linkAppealMail() {
-  const A = window.__banAppeal || {};
-  let ctx;
-  if (A.token) ctx = { appealToken: A.token };
-  else {
-    const username = (document.getElementById('appeal-user')?.value || '').trim(), pw = document.getElementById('appeal-pw')?.value || '';
-    if (!username || !pw) { const e = document.getElementById('appeal-err'); e.textContent = 'Completá usuario y contraseña para vincular el mail.'; e.style.display = 'block'; return; }
-    ctx = { username, pw };
-  }
-  crixLinkEmail(ctx, r => { A.mail = r.masked || 'tu mail'; renderAppealMail(); }, 'Para apelar necesitás un mail verificado: ahí te mandamos la respuesta.');
+  const subj = encodeURIComponent('Apelación de baneo · ' + (A.username || ''));
+  el.innerHTML = '<input id="appeal-contact" type="email" maxlength="200" placeholder="Tu mail de contacto (opcional)" autocomplete="email" style="width:100%;box-sizing:border-box;background:var(--bg3,#11151d);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;color:var(--text,#fff);font:inherit;font-size:13px">' +
+    '<div style="margin-top:6px">✉️ También podés escribirnos a <a href="mailto:crix.support@gmail.com?subject=' + subj + '" style="color:var(--accent,#7c9cff)">crix.support@gmail.com</a></div>';
 }
 async function sendBanAppeal() {
   const err = document.getElementById('appeal-err'), btn = document.getElementById('appeal-send');
@@ -2936,8 +2927,8 @@ async function sendBanAppeal() {
   const message = document.getElementById('appeal-msg').value.trim();
   if (message.length < 10) return fail('Explicá por qué creés que el ban es un error (mínimo 10 caracteres).');
   const A = window.__banAppeal || {};
-  if (!A.mail) return fail('Primero vinculá un mail verificado.');
   const body = { message, lang: window.__crixLang || LANG || 'es' };
+  if (!A.mail) { const c = (document.getElementById('appeal-contact')?.value || '').trim(); if (c) body.contact = c; }
   if (A.token) body.appealToken = A.token;
   else {
     body.username = (document.getElementById('appeal-user')?.value || '').trim();
@@ -2947,7 +2938,8 @@ async function sendBanAppeal() {
   btn.disabled = true; btn.textContent = 'Enviando…';
   try {
     await apiRequest('/api/appeals', { method:'POST', body, token:'' });
-    document.getElementById('appeal-box').innerHTML = '<div style="font-weight:700;color:#22c55e">✅ Apelación enviada</div><div style="font-size:13px;color:var(--text2)">El equipo de Crix la va a revisar' + ' y te responde a ' + esc(A.mail) + '. Podés mandar otra recién en 24 horas.</div>';
+    const to = A.mail || (body.contact || '');
+    document.getElementById('appeal-box').innerHTML = '<div style="font-weight:700;color:#22c55e">✅ Apelación enviada</div><div style="font-size:13px;color:var(--text2)">El equipo de Crix la va a revisar' + (to ? ' y te responde a ' + esc(to) : '') + '. Si no te contestamos, escribinos a crix.support@gmail.com. Podés mandar otra recién en 24 horas.</div>';
   } catch (e) {
     if (e.payload?.code === 'EMAIL_REQUIRED') { A.mail = ''; renderAppealMail(); }
     fail(e.message); btn.disabled = false; btn.textContent = 'Enviar apelación';
@@ -10224,6 +10216,10 @@ const LANGS = { es:'Español', en:'English', pt:'Português', fr:'Français', de
 const ORDER = ['es','en','pt','fr','de','it'];
 const GLOC  = { es:'es', en:'en', pt:'pt-BR', fr:'fr', de:'de', it:'it' };
 const ROWS = [
+  ["Tu mensaje le llega al equipo de Crix y te respondemos por mail, en el idioma de tu Crix.", "Your message goes to the Crix team and we’ll reply by email, in your Crix language.", "Sua mensagem chega à equipe do Crix e respondemos por e-mail, no idioma do seu Crix.", "Ton message est transmis à l’équipe Crix et nous répondons par e-mail, dans la langue de ton Crix.", "Deine Nachricht geht an das Crix-Team und wir antworten per E-Mail, in der Sprache deines Crix.", "Il tuo messaggio arriva al team di Crix e rispondiamo via e-mail, nella lingua del tuo Crix."],
+  ["Para apelar, respondé desde acá. Dejar un mail es opcional: si no, escribinos al mail de soporte.", "To appeal, reply from here. Leaving an email is optional: otherwise, write to our support email.", "Para apelar, responda daqui. Deixar um e-mail é opcional: se não, escreva para o e-mail de suporte.", "Pour faire appel, réponds depuis ici. Laisser un e-mail est facultatif : sinon, écris à l’e-mail du support.", "Um Einspruch einzulegen, antworte von hier aus. Eine E-Mail anzugeben ist optional: sonst schreibe an die Support-E-Mail.", "Per fare ricorso, rispondi da qui. Lasciare un’e-mail è facoltativo: altrimenti scrivi all’e-mail del supporto."],
+  ["Tu mail de contacto (opcional)", "Your contact email (optional)", "Seu e-mail de contato (opcional)", "Ton e-mail de contact (facultatif)", "Deine Kontakt-E-Mail (optional)", "La tua e-mail di contatto (facoltativa)"],
+  ["✉️ También podés escribirnos a", "✉️ You can also write to us at", "✉️ Você também pode escrever para", "✉️ Tu peux aussi nous écrire à", "✉️ Du kannst uns auch schreiben an", "✉️ Puoi anche scriverci a"],
   ["Cuenta Suspendida", "Account Suspended", "Conta suspensa", "Compte suspendu", "Konto gesperrt", "Account sospeso"],
   ["📨 ¿Creés que fue un error? Apelá el ban", "📨 Think it was a mistake? Appeal the ban", "📨 Acha que foi um erro? Apele o banimento", "📨 Tu penses que c’est une erreur ? Fais appel du bannissement", "📨 Glaubst du, das war ein Fehler? Lege Einspruch gegen die Sperre ein", "📨 Pensi sia un errore? Presenta ricorso contro il ban"],
   ["Tu mensaje le llega al equipo de Crix y la respuesta te llega al mail verificado de tu cuenta, en el idioma de tu Crix.", "Your message goes to the Crix team and the reply is sent to your account’s verified email, in your Crix language.", "Sua mensagem chega à equipe do Crix e a resposta é enviada ao e-mail verificado da sua conta, no idioma do seu Crix.", "Ton message est transmis à l’équipe Crix et la réponse est envoyée à l’e-mail vérifié de ton compte, dans la langue de ton Crix.", "Deine Nachricht geht an das Crix-Team, und die Antwort kommt an die verifizierte E-Mail deines Kontos, in der Sprache deines Crix.", "Il tuo messaggio arriva al team di Crix e la risposta ti arriva all’e-mail verificata del tuo account, nella lingua del tuo Crix."],
