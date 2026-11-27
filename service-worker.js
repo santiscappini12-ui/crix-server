@@ -1,4 +1,7 @@
-const CACHE_NAME = 'crix-shell-v29';
+// El servidor reemplaza __CRIX_BUILD__ por un identificador que cambia con CADA actualización del código: así el caché de la app
+// (PWA y web) se tira entero y se vuelve a bajar todo. Si este archivo se abre sin pasar por el servidor, queda un nombre fijo.
+const BUILD = '__CRIX_BUILD__';
+const CACHE_NAME = 'crix-shell-' + BUILD;
 // Archivos que la persona descargó para usar sin conexión (juegos, apps, videos, accesorios). Este caché NO se borra al
 // actualizar el service worker: solo se vacía cuando la persona quita la descarga (o borra los datos del sitio).
 const OFFLINE_CACHE = 'crix-offline-v1';
@@ -17,7 +20,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => Promise.allSettled([
-        ...SHELL.concat(APP_FILES).map(url => cache.add(url)),
+        ...SHELL.concat(APP_FILES).map(url => cache.add(new Request(url, { cache:'reload' }))),   // 'reload' = salta el caché HTTP del navegador
         ...CDN_FILES.map(url => fetch(url, { mode: 'cors' }).then(r => r.ok ? cache.put(url, r) : null))
       ]))
       .catch(() => {})
@@ -26,10 +29,18 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME && key !== OFFLINE_CACHE).map(key => caches.delete(key))))
-  );
-  self.clients.claim();
+  // Formatea TODO lo que no sea el caché actual ni las descargas sin conexión que la persona eligió (esas se conservan a propósito).
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    const stale = keys.filter(key => key !== CACHE_NAME && key !== OFFLINE_CACHE);
+    await Promise.all(stale.map(key => caches.delete(key)));
+    await self.clients.claim();
+    // Si había una versión anterior instalada, las pestañas abiertas se recargan para usar el código nuevo.
+    if (stale.some(k => k.startsWith('crix-shell-'))) {
+      const all = await self.clients.matchAll({ type:'window' });
+      all.forEach(c => c.postMessage({ crixUpdated:true, build:BUILD }));
+    }
+  })());
 });
 
 // ── Respuestas desde lo descargado ──

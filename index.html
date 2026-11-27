@@ -6714,6 +6714,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('mess
   const d = e.data || {};
   if (d.crixNotif) handleNotifAction(d);
   if (d.crixResubscribe) pushSync();
+  if (d.crixUpdated && !window.__crixReloading) { window.__crixReloading = true; try { showToast('🔄 Crix se actualizó. Recargando…', 1500); } catch (_) {} setTimeout(() => location.reload(), 1500); }
 });
 // ════════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════════

@@ -1155,6 +1155,23 @@ app.get('/crix-rapier.js', (req, res) => {
     res.send(rapierBrowserBundle);
   } catch (err) { res.status(404).type('text/plain').send('Rapier no instalado'); }
 });
+// Identificador de esta versión del código: cambia solo en cada deploy (commit del hosting o, si no hay, un hash de los archivos de la app).
+const BUILD_ID = (() => {
+  const env = process.env.RENDER_GIT_COMMIT || process.env.RAILWAY_GIT_COMMIT_SHA || process.env.SOURCE_VERSION || process.env.GIT_COMMIT || '';
+  if (env) return String(env).slice(0, 12);
+  try {
+    const h = crypto.createHash('sha1');
+    for (const f of fs.readdirSync(__dirname).filter(n => /\.(js|html|webmanifest|svg|glb)$/.test(n)).sort()) { h.update(f); h.update(fs.readFileSync(path.join(__dirname, f))); }
+    return h.digest('hex').slice(0, 12);
+  } catch (_) { return String(Date.now()); }
+})();
+// El service worker lleva la versión incrustada: cada deploy = otro nombre de caché = se formatea el de la PWA/web.
+app.get('/service-worker.js', (req, res) => {
+  try {
+    const js = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8').replace(/__CRIX_BUILD__/g, BUILD_ID);
+    res.set({ 'Content-Type':'application/javascript; charset=utf-8', 'Cache-Control':'no-store', 'Service-Worker-Allowed':'/' }).send(js);
+  } catch (e) { res.status(404).type('text/plain').send('No encontrado'); }
+});
 app.get(PUBLIC_FILES, (req, res) => {
   // El service worker y el manifiesto no deben quedar en caché para que las actualizaciones lleguen rápido.
   if (req.path === '/service-worker.js' || req.path === '/manifest.webmanifest') res.set('Cache-Control', 'no-cache');
