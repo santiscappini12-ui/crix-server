@@ -1053,7 +1053,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/crix-rules-v2.js','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js','/crix-report.js','/crix-rules.js',
+const PUBLIC_FILES = ['/index.html','/crix-rules-v2.js','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-loading.gif','/crix-splash.gif','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js','/crix-report.js','/crix-rules.js',
   '/discover-banner.jpg','/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
