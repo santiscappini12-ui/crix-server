@@ -4,6 +4,29 @@
   const REASONS = { ilegal:'Contenido ilegal', menores:'Pone en riesgo a menores', intimas:'Imágenes íntimas sin consentimiento', violencia:'Amenazas', odio:'Odio o acoso', estafa:'Estafa o robo de contraseñas', malware:'Virus o código malicioso', copyright:'Copia sin permiso', servidor:'Ataca o explota los servidores a propósito' };
   const TYPES = { map:'Juego/app', video:'Video', post:'Post', user:'Usuario', accessory:'Accesorio' };
 
+// Animación de "Enviado": se ve UNA vez (el GIF dura ~5 s), dice Enviado y se cierra solo, dejando al usuario donde estaba.
+  const SENT_GIF = '/crix-sent.gif', SENT_MS = 4960;
+  window.crixSent = function (label, onDone) {
+    document.getElementById('crix-sent')?.remove();
+    const bg = document.createElement('div');
+    bg.id = 'crix-sent';
+    bg.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(5,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;opacity:0;transition:opacity .25s ease';
+    const img = document.createElement('img');
+    img.alt = ''; img.draggable = false;
+    img.style.cssText = 'width:min(260px,64vw);height:auto;display:block;user-select:none;-webkit-user-drag:none';
+    img.src = SENT_GIF + '?t=' + Date.now();   // el query fuerza a arrancar desde el primer cuadro
+    const t = document.createElement('div');
+    t.textContent = label || 'Enviado';
+    t.style.cssText = 'font-family:var(--display,inherit);font-size:26px;font-weight:800;color:#fff';
+    bg.append(img, t);
+    document.body.appendChild(bg);
+    requestAnimationFrame(() => { bg.style.opacity = '1'; });
+    setTimeout(() => {
+      bg.style.opacity = '0';
+      setTimeout(() => { bg.remove(); if (onDone) try { onDone(); } catch (_) {} }, 260);
+    }, SENT_MS);
+  };
+
   async function call(url, body, noAuth) {
     try {
       const headers = { 'Content-Type':'application/json' };
@@ -100,7 +123,8 @@
         return showToast(r.err || 'No se pudo enviar');
       }
       document.getElementById('crix-report-box')?.remove();
-      showToast(r.repeated ? 'Ya lo habías denunciado' : 'Denuncia enviada. La va a revisar un admin.');
+      if (r.repeated) return showToast('Ya lo habías denunciado');
+      crixSent('Enviado');   // la denuncia es un modal: al cerrarse queda la página donde estabas
     });
     el.append(sel, txt, contact, note, file, send, button('Cancelar', 'btn-g', () => document.getElementById('crix-report-box').remove()));
   };

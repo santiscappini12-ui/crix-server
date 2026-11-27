@@ -3033,6 +3033,7 @@ async function sendBanAppeal() {
   try {
     await apiRequest('/api/appeals', { method:'POST', body, token:'' });
     const to = A.mail || (body.contact || '');
+    if (window.crixSent) crixSent('Enviado');
     document.getElementById('appeal-box').innerHTML = '<div style="font-weight:700;color:#22c55e">✅ Apelación enviada</div><div style="font-size:13px;color:var(--text2)">El equipo de Crix la va a revisar' + (to ? ' y te responde a ' + esc(to) : '') + '. Si no te contestamos, escribinos a crix.support@gmail.com. Podés mandar otra recién en 24 horas.</div>';
   } catch (e) {
     if (e.payload?.code === 'EMAIL_REQUIRED') { A.mail = ''; renderAppealMail(); }
