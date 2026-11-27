@@ -323,6 +323,7 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 /* ═══ GAME ═══ */
 #s-game{background:#000;}
 #game-wrap{position:fixed;inset:0;}
+#g-vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 46%,rgba(0,0,0,0) 58%,rgba(0,0,0,.14) 82%,rgba(0,0,0,.34) 100%);}
 #g-hud{position:fixed;top:0;left:0;right:0;z-index:50;pointer-events:none;padding:10px 14px;display:flex;justify-content:space-between;align-items:flex-start;}
 .g-pill{background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:5px 12px;font-size:11px;color:#aabbcc;pointer-events:auto;font-weight:600;}
 #g-chat-wrap{position:fixed;bottom:220px;left:12px;width:215px;z-index:60;}
@@ -3797,13 +3798,13 @@ function createLightRig(scene, renderer, L, opts) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   if (window.CrixGFX) CrixGFX.applyScene(scene, L, renderer);   // cielo + reflejos de entorno (antes de calcular las luces)
   const rig = {
-    scene, renderer, extent: opts.extent || 36, mapSize: opts.mapSize || 2048, dir: new THREE.Vector3(0, 1, 0),
+    scene, renderer, extent: opts.extent || 36, mapSize: opts.mapSize || 2048, cinematic: !!opts.cinematic, dir: new THREE.Vector3(0, 1, 0),
     hemi: new THREE.HemisphereLight(0xffffff, 0x555566, 0.4), amb: new THREE.AmbientLight(0xffffff, 0.18),
     sun: new THREE.DirectionalLight(0xffffff, 0.8),
     _r: new THREE.Vector3(), _u: new THREE.Vector3(), _f: new THREE.Vector3(), _up: new THREE.Vector3()
   };
   const sh = rig.sun.shadow;
-  sh.mapSize.set(rig.mapSize, rig.mapSize); sh.bias = -0.0003; sh.normalBias = 0.035; if ('radius' in sh) sh.radius = 2;
+  sh.mapSize.set(rig.mapSize, rig.mapSize); sh.bias = -0.0003; sh.normalBias = opts.cinematic ? 0.03 : 0.035; if ('radius' in sh) sh.radius = opts.cinematic ? 2.5 : 2;
   scene.add(rig.hemi, rig.amb, rig.sun, rig.sun.target);
   applyLightRig(rig, L);
   return rig;
@@ -3819,12 +3820,12 @@ function applyLightRig(rig, L) {
   // Al atardecer (sol bajo) la luz se vuelve cálida y pierde fuerza; el relleno mantiene visible el resto.
   const warm = Math.max(0, Math.min(1, (28 - L.sunElevation) / 28));
   rig.sun.color.setRGB(1, 1 - 0.28 * warm, 1 - 0.55 * warm);
-  rig.sun.intensity = 0.82 * B * L.sunIntensity * (1 - 0.35 * warm);
+  rig.sun.intensity = 0.82 * B * L.sunIntensity * (1 - 0.35 * warm) * (rig.cinematic ? 1.3 : 1);
   const ibl = !!(window.CrixGFX && rig.scene.environment);   // con entorno IBL el cielo ya aporta la luz ambiental: se baja el relleno
   const toLin = c => window.CrixGFX ? CrixGFX.lin(c) : c;
   const amb = new THREE.Color(L.ambient), sky = new THREE.Color(L.fogColor || '#87ceeb').lerp(new THREE.Color(0xffffff), 0.45);
-  rig.amb.color.copy(toLin(amb)); rig.amb.intensity = (ibl ? 0.05 : 0.2) * B;
-  rig.hemi.color.copy(toLin(sky)); rig.hemi.groundColor.copy(toLin(amb)).multiplyScalar(0.45); rig.hemi.intensity = (ibl ? 0.12 : 0.42) * B;
+  rig.amb.color.copy(toLin(amb)); rig.amb.intensity = (ibl ? 0.05 : 0.2) * B * (rig.cinematic ? 0.8 : 1);
+  rig.hemi.color.copy(toLin(sky)); rig.hemi.groundColor.copy(toLin(amb)).multiplyScalar(0.45); rig.hemi.intensity = (ibl ? 0.12 : 0.42) * B * (rig.cinematic ? 0.85 : 1);
   rig.sun.castShadow = L.shadows !== false;
   const sh = rig.sun.shadow, ext = rig.extent, dist = ext * 2.6, cam = sh.camera;
   cam.left = -ext; cam.right = ext; cam.top = ext; cam.bottom = -ext; cam.near = 1; cam.far = dist + ext * 2.2;
@@ -4830,12 +4831,12 @@ function playMap(mapId) {
   if(runtimePhysicsHandle)clearInterval(runtimePhysicsHandle);runtimePhysicsHandle=setInterval(_stepScriptParts,16);
   document.getElementById('g-map-name').textContent = m.name;
 }
-function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); if (window.CrixGFX) CrixGFX.setupRenderer(gRenderer, { exposure: 1.0 }); gRenderer.shadowMap.enabled = true; gRenderer.shadowMap.type = THREE.PCFSoftShadowMap; wrap.appendChild(gRenderer.domElement); window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
+function _initGame() { gScene = new THREE.Scene(); gScene.background = new THREE.Color(0x87ceeb); gScene.fog = new THREE.Fog(0x87ceeb, 100, 250); const wrap = document.getElementById('game-wrap'); gCamera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500); gRenderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'}); gRenderer.setPixelRatio(Math.min(devicePixelRatio, 2)); gRenderer.setSize(innerWidth, innerHeight); if (window.CrixGFX) CrixGFX.setupRenderer(gRenderer, { exposure: 1.12, cinematic: true }); gRenderer.shadowMap.enabled = true; gRenderer.shadowMap.type = THREE.PCFSoftShadowMap; wrap.appendChild(gRenderer.domElement); if (!document.getElementById('g-vignette')) { const vg = document.createElement('div'); vg.id = 'g-vignette'; wrap.appendChild(vg); } window.addEventListener('resize', () => { gCamera.aspect = innerWidth/innerHeight; gCamera.updateProjectionMatrix(); gRenderer.setSize(innerWidth, innerHeight); }); _setupGameInput(); if (/Android|webOS|iPhone|iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || innerWidth < 768) { document.getElementById('mob-ctrl').style.display = 'block'; _setupMob(); } _gameLoop(); }
 function _loadMap(m) {
   window.gPhysicsMode=(m&&(m.physicsMode==='classic'||(m.settings&&m.settings.physicsMode==='classic')))?'classic':'realistic';
   const toRemove=[]; gScene.traverse(object=>{if(object!==gScene)toRemove.push(object);});toRemove.forEach(object=>gScene.remove(object));
   gColliders=[];gNPCs=[];runtimeObjects.clear();_localRoom=null;_localPrev=null;networkRuntimePartIds=new Set();runtimeWorkspaceBase=[];_ragAbort();gPlayer=null;
-  disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:((window.CrixGFX&&CrixGFX.Q.quality==='ultra')?4096:2048)});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
+  disposeLightRig(gRig);const gLighting=normalizeLighting(m.lighting);gRig=createLightRig(gScene,gRenderer,gLighting,{extent:GFX_MOBILE?26:36,mapSize:GFX_MOBILE?1024:((window.CrixGFX&&CrixGFX.Q.quality==='ultra')?4096:2048),cinematic:true});applyLightingToScene(gScene,gLighting,gRenderer.domElement);
   const parts=m.parts||[];runtimeWorkspaceBase=scriptPartsSnapshot(parts).filter(part=>part.type==='Spawn'||part.isNPC);let spawn={x:0,y:3,z:0,yaw:0};
   parts.forEach((part,index)=>{
     if(part.type==='Spawn'){spawn={x:part.x||0,y:(part.y||0)+(part.sy||0.4)/2,z:part.z||0,yaw:spawnYawOf(part)};return;}
@@ -4988,14 +4989,14 @@ function _stepScriptParts() { _stepNetInterp();try{if(window.CrixExt)CrixExt.gam
 // Un único modelo de avatar: el jugador local y los jugadores remotos se construyen con el mismo código,
 // así cada persona ve a los demás exactamente igual a como se ve a sí misma. El origen del grupo está en los PIES
 // (y = 0 es el suelo), igual que gPlayer.position, que es lo que viaja por la red.
-function _makeAvatar(look, color) {
-  const av = CrixAvatar.build(look || {}); CrixAvatar.setUserColor(av, color || '#2f80ff');
+function _makeAvatar(look, color, pbr) {
+  const av = CrixAvatar.build(look || {}, pbr ? { pbr: true } : undefined); CrixAvatar.setUserColor(av, color || '#2f80ff');
   CrixAvatar.update(av, 0.5, { snap: true, speed: 0, onGround: true }); CrixAvatar.update(av, 0.5, { snap: true, speed: 0, onGround: true });
   return av;
 }
 // Contenedor en los pies (la escala del avatar no afecta a la posición ni a la etiqueta de nombre).
 function _buildHumanoid(color, look) {
-  const g = new THREE.Group(); const av = _makeAvatar(look, color); g.add(av.root); g.userData.avatar = av; shadowAllMeshes(g);
+  const g = new THREE.Group(); const av = _makeAvatar(look, color, true); g.add(av.root); g.userData.avatar = av; shadowAllMeshes(g);
   return { group: g, avatar: av };
 }
 function myLook() { return CrixAvatar.profileLook((ME && ME.look) || {}); }

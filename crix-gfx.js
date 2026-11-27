@@ -10,7 +10,7 @@
   if (!T) return;
   let pref = ''; try { pref = String(localStorage.getItem('crix_gfx') || ''); } catch (e) {}
   if (pref === 'off') return;   // sin CrixGFX el juego usa sus materiales y luces de siempre
-  const QUALITY = pref === 'ultra' ? 'ultra' : 'high';   // 'low' ya no existe: cualquier valor guardado distinto de 'ultra' usa 'high'
+  const QUALITY = pref === 'high' ? 'high' : 'ultra';   // ultra por defecto (anisotropía 16, sombras 4096). Para bajar: localStorage.setItem('crix_gfx','high')
   // Flujo de color correcto: salida sRGB (sin tone mapping, para respetar los colores), con todos los colores de entrada convertidos a lineal.
   // Los materiales "viejos" (Basic/Phong/Lambert/Points/Sprite, p. ej. los del avatar) se parchean más abajo para convertir
   // solos lo que se les asigna: sus archivos no se tocan y sus colores se ven igual que se eligieron.
@@ -43,6 +43,15 @@
     // Lo que no tiene luz (ojos, sangre, gizmos, etiquetas) no pasa por el tone mapping: se ve del color exacto.
     ['MeshBasicMaterial', 'SpriteMaterial'].forEach(n => { const pr = T[n] && T[n].prototype; if (pr) Object.defineProperty(pr, 'toneMapped', { configurable: true, enumerable: true, get() { return false; }, set() {} }); });
   }
+  // Material PBR del avatar y sus accesorios: acepta colores sRGB (hex, nombre, Color) igual que el Phong de antes,
+  // así `mat.color.set('#ff0000')` y `.clone()` siguen viéndose del mismo color elegido, pero con rugosidad, barniz y reflejos reales.
+  class AvMat extends T.MeshPhysicalMaterial {}
+  patchColor(AvMat.prototype, 'color'); patchColor(AvMat.prototype, 'emissive');
+  function avMat(params) {
+    const p = Object.assign({}, params || {}); const env = p.envMapIntensity; delete p.envMapIntensity;
+    if (!Q.physical) { delete p.clearcoat; delete p.clearcoatRoughness; }
+    const m = new AvMat(p); m.envMapIntensity = env === undefined ? 1 : env; return m;
+  }
   function basic(params) { return new T.MeshBasicMaterial(params || {}); }   // la conversión de color la hace el parche de arriba
   function std(params) {            // reemplazo PBR de MeshPhongMaterial ({color, shininess, opacity, emissive…})
     const p = Object.assign({}, params || {});
@@ -65,7 +74,10 @@
   // ── Renderer ─────────────────────────────────────────────────────────────────────────────────
   function setupRenderer(r, o) {
     o = o || {};
-    if (SRGB) { r.outputEncoding = T.sRGBEncoding; r.toneMapping = T.NoToneMapping; r.toneMappingExposure = 1; }   // sin ACES: no desplaza los tonos (el marrón sigue siendo marrón)
+    if (SRGB) { r.outputEncoding = T.sRGBEncoding; r.toneMapping = T.NoToneMapping; r.toneMappingExposure = 1; }   // menús y editores: sin ACES, los colores se ven tal cual
+    // Dentro del juego (o.cinematic): tone mapping ACES de cine, más rango dinámico y contraste. Apagar: localStorage.setItem('crix_cine','off')
+    let cine = true; try { cine = localStorage.getItem('crix_cine') !== 'off'; } catch (e) {}
+    if (SRGB && o.cinematic && cine) { r.toneMapping = T.ACESFilmicToneMapping; r.toneMappingExposure = o.exposure || 1.12; }
     if (r.shadowMap) { r.shadowMap.enabled = true; r.shadowMap.type = T.PCFSoftShadowMap; }
     Q.maxAniso = Math.min(Q.anisotropy, r.capabilities && r.capabilities.getMaxAnisotropy ? r.capabilities.getMaxAnisotropy() : 4);
     Q.anisotropy = Q.maxAniso || Q.anisotropy;
@@ -181,5 +193,5 @@
     scene.environment = null; scene.userData._gfx = null;
   }
 
-  window.CrixGFX = { Q, lin, basic, std, tex, setupRenderer, applyScene, dispose, roughFromShine };
+  window.CrixGFX = { Q, lin, basic, std, avMat, tex, setupRenderer, applyScene, dispose, roughFromShine };
 })();

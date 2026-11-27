@@ -13,6 +13,16 @@ npm start
 
 Abrí `http://localhost:3000`.
 
+## Modo realista dentro del juego
+
+Dentro de los juegos 3D (no en los menús ni en el editor de avatar) Crix se ve más realista, sin cambiar personajes ni accesorios:
+
+- Tone mapping cinematográfico ACES, sol más marcado y relleno más suave, sombras de 4096 px y filtrado anisotrópico 16×.
+- El avatar (jugador local y remotos) y los accesorios usan materiales PBR (rugosidad, barniz, reflejos del cielo) con los mismos colores y formas, y reciben sombras.
+- Viñeteado de cámara suave.
+- Para volver al aspecto anterior: `localStorage.setItem('crix_cine','off')` (sin tone mapping) o `localStorage.setItem('crix_gfx','high')` (sombras 2048) y recargar.
+
+
 ## Creaciones sin conexión (PWA)
 
 Cualquier creación (juego 3D, app/juego HTML, video o accesorio) se puede descargar para usarla **sin internet** desde Crix instalada como PWA, siempre que **su creador lo permita**.

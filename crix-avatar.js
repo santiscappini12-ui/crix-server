@@ -623,6 +623,22 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
 
   // ── Construcción ──────────────────────────────────────────────────────────────────────────────
   // Cada hueso lleva un hijo "visual" (Group) donde viven las mallas; así se puede escalar/ocultar/pintar sin tocar la jerarquía.
+  // Materiales: dentro del juego (opts.pbr) son PBR realistas con los MISMOS colores; en menús/editor y en Node siguen siendo Phong.
+  const PBR_PRESETS = {
+    skin:  { roughness: 0.52, clearcoat: 0.12, clearcoatRoughness: 0.55, envMapIntensity: 0.9 },
+    shirt: { roughness: 0.82, envMapIntensity: 0.6 },
+    pants: { roughness: 0.88, envMapIntensity: 0.5 },
+    shoes: { roughness: 0.42, clearcoat: 0.25, clearcoatRoughness: 0.35, envMapIntensity: 0.8 },
+    hair:  { roughness: 0.45, clearcoat: 0.35, clearcoatRoughness: 0.3, envMapIntensity: 0.9 },
+    clay:  { roughness: 0.6, clearcoat: 0.08, clearcoatRoughness: 0.5, envMapIntensity: 0.8 },
+    joint: { roughness: 0.32, metalness: 0.7, envMapIntensity: 1.1 },
+    acc:   { roughness: 0.38, metalness: 0.15, clearcoat: 0.3, clearcoatRoughness: 0.25, envMapIntensity: 1 }
+  };
+  function lit(pbr, kind, params, shininess) {
+    const G = typeof window !== 'undefined' && window.CrixGFX;
+    if (pbr && G && G.avMat) return G.avMat(Object.assign({}, PBR_PRESETS[kind] || PBR_PRESETS.acc, params));
+    return new THREE.MeshPhongMaterial(Object.assign({ shininess }, params));
+  }
   function buildAvatar(look, opts) {
     look = sanitizeLook(look);
     const root = new THREE.Group(); root.name = 'CrixAvatar';
@@ -634,13 +650,14 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     }
     const av = { root, bones, visuals, look, mats, parts: {}, accessories: {}, face: null, hair: null, joints: [], style: null, kind: MODEL.state === 'failed' ? 'legacy' : 'model', built: false };
     layoutBones(av, av.kind === 'model');
-    av.mats.skin = new THREE.MeshPhongMaterial({ color: 0xffd9b3, shininess: 20 });
-    av.mats.shirt = new THREE.MeshPhongMaterial({ color: 0x5b8def, shininess: 25 });
-    av.mats.pants = new THREE.MeshPhongMaterial({ color: 0x3a4668, shininess: 15 });
-    av.mats.shoes = new THREE.MeshPhongMaterial({ color: 0x22262e, shininess: 30 });
-    av.mats.hair = new THREE.MeshPhongMaterial({ color: 0x3b2a1e, shininess: 40 });
-    av.mats.white = new THREE.MeshPhongMaterial({ color: CLAY, shininess: 8 });
-    av.mats.joint = new THREE.MeshPhongMaterial({ color: 0xb9c2d0, shininess: 40 });
+    av.pbr = !!(opts && opts.pbr);
+    av.mats.skin = lit(av.pbr, 'skin', { color: 0xffd9b3 }, 20);
+    av.mats.shirt = lit(av.pbr, 'shirt', { color: 0x5b8def }, 25);
+    av.mats.pants = lit(av.pbr, 'pants', { color: 0x3a4668 }, 15);
+    av.mats.shoes = lit(av.pbr, 'shoes', { color: 0x22262e }, 30);
+    av.mats.hair = lit(av.pbr, 'hair', { color: 0x3b2a1e }, 40);
+    av.mats.white = lit(av.pbr, 'clay', { color: CLAY }, 8);
+    av.mats.joint = lit(av.pbr, 'joint', { color: 0xb9c2d0 }, 40);
     av.mats.eyeW = new THREE.MeshBasicMaterial({ color: 0xffffff });
     av.mats.eye = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
     av.mats.line = new THREE.MeshBasicMaterial({ color: 0x1b1f2a });
@@ -656,6 +673,7 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     else { av.built = true; buildFace(av); }
     applyLook(av, look);
     if (opts && opts.shadows !== false) root.traverse(o => { if (o.isMesh && !o.userData.noShadow) { o.castShadow = true; o.receiveShadow = false; } });
+    if (av.pbr) root.traverse(o => { if (o.isMesh && o.userData.tag !== 'face') o.receiveShadow = true; });   // en juego el cuerpo también recibe sombras (brazo sobre torso, gorra sobre la cara)
     root.userData.avatar = av;
     return av;
   }
@@ -1066,9 +1084,9 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
   function addAccessory(av, id, bone, rawSpec) {
     id = accId(id); const sp = sanitizeAccessory(bone, rawSpec); if (!id || !sp) return false;
     removeAccessory(av, id); if (Object.keys(av.accessories).length >= MAX_ACCESSORIES) return false;
-    const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(sp.color), shininess: 40, transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 });
+    const mat = lit(av.pbr, 'acc', { color: new THREE.Color(sp.color), transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 }, 40);
     if (sp.emissive) mat.emissive = new THREE.Color(sp.emissive);
-    const m = new THREE.Mesh(G('acc_' + sp.shape, ACC_SHAPES[sp.shape]), mat); m.castShadow = true; m.userData.tag = 'acc';
+    const m = new THREE.Mesh(G('acc_' + sp.shape, ACC_SHAPES[sp.shape]), mat); m.castShadow = true; m.receiveShadow = !!av.pbr; m.userData.tag = 'acc';
     m.scale.set(sp.size[0], sp.size[1], sp.size[2]); m.position.set(sp.offset[0], sp.offset[1], sp.offset[2]); m.rotation.set(sp.rotation[0] * DEG, sp.rotation[1] * DEG, sp.rotation[2] * DEG);
     av.visuals[sp.bone].add(m); av.accessories[id] = { mesh: m, bone: sp.bone }; return true;
   }
@@ -1113,15 +1131,15 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
     AccCache.set(id, p); p.then(v => { if (!v) setTimeout(() => { if (AccCache.get(id) === p) AccCache.delete(id); }, 30000); });
     return p;
   }
-  function buildAccParts(def, model) {
+  function buildAccParts(def, model, av) {
     const out = [], mats = [];
     for (const sp of def.parts) {
       let obj;
       if (sp.shape === 'model') { if (!model) continue; obj = model.clone(true); }
       else {
-        const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(sp.color), shininess: 40, transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 });
+        const mat = lit(av && av.pbr, 'acc', { color: new THREE.Color(sp.color), transparent: sp.opacity !== undefined && sp.opacity < 1, opacity: sp.opacity !== undefined ? sp.opacity : 1 }, 40);
         if (sp.emissive) mat.emissive = new THREE.Color(sp.emissive);
-        mats.push(mat); obj = new THREE.Mesh(G('acc_' + sp.shape, ACC_SHAPES[sp.shape]), mat); obj.castShadow = true;
+        mats.push(mat); obj = new THREE.Mesh(G('acc_' + sp.shape, ACC_SHAPES[sp.shape]), mat); obj.castShadow = true; obj.receiveShadow = !!(av && av.pbr);
       }
       obj.userData.eqacc = true;
       obj.scale.set(sp.size[0], sp.size[1], sp.size[2]); obj.position.set(sp.offset[0], sp.offset[1], sp.offset[2]); obj.rotation.set(sp.rotation[0] * DEG, sp.rotation[1] * DEG, sp.rotation[2] * DEG);
@@ -1147,12 +1165,12 @@ MODEL_POS.Teeth = headPoint(0, MOUTH_PITCH); MODEL_ROT.Teeth = headQuat(0, MOUTH
       loadAcc(id).then(r => {
         delete av._eqLoading[id];
         if (!r || av.disposed || av.equipped[id] || !(av.look.equip || []).includes(id)) return;
-        mountEquipped(av, id, buildAccParts(r.def, r.model));
+        mountEquipped(av, id, buildAccParts(r.def, r.model, av));
       });
     }
   }
   // Vista previa del editor: accesorio sin subir (def + modelo ya leído del archivo) sobre el personaje.
-  function setDraftAccessory(av, def, model) { if (!def) { removeEquipped(av, '_draft'); return; } mountEquipped(av, '_draft', buildAccParts(def, model)); }
+  function setDraftAccessory(av, def, model) { if (!def) { removeEquipped(av, '_draft'); return; } mountEquipped(av, '_draft', buildAccParts(def, model, av)); }
   // Alguien editó o borró un accesorio: se vuelve a bajar y se rearma en todos los avatares que lo llevan puesto.
   function refreshAccessory(id) {
     AccCache.delete(id);
