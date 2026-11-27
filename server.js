@@ -1169,7 +1169,7 @@ app.use((req, res, next) => {
 });
 // Solo se publican los archivos del cliente. Antes se servía el directorio completo
 // (server.js, package.json, script-runner.js...).
-const PUBLIC_FILES = ['/index.html','/crix-rules-v2.js','/crix-rigid.js','/crix-predict.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-loading.gif','/crix-splash.gif','/crix-sent.gif','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js','/crix-report.js','/crix-rules.js',
+const PUBLIC_FILES = ['/index.html','/crix-rules-v2.js','/crix-rigid.js','/crix-predict.js','/crix-steps.js','/service-worker.js','/manifest.webmanifest','/crix-icon.svg','/favicon.svg','/favicon-48.png','/crix-loading.gif','/crix-splash.gif','/crix-sent.gif','/crix-avatar.js','/crix-avatar.glb','/GLTFLoader.js','/crix-joints.js','/crix-objects.js','/crix-anim.js','/crix-animator.js','/crix-csg.js','/crix-edit.js','/crix-console.js','/death-scream.mp3','/crix-offline.js','/crix-fx.js','/crix-gfx.js','/crix-ext.js','/crix-native.js','/crix-report.js','/crix-rules.js',
   '/discover-banner.jpg','/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png','/icons/badge-72.png',
   '/google2fdf198aa054809a.html'];   // verificación de Google Search Console
 app.get('/', (req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, 'index.html')); });
@@ -1441,6 +1441,11 @@ const PREF_RULES = {
   crix_sound:         v => (v === 'on' || v === 'off') ? v : null,
   crix_nav_hidden:    v => (v === '0' || v === '1') ? v : null,
   crix_country:       v => /^[A-Z_]{2,10}$/.test(v) ? v : null,
+  crix_step_on:       v => (v === 'on' || v === 'off') ? v : null,
+  crix_step_vol:      v => { const n = parseInt(v, 10); return n >= 0 && n <= 100 ? String(n) : null; },
+  crix_step_style:    v => ['auto','grass','sand','wood','stone','metal','soft'].includes(v) ? v : null,
+  crix_jump_on:       v => (v === 'on' || v === 'off') ? v : null,
+  crix_step_others:   v => (v === 'on' || v === 'off') ? v : null,
 };
 // ── Accesorios de avatar ──
 // Los crea la gente (formas + un modelo .glb opcional), los ubica sobre el personaje y los sube "solo para mí" (private) o "para todos"

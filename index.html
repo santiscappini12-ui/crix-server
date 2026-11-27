@@ -414,6 +414,13 @@ body.nav-hidden #nav-toggle:hover{opacity:1;}
 .tex-add{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box;cursor:pointer;border:1.5px dashed var(--border);border-radius:9px;padding:9px;font-size:11px;color:var(--text2)}
 .tex-add:hover{border-color:var(--acc);color:var(--acc)}
 .tex-note{font-size:9.5px;color:var(--text3);line-height:1.5;margin-top:6px}
+#g-snd-btn{position:fixed;top:10px;right:92px;z-index:80;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.1);color:white;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12px;line-height:1.2;}
+#g-snd-panel{position:fixed;top:46px;right:10px;z-index:81;width:236px;max-width:calc(100vw - 20px);background:rgba(15,15,22,.94);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:11px 12px;color:#fff;font-size:12px;display:none;backdrop-filter:blur(6px);}
+#g-snd-panel.open{display:block;}
+#g-snd-panel .sr{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:7px 0;}
+#g-snd-panel .st{font-weight:800;font-size:12px;margin-bottom:2px;}
+#g-snd-panel select,#g-snd-panel input[type=range]{max-width:120px;font-size:11px;}
+#g-snd-panel select{background:#222;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:3px 4px;}
 #g-back-btn{position:fixed;top:10px;right:10px;z-index:80;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.1);color:white;padding:6px 13px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:11px;font-weight:700;}
 /* ═══ MODAL ═══ */
 .mo-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:600;display:none;align-items:center;justify-content:center;padding:16px;}
@@ -1027,6 +1034,15 @@ const CrixLoading = (() => {
     </div>
   </div>
   <button id="g-back-btn" onclick="exitGame()">← Salir</button>
+  <button id="g-snd-btn" onclick="gSndPanel()" title="Sonido de pisadas y salto">🦶</button>
+  <div id="g-snd-panel">
+    <div class="st">🦶 Pisadas y salto</div>
+    <div class="sr"><label for="gs-on">Pisadas</label><input type="checkbox" id="gs-on" onchange="gSndSet('crix_step_on',this.checked?'on':'off')"></div>
+    <div class="sr"><label for="gs-jump">Salto y aterrizaje</label><input type="checkbox" id="gs-jump" onchange="gSndSet('crix_jump_on',this.checked?'on':'off')"></div>
+    <div class="sr"><label for="gs-others">Pisadas de otros</label><input type="checkbox" id="gs-others" onchange="gSndSet('crix_step_others',this.checked?'on':'off')"></div>
+    <div class="sr"><label for="gs-vol">Volumen</label><input type="range" id="gs-vol" min="0" max="100" step="5" oninput="gSndSet('crix_step_vol',this.value,true)" onchange="this.blur();CrixSteps.preview()"></div>
+    <div class="sr"><label for="gs-style">Sonido</label><select id="gs-style" onchange="gSndSet('crix_step_style',this.value);this.blur();CrixSteps.preview()"></select></div>
+  </div>
   <div id="g-player-hud"><div class="g-pill" id="g-health-pill"><div id="g-health-fill"></div><span>❤️ <b id="g-health-v">100</b></span></div><div class="g-pill" id="g-coins-pill">🪙 <b id="g-coins-v">0</b></div></div>
   <div id="g-banner"></div><div id="g-flash"></div><div id="game-gui"></div>
   <div id="g-chat-wrap">
@@ -1275,6 +1291,7 @@ const CrixLoading = (() => {
 <script src="/socket.io/socket.io.js"></script>
 <script src="/crix-rigid.js"></script>
 <script src="/crix-predict.js"></script>
+<script src="/crix-steps.js"></script>
 <script>
 // Copia de world-physics.js (el mismo motor que usa el servidor). Se usa cuando el juego corre sin servidor (prueba desde el Studio).
 window.CrixWorldPhysics=(function(){const module={exports:{}};
@@ -2062,7 +2079,7 @@ function setUsers(u) {
 // ═══ Preferencias de la cuenta ═══
 // Idioma, difuminado de miniaturas, sonido, barra superior y país de clasificación se guardan en la cuenta (servidor), no solo en este
 // navegador: al iniciar sesión en otro dispositivo (o tras limpiar el navegador) se recuperan. localStorage sigue siendo la copia local.
-const ACCOUNT_PREF_KEYS = ['crix_lang', 'crix_thumb_blur_on', 'crix_thumb_blur_px', 'crix_thumb_filter', 'crix_sound', 'crix_nav_hidden', 'crix_country'];
+const ACCOUNT_PREF_KEYS = ['crix_lang', 'crix_thumb_blur_on', 'crix_thumb_blur_px', 'crix_thumb_filter', 'crix_sound', 'crix_nav_hidden', 'crix_country', 'crix_step_on', 'crix_step_vol', 'crix_step_style', 'crix_jump_on', 'crix_step_others'];
 let _prefTimer = null, _prefPending = {}, _applyingPrefs = false;
 // Llamar después de cambiar una de esas claves en localStorage: la sube a la cuenta (agrupa cambios seguidos).
 function prefSync(key) {
@@ -5128,10 +5145,11 @@ function _stepPlayer(mx, mz, moving) {
   for (const col of gColliders) _colBox(col);
   // Plataformas móviles: lo que está encima se mueve con ellas.
   if (gGround && gOnGround && (gGround._dx || gGround._dy || gGround._dz) && gColliders.includes(gGround)) { p.x += gGround._dx; p.z += gGround._dz; if (gGround._dy > 0) p.y += gGround._dy; }
+  const _wasG = gOnGround, _vy0 = gVelY, _sx = p.x, _sz = p.z;   // para las pisadas y el aterrizaje (crix-steps.js)
   // Salto: margen de gracia al salir de un borde (coyote) y salto "guardado" si se pulsa justo antes de aterrizar.
   if (gOnGround) gCoyote = 6; else if (gCoyote > 0) gCoyote--;
   if (gJumpBuf > 0) gJumpBuf--;
-  if (gJumpBuf > 0 && gCoyote > 0) { gVelY = G_JUMP; gOnGround = false; gCoyote = 0; gJumpBuf = 0; }
+  if (gJumpBuf > 0 && gCoyote > 0) { gVelY = G_JUMP; gOnGround = false; gCoyote = 0; gJumpBuf = 0; try { if (window.CrixSteps) CrixSteps.jump(); } catch (_) {} }
   // Aceleración: firme en el suelo, con algo de inercia en el aire (se conservan los impulsos de trampolines y lanzadores).
   if (moving) {
     const dir = new THREE.Vector3(mx, 0, mz).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), gCamTheta);
@@ -5151,6 +5169,45 @@ function _stepPlayer(mx, mz, moving) {
     else if (b.max.y - p.y <= 1.5) { p.y = b.max.y; gVelY = Math.max(gVelY, 0); gOnGround = true; gGround = col; }
     else break;
   }
+  _playerAudio(_wasG, _vy0, Math.hypot(p.x - _sx, p.z - _sz));
+}
+// Pisadas / aterrizaje del jugador local (crix-steps.js). El material sale de la pieza que se pisa.
+const _stepTr = window.CrixSteps ? CrixSteps.tracker() : null; let _gmCol = null, _gmMat = '';
+function _groundMaterial() {
+  if (!gGround) return '';
+  if (gGround === _gmCol) return _gmMat;
+  _gmCol = gGround; _gmMat = '';
+  for (const o of runtimeObjects.values()) if (o.collider === gGround) { _gmMat = CrixSteps.materialOf(o.data); break; }
+  return _gmMat;
+}
+function _playerAudio(wasGround, vy0, dist) {
+  if (!_stepTr || gRag) return;
+  try {
+    if (!wasGround && gOnGround && vy0 < -0.05) CrixSteps.land(_groundMaterial(), -vy0);
+    if (gOnGround && wasGround) CrixSteps.feed(_stepTr, dist, true, () => CrixSteps.step(_groundMaterial(), Math.min(1, 0.55 + Math.hypot(gVelX, gVelZ) / (gBaseSpeed || 0.23) * 0.45), _stepTr.foot));
+    else if (!gOnGround) CrixSteps.feed(_stepTr, 0, false);
+  } catch (_) {}
+}
+// Panel de pisadas y salto (🦶): cada ajuste se guarda en este navegador y en la cuenta.
+function gSndPanel(force) {
+  const el = document.getElementById('g-snd-panel'); if (!el || !window.CrixSteps) return;
+  const open = typeof force === 'boolean' ? force : !el.classList.contains('open');
+  if (open) {
+    const sel = document.getElementById('gs-style');
+    if (!sel.options.length) CrixSteps.STYLES.forEach(k => sel.add(new Option(CrixSteps.STYLE_NAMES[k], k)));
+    document.getElementById('gs-on').checked = CrixSteps.stepsOn();
+    document.getElementById('gs-jump').checked = CrixSteps.jumpOn();
+    document.getElementById('gs-others').checked = CrixSteps.othersOn();
+    document.getElementById('gs-vol').value = Math.round(CrixSteps.volume() * 100);
+    sel.value = CrixSteps.get('crix_step_style');
+  }
+  el.classList.toggle('open', open);
+  const b = document.getElementById('g-snd-btn'); if (b) b.textContent = CrixSteps.stepsOn() || CrixSteps.jumpOn() ? '🦶' : '🦶🚫';
+}
+function gSndSet(key, val, quiet) {
+  if (!window.CrixSteps) return; CrixSteps.setPref(key, String(val));
+  const b = document.getElementById('g-snd-btn'); if (b) b.textContent = CrixSteps.stepsOn() || CrixSteps.jumpOn() ? '🦶' : '🦶🚫';
+  if (!quiet && (key === 'crix_step_on' || key === 'crix_jump_on') && val === 'on') { sfxCtx(); key === 'crix_jump_on' ? CrixSteps.jump() : CrixSteps.preview(); }
 }
 function _tryJump() { if (gRag) return; gJumpBuf = 7; }
 function _setupMob() { const base = document.getElementById('joy-base'); const knob = document.getElementById('joy-knob'); const jBtn = document.getElementById('jump-btn'); const R = 42; let jId = null; base.addEventListener('touchstart', e=>{e.preventDefault();jId=e.changedTouches[0].identifier;},{passive:false}); base.addEventListener('touchmove', e=>{ e.preventDefault(); let t=null; for(let i=0;i<e.changedTouches.length;i++) if(e.changedTouches[i].identifier===jId) t=e.changedTouches[i]; if(!t)return; const r=base.getBoundingClientRect(); let dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2); const dist=Math.hypot(dx,dy); if(dist>R){dx=dx/dist*R;dy=dy/dist*R;} knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; joyPos={x:dx/R,y:dy/R}; },{passive:false}); const rst=()=>{knob.style.transform='translate(-50%,-50%)';joyPos={x:0,y:0};jId=null;}; base.addEventListener('touchend',e=>{e.preventDefault();rst();},{passive:false}); jBtn.addEventListener('touchstart',e=>{e.preventDefault();_tryJump();},{passive:false}); const cv=gRenderer.domElement; cv.style.touchAction='none'; let ctId=null,ccx=0,ccy=0,pinchD=0;
@@ -5249,7 +5306,7 @@ async function crixShare(kind, key) {
     try { document.getElementById('mo-game-page').classList.remove('open'); if (route) crixOpenRoute(route); else goTab0('home'); } finally { setTimeout(() => { window.__crixLock = false; }, 0); }
   });
 })();
-function exitGame() { try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;const backBtn=document.getElementById('g-back-btn');if(backBtn)backBtn.textContent='← Salir';goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
+function exitGame() { try{gSndPanel(false);}catch(_){} try{CrixAudio.stopAll();}catch(_){} try{_ragAbort();}catch(_){} gKeys={};currentGameSession++;stopGameScripts();netLeaveGame();netServerScriptsActive=false;gTouchWatch=new Set();if(typeof clearGameGui==='function')clearGameGui();document.getElementById('s-game').classList.remove('active');document.getElementById('nav').style.display='flex';if(stPlaytesting){stPlaytesting=false;const backBtn=document.getElementById('g-back-btn');if(backBtn)backBtn.textContent='← Salir';goTab('studio');return;}document.getElementById('s-home').classList.add('active');document.querySelectorAll('.nav-tab').forEach((b,i)=>b.classList.toggle('active',i===0));renderHome(); }
 let socket = null, netConnected = false, netCurrentMapId = null, netCurrentInstanceId = null, netTick = 0;
 const NET_RATE = 2;
 let remotePlayers = {};
@@ -5389,6 +5446,13 @@ function netUpdateRemotes() { const LERP = 0.18, now = performance.now(), dt = M
     const k = 1 - Math.exp(-dt * 12), sp = Math.hypot(rp.group.position.x - px, rp.group.position.z - pz) / dt, vy = (rp.group.position.y - py) / dt / 60;
     rp.spd += (sp - rp.spd) * k; rp.vy += (vy - rp.vy) * k;
     if (rp.av) CrixAvatar.update(rp.av, dt, { speed: rp.moving ? rp.spd : (rp.spd < 1.5 ? 0 : rp.spd), onGround: rp.og !== false, vy: rp.vy });
+    if (window.CrixSteps && gPlayer && CrixSteps.stepsOn() && CrixSteps.othersOn()) {   // pisadas de los demás: más bajas con la distancia, con paneo según de qué lado están
+      const dx = rp.group.position.x - gPlayer.position.x, dz = rp.group.position.z - gPlayer.position.z, dd = Math.hypot(dx, dz);
+      if (dd < 40) {
+        const tr = rp._stepTr || (rp._stepTr = CrixSteps.tracker()), moved = Math.hypot(rp.group.position.x - px, rp.group.position.z - pz);
+        CrixSteps.feed(tr, rp.moving ? moved : 0, rp.og !== false, foot => { const f = 1 - dd / 40, pan = dd > 0.5 ? Math.max(-1, Math.min(1, (dx * Math.cos(gCamTheta) - dz * Math.sin(gCamTheta)) / dd)) * 0.8 : 0; CrixSteps.step('', f * f * 0.8, foot, pan); });
+      }
+    }
   } }
 let _netPatchApplied = false;
 function _patchGameLoopWithNet() { if (_netPatchApplied) return; _netPatchApplied = true; (function netFrame() { requestAnimationFrame(netFrame); if (!gPlayer || !gRenderer) return; netSendMove(); netUpdateRemotes(); })(); }
@@ -6739,6 +6803,7 @@ function sfxCtx() {
 }
 ['pointerdown', 'keydown', 'touchend'].forEach(ev => window.addEventListener(ev, () => { if (!_sfx || _sfx.state !== 'running') sfxCtx(); }, { passive: true }));
 const soundOn = () => lsGet('crix_sound') !== 'off';
+if (window.CrixSteps) CrixSteps.init({ ctx: () => _sfx, pref: lsGet, set: (k, v) => { lsSet(k, v); prefSync(k); } });   // pisadas y salto (crix-steps.js)
 const appInView = () => document.visibilityState === 'visible' && (typeof document.hasFocus !== 'function' || document.hasFocus());
 function toggleSound() { lsSet('crix_sound', soundOn() ? 'off' : 'on'); prefSync('crix_sound'); showToast(soundOn() ? '🔔 Sonidos activados' : '🔕 Sonidos silenciados'); playSfx('soft'); }
 function sfxTone(c, f, start, dur, vol, type) {
