@@ -1280,7 +1280,7 @@ const CrixLoading = (() => {
 <script src="/crix-console.js"></script>
 <script src="/crix-native.js"></script>
 <script src="/crix-report.js" defer></script>
-<script src="/crix-rules-v2.js" defer onerror="var s=document.createElement('script');s.src='/crix-rules.js?v=2';document.head.appendChild(s)"></script>
+<script src="/crix-rules-v2.js" defer onerror="var s=document.createElement('script');s.src='/crix-rules.js?v=3';document.head.appendChild(s)"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/crix-gfx.js"></script>
 <script src="/GLTFLoader.js"></script>
@@ -2690,7 +2690,7 @@ async function doLogin() {
     const legacy = Object.values(getUsers()).find(x => x.username.toLowerCase() === username.toLowerCase());
     if (!legacy || legacy.pw !== btoa(unescape(encodeURIComponent(password)))) { authErr('Usuario no encontrado o contraseña incorrecta.'); return; }
     try {
-      const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color, acceptRules: confirm(window.crixT('Para pasar tu cuenta tenés que aceptar las reglas de uso de Crix (no publicar nada ilegal, dañino ni abusar de los servidores). ¿Aceptás?')) ? 2 : 0 }, token:'' });
+      const result = await apiRequest('/api/register', { method:'POST', body:{ username:legacy.username, pw:password, color:legacy.color, acceptRules: confirm(window.crixT('Para pasar tu cuenta tenés que aceptar las reglas de uso de Crix (no publicar nada ilegal, dañino ni abusar de los servidores). ¿Aceptás?')) ? 3 : 0 }, token:'' });
       loginAs(result.user, result.token, legacy.id, password);
     } catch (migrationError) { authErr(migrationError.message); }
   }
@@ -2706,7 +2706,7 @@ async function doRegister() {
   if (!/^[a-zA-Z0-9_]+$/.test(username)) { authErr('Solo letras, números y guión bajo.'); return; }
   if (!document.getElementById('r-rules').checked) { authErr('Tenés que aceptar las reglas de uso.'); return; }
   try {
-    const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor(), acceptRules:2 }, token:'' });
+    const result = await apiRequest('/api/register', { method:'POST', body:{ username, pw:password, color:randColor(), acceptRules:3 }, token:'' });
     loginAs(result.user, result.token, null, password);
   } catch (err) { authErr(err.message); }
 }
